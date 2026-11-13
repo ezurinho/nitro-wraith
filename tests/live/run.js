@@ -369,7 +369,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   // quedo atras una vez mientras el script seguia avanzando.
   const pkgVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
   const readmeVersion = (fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')
-    .match(/\*\*Archivo activo:\*\*[^\n]*\(v([\d.]+)\)/) || [])[1];
+    .match(/badge\/version-([\d.]+)-/) || [])[1];
   const constVersion = (fs.readFileSync(SCRIPT, 'utf8').match(/const VERSION = '([\d.]+)'/) || [])[1];
   check('versions match across package, script and README',
     Boolean(pkgVersion) && pkgVersion === scriptVersion
