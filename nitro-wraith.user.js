@@ -1146,7 +1146,10 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   // Trabajo real, no llamadas: el banco de rendimiento comprueba que el panel
   // no repite DOM ni almacenamiento en cada tick.
-  const perfCounters = { hudReads: 0, dayScans: 0, panelPaints: 0, userParses: 0 };
+  const perfCounters = {
+    hudReads: 0, dayScans: 0, panelPaints: 0, userParses: 0,
+    warningScans: 0, challengeScans: 0, captchaScans: 0,
+  };
 
   // Acceso propio para las funciones que viven antes de `disk`: `dayHistoryRead`,
   // `todayBump` y las marcas de la Mystery Box no pueden depender de una constante
@@ -2230,14 +2233,33 @@ All of this only aims at believable statistics. It is your call and your risk.
   // El popup no tiene un HTML publico estable: se busca por lo que dice (la
   // palabra "challenge" y el aviso de completado) y se pulsa el boton de
   // siempre. Un selector puesto en TUNE manda y evita el barrido.
+  // La ventana de arriba no comparte `session.typing` con el iframe: el contrato
+  // `__ntaFrame` dice si hay tecleo vivo. Sirve para no barrer el DOM caro desde
+  // las dos ventanas a la vez.
+  function typerIsTyping() {
+    if (session.typing) return true;
+    try {
+      const frame = window.__ntaFrame
+        || (window.top !== window ? window.top.__ntaFrame : null);
+      return Boolean(frame && Date.now() - frame.at < 5000
+        && !frame.stopped && (frame.typing || frame.chars > 0));
+    } catch {
+      return false;
+    }
+  }
+
   function closeChallengePopup() {
     if (CONFIG.challenges.enabled === false) return false;
     if (!document.body) return false;
+    // El popup aparece al cerrar la carrera; durante el tecleo no hay nada que
+    // cerrar y el barrido de selectores anchos solo compite con el juego.
+    if (typerIsTyping()) return false;
     if (Date.now() - challengeClosedAt < CONFIG.challenges.cooldownMs) return false;
-    // Con carrera viva no hace falta barrer el DOM cada 1,2 s: el popup es de
-    // despues de la carrera y sigue visible varios segundos.
-    if (Date.now() - challengeScanAt < (session.typing ? 2000 : 1200)) return false;
+    // Sin tecleo, un barrido cada 1,2 s basta: el popup sigue visible varios
+    // segundos y no cambia de un tick a otro.
+    if (Date.now() - challengeScanAt < 1200) return false;
     challengeScanAt = Date.now();
+    perfCounters.challengeScans += 1;
 
     const selector = String(CONFIG.challenges.selector || '').trim();
     let roots = [];
@@ -3472,13 +3494,13 @@ All of this only aims at believable statistics. It is your call and your risk.
   let sessionWarningScanAt = 0;
 
   function handleSessionWarning(force = false) {
-    // El aviso no aparece de golpe y desaparece: con una carrera viva, mirar
-    // todas las instancias una vez por segundo basta. El latido de 500 ms solo
-    // mira los botones cuando no hay tecleo en curso.
+    // El aviso espera a que lo veas: escanearlo dos veces por segundo era mas
+    // caro que util. Con una carrera viva baja a 1,5 s; parado, a 1 s.
     const now = Date.now();
-    const every = session.typing ? 1000 : 500;
+    const every = typerIsTyping() ? 1500 : 1000;
     if (!force && now - sessionWarningScanAt < every) return false;
     sessionWarningScanAt = now;
+    perfCounters.warningScans += 1;
 
     for (const doc of candidateDocs()) {
       const button = findSessionWarningButton(doc);
@@ -11554,6 +11576,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     let queuePrimary = true;    // false = another queue copy owns this window
     let queueRoleNoted = false;
     let captchaHandled = false;
+    let captchaScanAt = 0;
     let idleTimer = null;
     let continueTimer = null;
     let raceNowTimer = null;
@@ -14861,6 +14884,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     function onNavigate() {
       if (location.href === lastUrl) return;
       lastUrl = location.href;
+      // La pagina nueva puede traer un CAPTCHA: no se espera al siguiente ciclo
+      // de 3 s para mirarla.
+      captchaScanAt = 0;
       queueLog(`Route: ${location.pathname}`);
       // Cada visita al garaje vuelve a entrar en AUTO: si el bot venia apagado de
       // una pantalla anterior, aqui tiene que poder arrancar solo.
@@ -15882,7 +15908,16 @@ All of this only aims at believable statistics. It is your call and your risk.
       const liveRace = Boolean(state && !state.stopped
         && (state.typing || state.chars > 0)
         && (location.pathname === '/race' || location.pathname.startsWith('/race/')));
-      if (!liveRace && handleCaptcha(pageText())) return;
+      if (!liveRace) {
+        // `innerText` recorre el body y fuerza layout. La frase del CAPTCHA no
+        // cambia sola: una lectura cada 3 s basta y deja respirar al garaje.
+        const scanAt = Date.now();
+        if (scanAt - captchaScanAt >= 3000) {
+          captchaScanAt = scanAt;
+          perfCounters.captchaScans += 1;
+          if (handleCaptcha(pageText())) return;
+        }
+      }
 
       // Otra pestaña tiene el lease: esta cola no abre carreras ni reclama la
       // caja. Sigue atendiendo sesion, DQ y CAPTCHA, que son cosas de la pagina
