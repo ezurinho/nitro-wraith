@@ -66,7 +66,7 @@ The panel is the control surface, not a black box:
 
 ## What it does
 
-| | |
+| Feature | What it does |
 | --- | --- |
 | **Race loop** | Chains races from the garage and results screen with human delays. Re-arms after a stop. |
 | **Typing** | Calibrated 104–117 WPM under a hard 120 WPM ceiling, with accuracy kept at 96% or above. |
