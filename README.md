@@ -59,6 +59,14 @@ each stop.
 In the garage, **Resume** does the same as `Alt+A`. With a live race it forwards
 the key; otherwise it clears the hold and re-arms the queue.
 
+## Releases
+
+Releases are automatic. When the `check` workflow passes on `main` and
+`nitro-wraith.user.js` changed, the release workflow bumps the patch version,
+updates the Gist, tags the commit, and creates the GitHub release. It needs a
+repository secret named `GIST_TOKEN` with Gist write access; releases use the
+built-in `GITHUB_TOKEN`.
+
 ## Development
 
 The script has no dependencies. The harness needs Node 22+ and Chrome.

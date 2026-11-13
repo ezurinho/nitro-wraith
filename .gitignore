@@ -6,6 +6,9 @@
 .env.*
 node_modules/
 
+# Generated release notes
+.release-notes.md
+
 # Local exports, logs and screenshots
 Nitro Type userscript.txt
 NITRO WRAITH*.txt

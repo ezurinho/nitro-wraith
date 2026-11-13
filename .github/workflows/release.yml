@@ -1,0 +1,156 @@
+name: release
+
+on:
+  workflow_run:
+    workflows: ["check"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GIST_ID: 88f8b25546f8bb0ea588291bab8ffa58
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Check the current main commit
+        id: current
+        run: |
+          git fetch origin main --tags --force
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "A newer main commit is already pending; this run will not publish."
+          fi
+
+      - name: Configure git
+        if: steps.current.outputs.skip != '1'
+        run: |
+          git config user.name "$(git log -1 --format=%an)"
+          git config user.email "$(git log -1 --format=%ae)"
+
+      - name: Verify release helper and versions
+        if: steps.current.outputs.skip != '1'
+        run: |
+          node --check tools/release.js
+          node tools/release.js check
+
+      - name: Prepare release
+        id: prepare
+        if: steps.current.outputs.skip != '1'
+        run: |
+          node tools/release.js prepare | tee release.env
+          cat release.env >> "$GITHUB_OUTPUT"
+
+      - name: Check Gist access
+        if: steps.current.outputs.skip != '1'
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          if [ -z "$GIST_TOKEN" ]; then
+            echo "::error::GIST_TOKEN is missing. Add a repository secret with gist scope."
+            exit 1
+          fi
+          GH_TOKEN="$GIST_TOKEN" gh api "gists/$GIST_ID" --jq '.id' >/dev/null
+
+      - name: Decide publication
+        id: decision
+        if: steps.current.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mode="${{ steps.prepare.outputs.MODE }}"
+          tag="${{ steps.prepare.outputs.TAG }}"
+          version="${{ steps.prepare.outputs.VERSION }}"
+
+          if [ "$mode" = "skip" ]; then
+            if ! gh release view "$tag" >/dev/null 2>&1; then
+              mode="repair"
+            else
+              gist_version="$(curl -fsSL \
+                "https://gist.githubusercontent.com/ezurinho/${GIST_ID}/raw/nitro-wraith.meta.js?cache=$(date +%s)" \
+                | sed -n 's|^// @version[[:space:]]*||p' | head -n1)"
+              if [ "$gist_version" != "$version" ]; then
+                mode="sync"
+              else
+                mode="none"
+              fi
+            fi
+          fi
+
+          echo "MODE=$mode" >> "$GITHUB_OUTPUT"
+          echo "Publication mode: $mode"
+
+      - name: Commit the patch bump
+        if: steps.current.outputs.skip != '1' && steps.decision.outputs.MODE == 'bump'
+        run: |
+          node --check nitro-wraith.user.js
+          node tools/release.js check
+          git add nitro-wraith.user.js nitro-wraith.meta.js package.json README.md CHANGELOG.md
+          git commit -m "release: ${{ steps.prepare.outputs.VERSION }} [skip ci]"
+          git push origin HEAD:main
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+
+      - name: Update Gist
+        if: steps.current.outputs.skip != '1' && steps.decision.outputs.MODE != 'none'
+        env:
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          version="${{ steps.prepare.outputs.VERSION }}"
+          gh gist edit "$GIST_ID" --filename nitro-wraith.user.js nitro-wraith.user.js
+          gh gist edit "$GIST_ID" --filename nitro-wraith.meta.js nitro-wraith.meta.js
+          gh api --method PATCH "gists/$GIST_ID" \
+            -f description="NITRO WRAITH — human-paced Nitro Type userscript $version" \
+            >/dev/null
+
+      - name: Publish release
+        if: >
+          steps.current.outputs.skip != '1' &&
+          (steps.decision.outputs.MODE == 'publish' ||
+           steps.decision.outputs.MODE == 'bump' ||
+           steps.decision.outputs.MODE == 'repair')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.prepare.outputs.TAG }}"
+          version="${{ steps.prepare.outputs.VERSION }}"
+
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            git tag -a "$tag" -m "NITRO WRAITH $version"
+            git push origin "$tag"
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" nitro-wraith.user.js nitro-wraith.meta.js --clobber
+            gh release edit "$tag" \
+              --title "NITRO WRAITH — $version" \
+              --notes-file .release-notes.md
+          else
+            gh release create "$tag" --verify-tag \
+              --title "NITRO WRAITH — $version" \
+              --notes-file .release-notes.md \
+              nitro-wraith.user.js nitro-wraith.meta.js
+          fi
