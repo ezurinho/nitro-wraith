@@ -15618,10 +15618,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       return Date.now() + ms;
     }
 
-    function clearDqModal() {
+    function clearDqModal(cachedText) {
       if (!document.body) return false;
 
-      const text = modalText();
+      // El tick lee el modal una vez y comparte el texto con handleModal: leer
+      // dos veces los mismos nodos fuerza dos veces el layout de la pagina.
+      const text = cachedText === undefined ? modalText() : cachedText;
       if (!looksDisqualified(text)) {
         dqPressAt = 0;
         dqPressTries = 0;
@@ -15692,8 +15694,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
 
       // El modal de DQ se atiende antes que nada: es lo que dejaba la pagina
-      // clavada cuando el tipador estaba parado o de descanso.
-      if (clearDqModal()) return;
+      // clavada cuando el tipador estaba parado o de descanso. El texto se lee
+      // una sola vez por tick y se reutiliza al final.
+      const modal = modalText();
+      if (clearDqModal(modal)) return;
 
       // El popup de Daily Challenge tambien cae en esta ventana: es el garaje
       // quien lo ve al volver de la carrera.
@@ -15773,7 +15777,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       // para despues, como antes, para que su recuperacion siga siendo la ultima.
       watchStuck();
 
-      if (handleModal(modalText())) return;
+      if (handleModal(modal)) return;
 
       const path = location.pathname;
       if (path === '/login' || path.startsWith('/login/')) {
