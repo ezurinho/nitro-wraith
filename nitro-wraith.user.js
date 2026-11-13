@@ -9682,8 +9682,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       });
     }
 
-    // El panel es nuevo: hay que repintar el historial aunque no haya cambiado.
+    // El panel es nuevo: hay que repintar el historial y la temporada aunque
+    // los datos no hayan cambiado (si no, quedan vacios hasta el proximo cambio).
     panel.historySig = '';
+    panel.seasonSig = '';
+    panel.seasonBaseSig = '';
+    seasonPaintAt = 0;
 
     applyCollapsed(disk.get(KEYS.panelCollapsed) === '1');
     applyFootMode();
