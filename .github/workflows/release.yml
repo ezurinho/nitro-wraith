@@ -65,6 +65,7 @@ jobs:
           cat release.env >> "$GITHUB_OUTPUT"
 
       - name: Check Gist access
+        id: gist
         if: steps.current.outputs.skip != '1'
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
@@ -73,7 +74,11 @@ jobs:
             echo "::error::GIST_TOKEN is missing. Add a repository secret with gist scope."
             exit 1
           fi
-          GH_TOKEN="$GIST_TOKEN" gh api "gists/$GIST_ID" --jq '.id' >/dev/null
+          gist_version="$(GH_TOKEN="$GIST_TOKEN" gh api "gists/$GIST_ID" \
+            --jq '.files["nitro-wraith.meta.js"].content' \
+            | sed -n 's|^// @version[[:space:]]*||p' | head -n1)"
+          echo "GIST_VERSION=$gist_version" >> "$GITHUB_OUTPUT"
+          echo "Gist version: ${gist_version:-missing}"
 
       - name: Decide publication
         id: decision
@@ -88,15 +93,10 @@ jobs:
           if [ "$mode" = "skip" ]; then
             if ! gh release view "$tag" >/dev/null 2>&1; then
               mode="repair"
+            elif [ "${{ steps.gist.outputs.GIST_VERSION }}" != "$version" ]; then
+              mode="sync"
             else
-              gist_version="$(curl -fsSL \
-                "https://gist.githubusercontent.com/ezurinho/${GIST_ID}/raw/nitro-wraith.meta.js?cache=$(date +%s)" \
-                | sed -n 's|^// @version[[:space:]]*||p' | head -n1)"
-              if [ "$gist_version" != "$version" ]; then
-                mode="sync"
-              else
-                mode="none"
-              fi
+              mode="none"
             fi
           fi
 
