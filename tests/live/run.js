@@ -25,6 +25,7 @@ const { PANEL_READ } = require('./panel-read');
 const ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURES = path.join(__dirname, 'fixtures');
 const SCRIPT = path.join(ROOT, 'nitro-wraith.user.js');
+const SHOT_DIR = process.env.SHOT_DIR ? path.resolve(ROOT, process.env.SHOT_DIR) : '';
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -230,6 +231,115 @@ async function clickSelector(tab, selector) {
   await tab.send('Input.dispatchMouseEvent', {
     type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1,
   });
+}
+
+async function captureShot(cdp, file, clip) {
+  const result = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    captureBeyondViewport: true,
+    clip: { ...clip, scale: 1 },
+  });
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, Buffer.from(result.data, 'base64'));
+  console.log(`screenshot: ${path.relative(ROOT, file)}`);
+}
+
+// Genera la galeria que usa el README. Solo corre cuando el workflow manual
+// pasa SHOT_DIR; el check normal no escribe archivos ni cambia su resultado.
+async function capturePanelThemes(cdp, appUrl) {
+  if (!SHOT_DIR) return;
+
+  await cdp.send('Page.navigate', { url: appUrl });
+  await waitFor(async () => {
+    try {
+      return await cdp.evaluate(`Boolean(document.querySelector('iframe')
+        && document.querySelector('iframe').contentWindow.__ntaDebug)`);
+    } catch {
+      return false;
+    }
+  }, 15000, 'the panel for screenshots');
+
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520, height: 1100, deviceScaleFactor: 2, mobile: false,
+  });
+  await sleep(180);
+
+  const seeded = await cdp.evaluate(`(() => {
+    const frame = document.querySelector('iframe');
+    const w = frame && frame.contentWindow;
+    const d = w && w.__ntaDebug;
+    const host = w && w.document.getElementById('nt-autotyper-panel');
+    const root = host && host.shadowRoot;
+    const panel = root && root.querySelector('.panel');
+    if (!d || !panel) return { ready: false };
+
+    frame.style.height = '1100px';
+    w.document.body.style.minHeight = '1100px';
+    const now = Date.now();
+    w.localStorage.setItem('autoTyperSeason', JSON.stringify({
+      v: 2, at: now, auto: true, source: 'user', seasonID: 73,
+      seasonName: 'Spirit Racers', tier: 6, nextTier: 7,
+      progress: 34, xp: 76701, currentXp: 70000, nextXp: 90000,
+      endsAt: now + 27 * 86400000, endsText: 'Nov 29',
+    }));
+    d.patchSession({
+      races: 128, raceLimit: 310, xp: 1240,
+      chars: 550, correct: 543, errors: 7,
+      startedAt: now - 60000, endedAt: 0, clockDone: true,
+      dailyRaceLimit: 0, dailyXpLimit: 0, activeOn: 0,
+    });
+    d.seedHistory([
+      { at: now - 90000, wpm: 112.6, acc: 97.1, place: 2, cash: 18, xp: 920 },
+      { at: now - 240000, wpm: 109.8, acc: 96.2, place: 4, cash: 11, xp: 780 },
+      { at: now - 390000, wpm: 114.9, acc: 98.0, place: 1, cash: 24, xp: 1040 },
+    ]);
+    d.paintSeason();
+    const stats = root.querySelector('[data-tab-btn="stats"]');
+    if (stats) stats.click();
+    if (panel.dataset.collapsed === 'true') {
+      const collapse = root.querySelector('.collapse');
+      if (collapse) collapse.click();
+    }
+    d.paint();
+    return { ready: true, theme: panel.dataset.theme };
+  })()`);
+  if (!seeded.ready) throw new Error('the panel is not ready for screenshots');
+
+  const themes = ['carbon', 'aurora', 'sunset', 'ice', 'violet', 'rgb'];
+  try {
+    for (const theme of themes) {
+      const changed = await cdp.evaluate(`(() => {
+        const root = document.querySelector('iframe').contentWindow.document
+          .getElementById('nt-autotyper-panel').shadowRoot;
+        const button = root.querySelector('[data-theme-btn="${theme}"]');
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`);
+      if (!changed) throw new Error(`theme button not found: ${theme}`);
+      await sleep(180);
+
+      const clip = await cdp.evaluate(`(() => {
+        const frame = document.querySelector('iframe');
+        const panel = frame.contentWindow.document
+          .getElementById('nt-autotyper-panel').shadowRoot.querySelector('.panel');
+        if (!frame || !panel) return null;
+        const f = frame.getBoundingClientRect();
+        const r = panel.getBoundingClientRect();
+        return {
+          x: Math.max(0, Math.round(f.left + r.left - 18)),
+          y: Math.max(0, Math.round(f.top + r.top - 18)),
+          width: Math.ceil(r.width + 36),
+          height: Math.ceil(r.height + 36),
+        };
+      })()`);
+      if (!clip) throw new Error(`panel clip not found: ${theme}`);
+      await captureShot(cdp, path.join(SHOT_DIR, `theme-${theme}.png`), clip);
+    }
+  } finally {
+    try { await cdp.send('Emulation.clearDeviceMetricsOverride'); } catch { /* ya cerro */ }
+  }
 }
 
 async function waitForLoginHooks(tab) {
@@ -5404,6 +5514,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       try { socialTab.close(); } catch { /* el websocket ya cerro */ }
     }
   }
+
+  if (SHOT_DIR) await capturePanelThemes(cdp, appUrl);
 
   return results;
 }

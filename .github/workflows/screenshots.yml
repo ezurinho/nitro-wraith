@@ -1,0 +1,38 @@
+name: screenshots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: screenshots
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Find Chrome
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$CHROME"
+          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          "$CHROME" --version
+      - name: Capture panel themes
+        env:
+          SHOT_DIR: screenshots/current
+        run: npm test
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: nitro-wraith-screenshots
+          path: screenshots/current
+          if-no-files-found: error
+          retention-days: 7
