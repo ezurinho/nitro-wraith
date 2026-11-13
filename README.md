@@ -9,6 +9,7 @@ no fast mode and no shortcut around the pace.
 [![Version](https://img.shields.io/badge/version-8.14.1-1f6feb?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-2ea043?style=flat-square)](LICENSE)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-userscript-f59e0b?style=flat-square)](https://www.tampermonkey.net/)
+[![check](https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml/badge.svg)](https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml)
 
 **[Install latest](https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js)** · [Release](https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.1) · [Gist](https://gist.github.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58) · [Changelog](CHANGELOG.md)
 
