@@ -768,6 +768,120 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('panel ticks still repaint a connected panel', perf.paints === 20, perf);
   check('a steady panel tick stays well inside a frame', perf.medianMs < 8, perf);
 
+  // Perfil de rendimiento del panel: el mismo tick con datos nuevos cuesta
+  // distinto plegado, desplegado y con la pestaña en segundo plano. El plegado
+  // solo pinta las acciones; el fondo no toca el DOM. Se comparan medianas y
+  // contadores de trabajo real, no solo llamadas.
+  const panelPerf = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = shadow && shadow.querySelector('.panel');
+    const collapse = shadow && shadow.querySelector('.collapse');
+    if (!d || !panel || !collapse) return { has: false };
+
+    const original = d.session();
+    const count = 80;
+    const bench = () => {
+      // Calienta caches y deja un valor visible distinto en cada tick.
+      for (let i = 0; i < 6; i++) d.patchSession({ races: original.races + i });
+      d.perfReset();
+      const times = [];
+      for (let i = 0; i < count; i++) {
+        const t0 = w.performance.now();
+        d.patchSession({ races: original.races + 100 + i });
+        times.push(w.performance.now() - t0);
+      }
+      const paints = d.perf().panelPaints;
+      times.sort((a, b) => a - b);
+      return {
+        medianMs: times[Math.floor(times.length / 2)],
+        p95Ms: times[Math.floor(times.length * 0.95)],
+        paints,
+        collapsed: panel.dataset.collapsed,
+        hidden: w.document.hidden,
+      };
+    };
+
+    if (panel.dataset.collapsed === 'true') collapse.click();
+    const expanded = bench();
+    collapse.click();
+    const collapsed = bench();
+    collapse.click();
+    d.patchSession({ races: original.races });
+    return { has: true, count, expanded, collapsed };
+  })()`, true);
+
+  check('the folded panel costs less than the expanded panel',
+    panelPerf.has
+      && panelPerf.expanded.collapsed === 'false'
+      && panelPerf.collapsed.collapsed === 'true'
+      && panelPerf.expanded.paints === panelPerf.count
+      && panelPerf.collapsed.paints === panelPerf.count
+      && panelPerf.expanded.medianMs < 8
+      && panelPerf.collapsed.medianMs < panelPerf.expanded.medianMs,
+    panelPerf);
+
+  // La pestaña en segundo plano es real: se abre otra pestaña, se lleva al
+  // frente y se mide el iframe original mientras su documento esta oculto.
+  let backgroundPerf = { has: false };
+  let backgroundTab = null;
+  try {
+    backgroundTab = await openTab(devtoolsPort, 'about:blank');
+    await backgroundTab.send('Page.bringToFront');
+    await sleep(120);
+
+    const visibility = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      return { hidden: w.document.hidden, state: w.document.visibilityState };
+    })()`);
+
+    backgroundPerf = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const d = w.__ntaDebug;
+      const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+      const panel = shadow && shadow.querySelector('.panel');
+      if (!d || !panel) return { has: false };
+
+      const original = d.session();
+      const count = 80;
+      for (let i = 0; i < 6; i++) d.patchSession({ races: original.races + i });
+      d.perfReset();
+      const times = [];
+      for (let i = 0; i < count; i++) {
+        const t0 = w.performance.now();
+        d.patchSession({ races: original.races + 100 + i });
+        times.push(w.performance.now() - t0);
+      }
+      const paints = d.perf().panelPaints;
+      times.sort((a, b) => a - b);
+      d.patchSession({ races: original.races });
+      return {
+        has: true, count, paints,
+        medianMs: times[Math.floor(times.length / 2)],
+        p95Ms: times[Math.floor(times.length * 0.95)],
+        collapsed: panel.dataset.collapsed,
+        hidden: w.document.hidden,
+      };
+    })()`, true);
+    backgroundPerf.hidden = visibility.hidden;
+    backgroundPerf.visibilityState = visibility.state;
+  } finally {
+    if (backgroundTab) {
+      try { await backgroundTab.send('Page.close'); } catch { /* el target ya cerro */ }
+      try { backgroundTab.close(); } catch { /* el websocket ya cerro */ }
+    }
+    try { await cdp.send('Page.bringToFront'); } catch { /* la pestaña ya no responde */ }
+    await sleep(120);
+  }
+
+  check('a background panel tick skips DOM paints',
+    backgroundPerf.has && backgroundPerf.hidden === true
+      && backgroundPerf.visibilityState === 'hidden'
+      && backgroundPerf.paints === 0
+      && backgroundPerf.medianMs < panelPerf.expanded.medianMs,
+    backgroundPerf);
+
   // El memo del HUD no puede contaminar la calibracion del reloj: mientras
   // quedan muestras (`clockDone` falso) el guardia necesita una lectura fresca
   // por muestra; despues comparte el memo con el panel.

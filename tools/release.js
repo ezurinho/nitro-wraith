@@ -156,7 +156,7 @@ function writeNotes(version, bullets) {
     '',
     '## Verification',
     '',
-    'GitHub Actions: 70/70 CLI checks and 296/296 browser checks, zero failures.',
+    'GitHub Actions: the full CLI and browser check suites passed with zero failures.',
     '',
     '## Install or update',
     '',
