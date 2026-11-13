@@ -786,6 +786,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       // Calienta caches y deja un valor visible distinto en cada tick.
       for (let i = 0; i < 6; i++) d.patchSession({ races: original.races + i });
       d.perfReset();
+      const observer = new w.MutationObserver(() => {});
+      observer.observe(panel, { subtree: true, childList: true, attributes: true, characterData: true });
       const times = [];
       for (let i = 0; i < count; i++) {
         const t0 = w.performance.now();
@@ -793,11 +795,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         times.push(w.performance.now() - t0);
       }
       const paints = d.perf().panelPaints;
+      const mutations = observer.takeRecords().length;
+      observer.disconnect();
       times.sort((a, b) => a - b);
       return {
         medianMs: times[Math.floor(times.length / 2)],
         p95Ms: times[Math.floor(times.length * 0.95)],
-        paints,
+        totalMs: times.reduce((sum, value) => sum + value, 0),
+        paints, mutations,
         collapsed: panel.dataset.collapsed,
         hidden: w.document.hidden,
       };
@@ -818,8 +823,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && panelPerf.collapsed.collapsed === 'true'
       && panelPerf.expanded.paints === panelPerf.count
       && panelPerf.collapsed.paints === panelPerf.count
+      && panelPerf.expanded.mutations > panelPerf.collapsed.mutations
       && panelPerf.expanded.medianMs < 8
-      && panelPerf.collapsed.medianMs < panelPerf.expanded.medianMs,
+      && panelPerf.collapsed.medianMs < panelPerf.expanded.medianMs
+      && panelPerf.collapsed.totalMs < panelPerf.expanded.totalMs,
     panelPerf);
 
   // La pestaña en segundo plano es real: se abre otra pestaña, se lleva al
@@ -847,6 +854,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const count = 80;
       for (let i = 0; i < 6; i++) d.patchSession({ races: original.races + i });
       d.perfReset();
+      const observer = new w.MutationObserver(() => {});
+      observer.observe(panel, { subtree: true, childList: true, attributes: true, characterData: true });
       const times = [];
       for (let i = 0; i < count; i++) {
         const t0 = w.performance.now();
@@ -854,12 +863,15 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         times.push(w.performance.now() - t0);
       }
       const paints = d.perf().panelPaints;
+      const mutations = observer.takeRecords().length;
+      observer.disconnect();
       times.sort((a, b) => a - b);
       d.patchSession({ races: original.races });
       return {
-        has: true, count, paints,
+        has: true, count, paints, mutations,
         medianMs: times[Math.floor(times.length / 2)],
         p95Ms: times[Math.floor(times.length * 0.95)],
+        totalMs: times.reduce((sum, value) => sum + value, 0),
         collapsed: panel.dataset.collapsed,
         hidden: w.document.hidden,
       };
@@ -879,6 +891,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     backgroundPerf.has && backgroundPerf.hidden === true
       && backgroundPerf.visibilityState === 'hidden'
       && backgroundPerf.paints === 0
+      && backgroundPerf.mutations === 0
       && backgroundPerf.medianMs < panelPerf.expanded.medianMs,
     backgroundPerf);
 
