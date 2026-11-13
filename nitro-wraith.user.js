@@ -16767,6 +16767,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
     };
 
+    let lastPanelPaintAt = 0;
+
     setInterval(() => {
       // Eleccion de copia en este marco: una escribe, las demas esperan. Se
       // refresca en cada latido del panel, que es el unico que corre siempre.
@@ -16775,7 +16777,15 @@ All of this only aims at believable statistics. It is your call and your risk.
         if (!document.getElementById(PANEL_ID)) createPanel();
       });
       heart('results', watchRaceResults);
-      heart('paint', updatePanel);
+      // Con una carrera viva el panel no necesita 2 Hz: el HUD del juego se
+      // refresca una vez por segundo. Se pinta en el siguiente latido y se
+      // libera el hilo justo cuando la app esta procesando las teclas.
+      heart('paint', () => {
+        const now = Date.now();
+        if (session.typing && now - lastPanelPaintAt < 1000) return;
+        lastPanelPaintAt = now;
+        updatePanel();
+      });
       heart('captcha', () => clickCaptchaContinue(document));
       heart('challenge', closeChallengePopup);
       heart('calibration', () => maybeCalibrate());
