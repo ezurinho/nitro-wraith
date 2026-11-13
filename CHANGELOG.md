@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.6 — 2026-11-13
+
+- feat: refresh the project page and trim background scans
+
 ## 8.14.5 — 2026-11-13
 
 - perf: paint the idle panel once per second
