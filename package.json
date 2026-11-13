@@ -1,0 +1,19 @@
+{
+  "name": "nitro-wraith",
+  "version": "8.14.1",
+  "private": true,
+  "description": "NITRO WRAITH — human-paced Nitro Type userscript and browser harness",
+  "scripts": {
+    "test": "node tests/live/run.js",
+    "check": "node --check nitro-wraith.user.js && node --check tests/live/run.js && node --check tests/live/live.js && node --check tests/live/live.test.js && node --check tests/live/fake-cdp.js && node --check tests/live/panel-read.js && node --check tests/live/history.js && node --check tests/live/report.js && node --check tests/live/chrome.js && node --check tests/live/tabs.js && node --check tools/export-downloads.js && node tests/live/live.test.js && node tests/live/run.js",
+    "live": "node tests/live/live.js",
+    "live:chrome": "node tests/live/chrome.js",
+    "live:tabs": "node tests/live/tabs.js",
+    "live:history": "node tests/live/report.js",
+    "export": "node tools/export-downloads.js",
+    "live:test": "node tests/live/live.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
