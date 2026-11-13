@@ -109,9 +109,9 @@ with a green square that slides between them:
             the DQ streak. Below it, the last 10 races with their time, place,
             XP, WPM and deviation from target (green within +-2%, amber
             outside), plus their average and best.
-  - TUNE    the settings: pace profile as a segmented control, the switches
-            (breaks, Mystery Box, stickers, guard, sound) as animated toggles,
-            the session-limit slider and export/import/report.
+  - TUNE    the settings in three sections: Rhythm (pace profile and
+            calibration), Limits (session, daily budget and active hours) and
+            Automation (switches, auto nitro, theme and config tools).
   - LOG     the closed sessions (the last four, with their deviation), a 7-day
             summary (races, average WPM, DQ and Mystery Boxes, one row per day)
             and the last notices with their time, without opening the console.
@@ -126,7 +126,7 @@ paused / break / stopped), mode, live WPM, the ceiling and the key hint. Alt+R
 clears the race history (handy when starting a fresh session) and Alt+H prints
 closed sessions in the console.
 
-Session limit: three independent limits live in the TUNE card, each with its
+Session limit: three independent limits live in TUNE's Limits section, each with its
 clickable row and its slider, and the first one to arrive closes the session:
 "limit" cycles free / 10 / 20 / 50 / 100 races, "time" cycles free / 15 min /
 30 min / 1 h / 2 h and "xp" cycles free / 5k / 10k / 25k / 50k. All three are
@@ -284,10 +284,12 @@ WPM, for a fresh account), balanced (the account's own 104-117) and fast
 is the same human one in all three, and the choice is saved in localStorage. The
 same three sit in the TUNE view as a segmented control.
 
-TUNE view (the ⚙ button, next to Stop): pace profile, the switches (breaks,
-Mystery Box, stickers, Auto nitro, the safety guard and the sound), export/import of the
-configuration and "csv", which downloads one spreadsheet with the closed
-sessions (the same ones Alt+H prints) and, below them, the 7-day summary: a
+TUNE view (the ⚙ button, next to Stop) is split into Rhythm (pace profile and
+calibration), Limits (session, daily budget and active hours) and Automation
+(switches for breaks, Mystery Box, stickers, Auto nitro, the safety guard and
+the sound, plus the theme and export/import/report/csv tools). "csv" downloads
+one spreadsheet with the closed sessions (the same ones Alt+H prints) and,
+below them, the 7-day summary: a
 `kind` column separates `session` rows from `day` rows, and the columns are the
 ones that make sense for both (date, races, WPM, target, deviation, accuracy,
 DQ, boxes and the reason the session closed). Before 6.4.0 those switches only existed in CONFIG and turning one
@@ -8635,6 +8637,15 @@ All of this only aims at believable statistics. It is your call and your risk.
         .panel[data-tab="log"] .v-log,
         .panel[data-tab="info"] .v-info { display: block; animation: nt-view .28s cubic-bezier(.2, .9, .25, 1) both; }
         @keyframes nt-view { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+        /* TUNE se lee en tres bloques: ritmo, limites y automatizacion. La
+           cabecera solo separa; las tarjetas y sus controles siguen igual. */
+        .tune-sec { margin: 0 0 11px; }
+        .tune-sec:last-child { margin-bottom: 0; }
+        .tune-sec-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin: 1px 1px 7px; }
+        .tune-sec-h span { display: inline-flex; align-items: center; gap: 6px; font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); }
+        .tune-sec-h span::before { content: ''; width: 12px; height: 1px; border-radius: 99px; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
+        .tune-sec-h b { font: 600 8px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .04em; color: var(--dim-2); }
+        .tune-sec-h::after { content: ''; flex: 1 1 20px; min-width: 12px; height: 1px; align-self: center; background: linear-gradient(90deg, var(--line), transparent); }
 
         /* ---------- tarjetas ------------------------------------------------- */
         .card { position: relative; contain: layout style; margin-bottom: 9px; padding: 9px 10px 10px; border-radius: 10px; background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .012)); border: 1px solid var(--line); transition: border-color .2s ease, box-shadow .25s ease, transform .18s ease; }
@@ -9080,149 +9091,158 @@ All of this only aims at believable statistics. It is your call and your risk.
 
             <!-- ------------------------------ TUNE -------------------------- -->
             <section class="view v-tune cfg" id="nt-view-tune" role="tabpanel" aria-label="Tune">
-              <div class="view-head"><span>Tune</span><b>pace · switches · limits</b></div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
-                <div class="card-h"><span class="card-t">Pace</span><span class="card-s">all under the ceiling</span></div>
-                <div class="seg" data-index="1">
-                  <i class="seg-glide"></i>
-                  <button class="seg-btn" type="button" data-pace="soft" title="Softer target: 98-108 WPM, for a fresh account">soft</button>
-                  <button class="seg-btn" type="button" data-pace="balanced" title="Calibrated target: the account's own range">balanced</button>
-                  <button class="seg-btn" type="button" data-pace="fast" title="Top of the calibrated envelope: 110-119 WPM, still under the ceiling">fast</button>
-                </div>
-                <div class="rows">
-                  <div class="row"><span>ceiling</span><b data-field="tuneCap">≤ 120 wpm</b></div>
-                  <div class="row"><span>range</span><b data-field="tuneRange">104-117</b></div>
-                  <div class="row cal-row" data-field="calRow" title="Reads the account average from the stats API and centres the balanced range on it"><span>auto</span><b data-field="cal">on</b></div>
-                  <div class="row"><span>calibrated</span><b data-field="calWpm">—</b></div>
-                  <div class="row"><span>accuracy</span><b data-field="calAcc">—</b></div>
-                  <div class="row"><span>account</span><b data-field="calAccount">—</b></div>
-                </div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></span>
-                <div class="card-h"><span class="card-t">Switches</span><span class="card-s">saved on this browser</span></div>
-                <div class="set-row">
-                  <span class="set-lbl">Breaks<i>human pauses between races</i></span>
-                  <span class="set-val"><b data-sw-txt="breaks" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="breaks" data-on="1" title="Human pauses between races (9-16 races apart, 20-90 s, 15% of them 3-10 min)"></button></span>
-                </div>
-                <div class="set-row">
-                  <span class="set-lbl">Mystery Box<i>free garage reward, every ~21 h</i></span>
-                  <span class="set-val"><b data-sw-txt="mysteryBox" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="mysteryBox" data-on="1" title="Claim the free garage reward roughly every 21 h"></button></span>
-                </div>
-                <div class="set-row">
-                  <span class="set-lbl">Stickers<i>one in ~35% of the races</i></span>
-                  <span class="set-val"><b data-sw-txt="stickers" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="stickers" data-on="1" title="Send a sticker in ~35% of the races"></button></span>
-                </div>
-                <div class="set-row">
-                  <span class="set-lbl">Auto nitro<i>skips one long word per race</i></span>
-                  <span class="set-val"><b data-sw-txt="useNitro" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="useNitro" data-on="1" title="Auto nitro: press Enter once per race to skip one word chosen by the nitro strategy. It does not raise WPM; the saved time is paid back over the rest of the lesson"></button></span>
-                </div>
-                <div class="set-row nitro-strategy-row">
-                  <span class="set-lbl">Nitro strategy<i>which word Enter skips</i></span>
-                  <span class="set-val"><select class="nitro-strategy" data-field="nitroStrategy" aria-label="Nitro strategy"><option value="longest">longest</option><option value="first">first</option><option value="last">last</option></select></span>
-                </div>
-                <div class="set-row nitro-target-row" title="The word the nitro strategy would skip on the current lesson. It updates live and clears after the nitro is spent.">
-                  <span class="set-lbl">Nitro target<i>the word Enter would skip</i></span>
-                  <span class="set-val"><b data-field="nitroPreview">—</b></span>
-                </div>
-                <div class="set-row">
-                  <span class="set-lbl">Guard<i>stops on an impossible reading</i></span>
-                  <span class="set-val"><b data-sw-txt="guard" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="guard" data-on="1" title="Safety guard: ends the race and opens a long break if the measured WPM goes past the ceiling. Turn it off only if you know what you are doing"></button></span>
-                </div>
-                <div class="set-row">
-                  <span class="set-lbl">Sound<i>discreet tone when the bot waits</i></span>
-                  <span class="set-val"><b data-sw-txt="sound" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="sound" data-on="0" title="Sound alerts: a short tone on long breaks, duplicate copies and site blocks"></button></span>
+              <div class="view-head"><span>Tune</span><b>rhythm · limits · automation</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
+                <div class="tune-sec-h"><span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
+                  <div class="card-h"><span class="card-t">Pace</span><span class="card-s">all under the ceiling</span></div>
+                  <div class="seg" data-index="1">
+                    <i class="seg-glide"></i>
+                    <button class="seg-btn" type="button" data-pace="soft" title="Softer target: 98-108 WPM, for a fresh account">soft</button>
+                    <button class="seg-btn" type="button" data-pace="balanced" title="Calibrated target: the account's own range">balanced</button>
+                    <button class="seg-btn" type="button" data-pace="fast" title="Top of the calibrated envelope: 110-119 WPM, still under the ceiling">fast</button>
+                  </div>
+                  <div class="rows">
+                    <div class="row"><span>ceiling</span><b data-field="tuneCap">≤ 120 wpm</b></div>
+                    <div class="row"><span>range</span><b data-field="tuneRange">104-117</b></div>
+                    <div class="row cal-row" data-field="calRow" title="Reads the account average from the stats API and centres the balanced range on it"><span>auto</span><b data-field="cal">on</b></div>
+                    <div class="row"><span>calibrated</span><b data-field="calWpm">—</b></div>
+                    <div class="row"><span>accuracy</span><b data-field="calAcc">—</b></div>
+                    <div class="row"><span>account</span><b data-field="calAccount">—</b></div>
+                  </div>
                 </div>
               </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 0 18h1.6a1.7 1.7 0 0 0 1.2-2.9l-.5-.5a1.7 1.7 0 0 1 1.2-2.9H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.7Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="8.3" r="1.1" fill="currentColor" stroke="none"/></svg></span>
-                <div class="card-h"><span class="card-t">Theme</span><span class="card-s" data-field="themeName">Carbon</span></div>
-                <div class="themes" data-field="themes" role="group" aria-label="Panel theme">
-                  <button class="theme" type="button" data-theme-btn="carbon" aria-pressed="true" title="Carbon: green on carbon, the classic"><i class="sw-carbon"></i><span>Carbon</span></button>
-                  <button class="theme" type="button" data-theme-btn="aurora" aria-pressed="false" title="Aurora: teal fading into violet"><i class="sw-aurora"></i><span>Aurora</span></button>
-                  <button class="theme" type="button" data-theme-btn="sunset" aria-pressed="false" title="Sunset: warm orange and pink"><i class="sw-sunset"></i><span>Sunset</span></button>
-                  <button class="theme" type="button" data-theme-btn="ice" aria-pressed="false" title="Ice: cold cyan on deep blue"><i class="sw-ice"></i><span>Ice</span></button>
-                  <button class="theme" type="button" data-theme-btn="violet" aria-pressed="false" title="Violet: purple neon"><i class="sw-violet"></i><span>Violet</span></button>
-                  <button class="theme" type="button" data-theme-btn="rgb" aria-pressed="false" title="RGB: animated rainbow border and title"><i class="sw-rgb"></i><span>RGB</span></button>
+              <div class="tune-sec" role="group" aria-labelledby="tune-limits-label">
+                <div class="tune-sec-h"><span id="tune-limits-label">Limits</span><b>session, day and hours</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2"/><circle cx="15" cy="16" r="2"/></svg></span>
+                  <div class="card-h"><span class="card-t">Session limit</span><span class="card-s">the bot stops on its own</span></div>
+                  <div class="limit-row row" data-field="raceLimitRow" title="Click: races per session (free, 25, 50, 100). 25 is where the session bonus reaches its 250 XP per race cap">
+                    <span>races</span><b data-field="limit">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="limitSlider" aria-label="Races per session" title="Races per session: free, 25, 50 or 100">
+                  <div class="sld-ends"><span>free</span><span>25</span><span>50</span><span>100</span></div>
+                  <div class="limit-row row time-row" data-field="timeLimitRow" title="Click: minutes per session (free, 15, 30, 60, 120). The clock starts with the first race of the session">
+                    <span>time</span><b data-field="timeLimit">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="timeSlider" aria-label="Minutes per session" title="Minutes per session: free, 15, 30, 60 or 120">
+                  <div class="sld-ends"><span>free</span><span>15m</span><span>30m</span><span>1h</span><span>2h</span></div>
+                  <div class="limit-row row xp-row" data-field="xpLimitRow" title="Click: XP per session (free, 5k, 10k, 25k, 50k). Counts the XP the game itself awards in each race">
+                    <span>xp</span><b data-field="xpLimit">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="xpSlider" aria-label="XP per session" title="XP per session: free, 5k, 10k, 25k or 50k">
+                  <div class="sld-ends"><span>free</span><span>5k</span><span>10k</span><span>25k</span><span>50k</span></div>
+                  <div class="rows">
+                    <div class="row"><span>left</span><b data-field="etaLeft">—</b></div>
+                    <div class="row time-left-row" data-field="timeLeftRow" style="display:none"><span>time left</span><b data-field="timeLeft">—</b></div>
+                    <div class="row xp-left-row" data-field="xpRow" style="display:none"><span>xp</span><b data-field="xpTotal">—</b></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 18V6M4 18h16"/><path d="M8 14v-3M12 14V7M16 14v-5"/></svg></span>
+                  <div class="card-h"><span class="card-t">Daily budget</span><span class="card-s">stop before tomorrow</span></div>
+                  <div class="limit-row row" data-field="dailyRaceRow" title="Click: races per day (free, 100, 200, 300). Counts the races the game recorded today">
+                    <span>races/day</span><b data-field="dailyRaces">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyRaceSlider" aria-label="Races per day" title="Races per day: free, 100, 200 or 300">
+                  <div class="sld-ends"><span>free</span><span>100</span><span>200</span><span>300</span></div>
+                  <div class="limit-row row xp-row" data-field="dailyXpRow" title="Click: XP per day (free, 50k, 100k, 200k). Counts the XP the game paid today">
+                    <span>xp/day</span><b data-field="dailyXp">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyXpSlider" aria-label="XP per day" title="XP per day: free, 50k, 100k or 200k">
+                  <div class="sld-ends"><span>free</span><span>50k</span><span>100k</span><span>200k</span></div>
+                  <div class="rows">
+                    <div class="row" data-field="dailyLeftRow" title="Budget left today; both counters reset at midnight"><span>left</span><b data-field="dailyLeft">—</b></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span>
+                  <div class="card-h"><span class="card-t">Active hours</span><span class="card-s">races only in this window</span></div>
+                  <div class="limit-row row" data-field="activeRow" title="Click: turn the active window on/off. Shift+click resets 08:00–23:00">
+                    <span>window</span><b data-field="activeState">off</b>
+                  </div>
+                  <div class="limit-row row" data-field="activeStartRow" title="Click: start hour +1 (Shift+click: −1). The window can cross midnight">
+                    <span>from</span><b data-field="activeStart">08:00</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="23" step="1" value="8" data-field="activeStartSlider" aria-label="Active window start hour" title="Start of the active window">
+                  <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+                  <div class="limit-row row" data-field="activeEndRow" title="Click: end hour +1 (Shift+click: −1). An end before the start crosses midnight">
+                    <span>to</span><b data-field="activeEnd">23:00</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="23" step="1" value="23" data-field="activeEndSlider" aria-label="Active window end hour" title="End of the active window">
+                  <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+                  <div class="rows">
+                    <div class="row" data-field="activeNowRow" title="Local time. Races only start while the window is open"><span>now</span><b data-field="activeNow">always</b></div>
+                  </div>
                 </div>
               </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2"/><circle cx="15" cy="16" r="2"/></svg></span>
-                <div class="card-h"><span class="card-t">Session limit</span><span class="card-s">the bot stops on its own</span></div>
-                <div class="limit-row row" data-field="raceLimitRow" title="Click: races per session (free, 25, 50, 100). 25 is where the session bonus reaches its 250 XP per race cap">
-                  <span>races</span><b data-field="limit">free</b>
+              <div class="tune-sec" role="group" aria-labelledby="tune-automation-label">
+                <div class="tune-sec-h"><span id="tune-automation-label">Automation</span><b>behavior, panel and tools</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></span>
+                  <div class="card-h"><span class="card-t">Switches</span><span class="card-s">saved on this browser</span></div>
+                  <div class="set-row">
+                    <span class="set-lbl">Breaks<i>human pauses between races</i></span>
+                    <span class="set-val"><b data-sw-txt="breaks" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="breaks" data-on="1" title="Human pauses between races (9-16 races apart, 20-90 s, 15% of them 3-10 min)"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Mystery Box<i>free garage reward, every ~21 h</i></span>
+                    <span class="set-val"><b data-sw-txt="mysteryBox" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="mysteryBox" data-on="1" title="Claim the free garage reward roughly every 21 h"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Stickers<i>one in ~35% of the races</i></span>
+                    <span class="set-val"><b data-sw-txt="stickers" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="stickers" data-on="1" title="Send a sticker in ~35% of the races"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Auto nitro<i>skips one long word per race</i></span>
+                    <span class="set-val"><b data-sw-txt="useNitro" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="useNitro" data-on="1" title="Auto nitro: press Enter once per race to skip one word chosen by the nitro strategy. It does not raise WPM; the saved time is paid back over the rest of the lesson"></button></span>
+                  </div>
+                  <div class="set-row nitro-strategy-row">
+                    <span class="set-lbl">Nitro strategy<i>which word Enter skips</i></span>
+                    <span class="set-val"><select class="nitro-strategy" data-field="nitroStrategy" aria-label="Nitro strategy"><option value="longest">longest</option><option value="first">first</option><option value="last">last</option></select></span>
+                  </div>
+                  <div class="set-row nitro-target-row" title="The word the nitro strategy would skip on the current lesson. It updates live and clears after the nitro is spent.">
+                    <span class="set-lbl">Nitro target<i>the word Enter would skip</i></span>
+                    <span class="set-val"><b data-field="nitroPreview">—</b></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Guard<i>stops on an impossible reading</i></span>
+                    <span class="set-val"><b data-sw-txt="guard" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="guard" data-on="1" title="Safety guard: ends the race and opens a long break if the measured WPM goes past the ceiling. Turn it off only if you know what you are doing"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Sound<i>discreet tone when the bot waits</i></span>
+                    <span class="set-val"><b data-sw-txt="sound" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="sound" data-on="0" title="Sound alerts: a short tone on long breaks, duplicate copies and site blocks"></button></span>
+                  </div>
                 </div>
-                <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="limitSlider" aria-label="Races per session" title="Races per session: free, 25, 50 or 100">
-                <div class="sld-ends"><span>free</span><span>25</span><span>50</span><span>100</span></div>
-                <div class="limit-row row time-row" data-field="timeLimitRow" title="Click: minutes per session (free, 15, 30, 60, 120). The clock starts with the first race of the session">
-                  <span>time</span><b data-field="timeLimit">free</b>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 0 18h1.6a1.7 1.7 0 0 0 1.2-2.9l-.5-.5a1.7 1.7 0 0 1 1.2-2.9H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.7Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="8.3" r="1.1" fill="currentColor" stroke="none"/></svg></span>
+                  <div class="card-h"><span class="card-t">Theme</span><span class="card-s" data-field="themeName">Carbon</span></div>
+                  <div class="themes" data-field="themes" role="group" aria-label="Panel theme">
+                    <button class="theme" type="button" data-theme-btn="carbon" aria-pressed="true" title="Carbon: green on carbon, the classic"><i class="sw-carbon"></i><span>Carbon</span></button>
+                    <button class="theme" type="button" data-theme-btn="aurora" aria-pressed="false" title="Aurora: teal fading into violet"><i class="sw-aurora"></i><span>Aurora</span></button>
+                    <button class="theme" type="button" data-theme-btn="sunset" aria-pressed="false" title="Sunset: warm orange and pink"><i class="sw-sunset"></i><span>Sunset</span></button>
+                    <button class="theme" type="button" data-theme-btn="ice" aria-pressed="false" title="Ice: cold cyan on deep blue"><i class="sw-ice"></i><span>Ice</span></button>
+                    <button class="theme" type="button" data-theme-btn="violet" aria-pressed="false" title="Violet: purple neon"><i class="sw-violet"></i><span>Violet</span></button>
+                    <button class="theme" type="button" data-theme-btn="rgb" aria-pressed="false" title="RGB: animated rainbow border and title"><i class="sw-rgb"></i><span>RGB</span></button>
+                  </div>
                 </div>
-                <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="timeSlider" aria-label="Minutes per session" title="Minutes per session: free, 15, 30, 60 or 120">
-                <div class="sld-ends"><span>free</span><span>15m</span><span>30m</span><span>1h</span><span>2h</span></div>
-                <div class="limit-row row xp-row" data-field="xpLimitRow" title="Click: XP per session (free, 5k, 10k, 25k, 50k). Counts the XP the game itself awards in each race">
-                  <span>xp</span><b data-field="xpLimit">free</b>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/></svg></span>
+                  <div class="card-h"><span class="card-t">Config</span><span class="card-s">carry it anywhere</span></div>
+                  <div class="rows" style="display:flex; gap:6px; margin:0 0 2px">
+                    <button class="act" type="button" data-act="export" title="Copy this configuration (profile, limit, sound, switches) so it can be pasted in another browser or account">copy</button>
+                    <button class="act" type="button" data-act="import" title="Apply whatever config is pasted in the box below">apply</button>
+                    <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, environment) to paste when something is off">report</button>
+                    <button class="act" type="button" data-act="csv" title="Download the closed sessions as a CSV (date, races, WPM, target, deviation, accuracy, DQ, reason) for a spreadsheet">csv</button>
+                  </div>
+                  <div class="rows">
+                    <div class="row up-row" data-field="upRow" title="Auto-update check: the last result, its error and when it will retry"><span>update</span><b data-field="up">—</b></div>
+                    <div class="row ch-row" data-field="chRow" title="Daily Challenge popup: close it automatically. Shift+click sets a CSS selector"><span>challenge</span><b data-field="ch">on</b></div>
+                  </div>
+                  <textarea class="cfg-text" data-field="cfgText" spellcheck="false" placeholder="Paste a copied config here and press apply."></textarea>
+                  <div class="cfg-note" data-field="cfgNote">Pace and switches are saved on this browser and survive reloads.</div>
                 </div>
-                <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="xpSlider" aria-label="XP per session" title="XP per session: free, 5k, 10k, 25k or 50k">
-                <div class="sld-ends"><span>free</span><span>5k</span><span>10k</span><span>25k</span><span>50k</span></div>
-                <div class="rows">
-                  <div class="row"><span>left</span><b data-field="etaLeft">—</b></div>
-                  <div class="row time-left-row" data-field="timeLeftRow" style="display:none"><span>time left</span><b data-field="timeLeft">—</b></div>
-                  <div class="row xp-left-row" data-field="xpRow" style="display:none"><span>xp</span><b data-field="xpTotal">—</b></div>
-                </div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 18V6M4 18h16"/><path d="M8 14v-3M12 14V7M16 14v-5"/></svg></span>
-                <div class="card-h"><span class="card-t">Daily budget</span><span class="card-s">stop before tomorrow</span></div>
-                <div class="limit-row row" data-field="dailyRaceRow" title="Click: races per day (free, 100, 200, 300). Counts the races the game recorded today">
-                  <span>races/day</span><b data-field="dailyRaces">free</b>
-                </div>
-                <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyRaceSlider" aria-label="Races per day" title="Races per day: free, 100, 200 or 300">
-                <div class="sld-ends"><span>free</span><span>100</span><span>200</span><span>300</span></div>
-                <div class="limit-row row xp-row" data-field="dailyXpRow" title="Click: XP per day (free, 50k, 100k, 200k). Counts the XP the game paid today">
-                  <span>xp/day</span><b data-field="dailyXp">free</b>
-                </div>
-                <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyXpSlider" aria-label="XP per day" title="XP per day: free, 50k, 100k or 200k">
-                <div class="sld-ends"><span>free</span><span>50k</span><span>100k</span><span>200k</span></div>
-                <div class="rows">
-                  <div class="row" data-field="dailyLeftRow" title="Budget left today; both counters reset at midnight"><span>left</span><b data-field="dailyLeft">—</b></div>
-                </div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span>
-                <div class="card-h"><span class="card-t">Active hours</span><span class="card-s">races only in this window</span></div>
-                <div class="limit-row row" data-field="activeRow" title="Click: turn the active window on/off. Shift+click resets 08:00–23:00">
-                  <span>window</span><b data-field="activeState">off</b>
-                </div>
-                <div class="limit-row row" data-field="activeStartRow" title="Click: start hour +1 (Shift+click: −1). The window can cross midnight">
-                  <span>from</span><b data-field="activeStart">08:00</b>
-                </div>
-                <input class="sld" type="range" min="0" max="23" step="1" value="8" data-field="activeStartSlider" aria-label="Active window start hour" title="Start of the active window">
-                <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
-                <div class="limit-row row" data-field="activeEndRow" title="Click: end hour +1 (Shift+click: −1). An end before the start crosses midnight">
-                  <span>to</span><b data-field="activeEnd">23:00</b>
-                </div>
-                <input class="sld" type="range" min="0" max="23" step="1" value="23" data-field="activeEndSlider" aria-label="Active window end hour" title="End of the active window">
-                <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
-                <div class="rows">
-                  <div class="row" data-field="activeNowRow" title="Local time. Races only start while the window is open"><span>now</span><b data-field="activeNow">always</b></div>
-                </div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/></svg></span>
-                <div class="card-h"><span class="card-t">Config</span><span class="card-s">carry it anywhere</span></div>
-                <div class="rows" style="display:flex; gap:6px; margin:0 0 2px">
-                  <button class="act" type="button" data-act="export" title="Copy this configuration (profile, limit, sound, switches) so it can be pasted in another browser or account">copy</button>
-                  <button class="act" type="button" data-act="import" title="Apply whatever config is pasted in the box below">apply</button>
-                  <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, environment) to paste when something is off">report</button>
-                  <button class="act" type="button" data-act="csv" title="Download the closed sessions as a CSV (date, races, WPM, target, deviation, accuracy, DQ, reason) for a spreadsheet">csv</button>
-                </div>
-                <div class="rows">
-                  <div class="row up-row" data-field="upRow" title="Auto-update check: the last result, its error and when it will retry"><span>update</span><b data-field="up">—</b></div>
-                  <div class="row ch-row" data-field="chRow" title="Daily Challenge popup: close it automatically. Shift+click sets a CSS selector"><span>challenge</span><b data-field="ch">on</b></div>
-                </div>
-                <textarea class="cfg-text" data-field="cfgText" spellcheck="false" placeholder="Paste a copied config here and press apply."></textarea>
-                <div class="cfg-note" data-field="cfgNote">Pace and switches are saved on this browser and survive reloads.</div>
               </div>
             </section>
 
