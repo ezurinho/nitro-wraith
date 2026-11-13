@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.3 — 2026-11-13
+
+- feat: group the TUNE view into rhythm, limits and automation
+
 ## 8.14.2 — 2026-11-13
 
 - Paint the live panel at the game HUD rate (1 Hz) and skip the full DOM paint

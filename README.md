@@ -6,12 +6,12 @@ A Tampermonkey userscript for a single Nitro Type account. It chains races with
 human delays, keeps typing inside a calibrated range, and stays in AUTO. There is
 no fast mode and no shortcut around the pace.
 
-[![Version](https://img.shields.io/badge/version-8.14.2-1f6feb?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-8.14.3-1f6feb?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-2ea043?style=flat-square)](LICENSE)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-userscript-f59e0b?style=flat-square)](https://www.tampermonkey.net/)
 [![check](https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml/badge.svg)](https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml)
 
-**[Install latest](https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js)** · [Release](https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.2) · [Gist](https://gist.github.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58) · [Changelog](CHANGELOG.md)
+**[Install latest](https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js)** · [Release](https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.3) · [Gist](https://gist.github.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58) · [Changelog](CHANGELOG.md)
 
 ## What it does
 
