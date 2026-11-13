@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.14.4 — 2026-11-13
+
+- perf: throttle optional DOM scans while racing
+- test: count panel DOM mutations while folded and hidden
+- test: compare panel performance while folded and hidden
+
 ## 8.14.3 — 2026-11-13
 
 - feat: group the TUNE view into rhythm, limits and automation
