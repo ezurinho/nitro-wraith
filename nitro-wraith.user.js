@@ -826,17 +826,19 @@ All of this only aims at believable statistics. It is your call and your risk.
     const health = updateHealth();
     setText(node, health.text);
     setGood(node, health.good);
-    node.title = health.title;
+    if (node.title !== health.title) node.title = health.title;
   }
 
   function paintUpdateBadge(node) {
     if (!node) return;
     const info = updateInfo();
-    node.hidden = !info;
+    if (node.hidden !== !info) node.hidden = !info;
     if (!info) return;
-    node.textContent = 'update';
-    node.title = `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
-    node.setAttribute('aria-label', `Update available: v${info.latest}. Download the new userscript.`);
+    if (node.textContent !== 'update') node.textContent = 'update';
+    const title = `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
+    if (node.title !== title) node.title = title;
+    const label = `Update available: v${info.latest}. Download the new userscript.`;
+    if (node.getAttribute('aria-label') !== label) node.setAttribute('aria-label', label);
   }
 
   async function checkForUpdate(force = false) {
@@ -1097,7 +1099,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   function todayRead() {
     const now = Date.now();
     // Se pinta muchas veces por carrera; el resumen no cambia tan rapido.
-    if (todayCache && now - todayCacheAt < 500) return todayCache;
+    if (todayCache && now - todayCacheAt < 1500) return todayCache;
 
     const day = todayEmpty();
     try {
@@ -1132,7 +1134,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Antes la huella se recalculaba leyendo TODAS las claves de localStorage en
   // cada tick (y cada ventana tiene su latido); ahora el escaneo se hace una
   // vez por segundo y el resto de ticks reutilizan la lista.
-  const DAY_HIST_TTL_MS = 1200;
+  const DAY_HIST_TTL_MS = 1500;
 
   // Trabajo real, no llamadas: el banco de rendimiento comprueba que el panel
   // no repite DOM ni almacenamiento en cada tick.
@@ -6776,6 +6778,19 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (el && el.textContent !== value) el.textContent = value;
   }
 
+  // Las filas que aparecen y desaparecen se tocan en cada latido. Escribir el
+  // mismo display invalida el estilo aunque el valor no cambie, asi que solo
+  // se escribe cuando de verdad cambia.
+  function setDisplay(el, show) {
+    if (!el) return;
+    const value = show ? 'flex' : 'none';
+    if (el.style.display !== value) el.style.display = value;
+  }
+
+  function setColor(el, value) {
+    if (el && el.style.color !== value) el.style.color = value;
+  }
+
   function setGood(el, good) {
     if (!el) return;
     if (good === null) {
@@ -7080,8 +7095,20 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const index = TAB_ORDER.indexOf(name);
     panel.root.dataset.tab = name;
-    if (panel.refs.rail && panel.refs.rail.dataset.index !== String(index)) {
-      panel.refs.rail.dataset.index = String(index);
+    if (panel.refs.rail) {
+      if (panel.refs.rail.dataset.index !== String(index)) {
+        panel.refs.rail.dataset.index = String(index);
+      }
+      // El rail se anuncia como tablist: solo la pestaña activa entra en el
+      // orden de tabulacion. Las flechas mueven entre vistas sin usar el raton.
+      for (const button of panel.refs.rail.querySelectorAll('[data-tab-btn]')) {
+        const active = button.dataset.tabBtn === name;
+        const selected = active ? 'true' : 'false';
+        if (button.getAttribute('aria-selected') !== selected) {
+          button.setAttribute('aria-selected', selected);
+        }
+        button.tabIndex = active ? 0 : -1;
+      }
     }
 
     const tune = name === 'tune';
@@ -8390,8 +8417,8 @@ All of this only aims at believable statistics. It is your call and your risk.
           animation: nt-boot .42s cubic-bezier(.2, .9, .25, 1) both;
         }
         @keyframes nt-boot {
-          from { opacity: 0; transform: translateY(10px) scale(.97); filter: blur(2px); }
-          to   { opacity: 1; transform: none; filter: none; }
+          from { opacity: 0; transform: translateY(10px) scale(.97); }
+          to   { opacity: 1; transform: none; }
         }
 
         /* ---------- temas --------------------------------------------------- */
@@ -8470,7 +8497,9 @@ All of this only aims at believable statistics. It is your call and your risk.
         .panel[data-theme="rgb"][data-state="running"] {
           animation-play-state: paused;
         }
-        .panel[data-theme="rgb"][data-state="running"] .title {
+        .panel[data-theme="rgb"][data-state="running"] .title,
+        .panel[data-theme="rgb"][data-collapsed="true"],
+        .panel[data-theme="rgb"][data-collapsed="true"] .title {
           animation-play-state: paused;
         }
 
@@ -8489,11 +8518,11 @@ All of this only aims at believable statistics. It is your call and your risk.
           -webkit-mask-composite: xor;
           mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           mask-composite: exclude;
-          opacity: 0;
-          transition: opacity .3s ease;
+          display: none;
+          opacity: .9;
           pointer-events: none;
         }
-        .panel[data-theme="rgb"]::after { opacity: .9; }
+        .panel[data-theme="rgb"]::after { display: block; }
         .panel[data-theme="rgb"] .title {
           background: linear-gradient(90deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
           background-size: 300% 100%;
@@ -8544,6 +8573,12 @@ All of this only aims at believable statistics. It is your call and your risk.
 
         /* ---------- tira de chips ------------------------------------------- */
         .chips-row { display: flex; align-items: center; gap: 6px; padding: 0 11px 9px; }
+        /* Progreso de la carrera visible desde cualquier pestaña. Es una
+           linea compositada: scaleX no toca el layout ni el texto de al lado. */
+        .race-line { height: 2px; margin: 0 11px; border-radius: 99px; background: rgba(255, 255, 255, .05); overflow: hidden; opacity: 0; transition: opacity .2s ease; }
+        .panel[data-state="running"] .race-line, .panel[data-state="paused"] .race-line { opacity: 1; }
+        .race-line i { display: block; height: 100%; transform: scaleX(var(--race-fill, 0)); transform-origin: left center; background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 95%, transparent), color-mix(in srgb, var(--acc-2) 95%, transparent)); box-shadow: 0 0 9px color-mix(in srgb, var(--acc) 55%, transparent); }
+        .panel[data-collapsed="true"] .race-line { display: none; }
         .pace { all: unset; flex: none; padding: 4px 8px; border-radius: 999px; cursor: pointer; font: 700 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; color: var(--acc-2); background: color-mix(in srgb, var(--acc) 12%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 32%, transparent); transition: filter .15s ease, transform .12s ease, box-shadow .2s ease; }
         .pace:hover { filter: brightness(1.16); box-shadow: 0 0 14px -4px color-mix(in srgb, var(--acc) 70%, transparent); }
         .pace:active { transform: scale(.96); }
@@ -8563,6 +8598,10 @@ All of this only aims at believable statistics. It is your call and your risk.
         .rail-btn:hover { color: var(--acc-2); }
         .rail-btn:active { transform: scale(.9); }
         .rail-btn svg { width: 15px; height: 15px; display: block; }
+        /* Etiqueta flotante del rail: aparece solo al apuntar o enfocar, con
+           transform y opacity (nada de width ni filtros). */
+        .rail-btn::after { content: attr(data-label); position: absolute; left: calc(100% + 7px); top: 50%; z-index: 6; padding: 4px 7px; border-radius: 6px; white-space: nowrap; pointer-events: none; font: 700 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); background: var(--bg-hi); border: 1px solid var(--line-strong); box-shadow: 0 8px 18px -12px rgba(0, 0, 0, .9); opacity: 0; transform: translate(-3px, -50%); transition: opacity .16s ease, transform .16s ease; }
+        .rail-btn:hover::after, .rail-btn:focus-visible::after { opacity: 1; transform: translate(0, -50%); }
         /* El deslizador del rail: un cuadrado con glow que viaja con muelle. */
         .rail-glide { position: absolute; left: 6px; top: 9px; width: 30px; height: 30px; border-radius: 9px; background: var(--acc-dim); border: 1px solid var(--line-strong); box-shadow: 0 0 16px -6px var(--acc), inset 0 0 12px -6px var(--acc); transition: transform .34s cubic-bezier(.34, 1.4, .5, 1); transition: transform .34s linear(0, 0.32 14%, 0.82 28%, 1.06 44%, 1.02 58%, 0.995 72%, 1); pointer-events: none; }
         .rail[data-index="1"] .rail-glide { transform: translateY(32px); }
@@ -8577,7 +8616,13 @@ All of this only aims at believable statistics. It is your call and your risk.
         .views::-webkit-scrollbar { width: 6px; }
         .views::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--acc) 22%, transparent); border-radius: 99px; }
         .views::-webkit-scrollbar-track { background: transparent; }
+        .views { scrollbar-gutter: stable; }
         .view { display: none; }
+        /* Cabecera corta de cada vista: dice donde estas sin ocupar una tarjeta. */
+        .view-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2px 8px; margin: 0 1px 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+        .view-head span { display: inline-flex; align-items: center; gap: 6px; font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); }
+        .view-head span::before { content: ''; width: 10px; height: 1px; border-radius: 99px; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
+        .view-head b { font: 600 8px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .04em; color: var(--dim-2); text-align: right; }
         .panel[data-tab="stats"] .v-stats,
         .panel[data-tab="tune"] .v-tune,
         .panel[data-tab="log"] .v-log,
@@ -8585,7 +8630,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         @keyframes nt-view { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 
         /* ---------- tarjetas ------------------------------------------------- */
-        .card { position: relative; margin-bottom: 9px; padding: 9px 10px 10px; border-radius: 10px; background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .012)); border: 1px solid var(--line); transition: border-color .2s ease, box-shadow .25s ease, transform .18s ease; }
+        .card { position: relative; contain: layout style; margin-bottom: 9px; padding: 9px 10px 10px; border-radius: 10px; background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .012)); border: 1px solid var(--line); transition: border-color .2s ease, box-shadow .25s ease, transform .18s ease; }
         .card:last-child { margin-bottom: 2px; }
         .card:hover { border-color: var(--line-strong); box-shadow: 0 10px 22px -16px rgba(0, 0, 0, .9), 0 0 22px -14px color-mix(in srgb, var(--acc) 65%, transparent); }
         .card::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; border-radius: 99px; background: linear-gradient(180deg, var(--acc), color-mix(in srgb, var(--acc) 12%, transparent)); box-shadow: 0 0 10px color-mix(in srgb, var(--acc) 55%, transparent); opacity: .85; transition: opacity .2s ease; }
@@ -8774,8 +8819,8 @@ All of this only aims at believable statistics. It is your call and your risk.
 
         /* ---------- barra de estado y acciones ------------------------------ */
         .foot { padding: 7px 11px 8px; border-top: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, .012), rgba(0, 0, 0, .22)); }
-        .status { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; font: 500 9.5px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
-        .foot-bar { display: flex; align-items: center; gap: 5px; font: 600 8.5px/1 ui-monospace, monospace; letter-spacing: .05em; text-transform: uppercase; color: var(--dim-2); }
+        .status { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 26px; margin-bottom: 6px; font: 500 9.5px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
+        .foot-bar { display: flex; align-items: center; flex-wrap: nowrap; min-width: 0; gap: 5px; overflow: hidden; white-space: nowrap; font: 600 8.5px/1 ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: .05em; text-transform: uppercase; color: var(--dim-2); }
         .led { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dim-2); box-shadow: 0 0 8px color-mix(in srgb, var(--dim-2) 50%, transparent); transition: background .25s ease, box-shadow .25s ease; }
         .panel[data-state="running"] .led { background: var(--acc); box-shadow: 0 0 10px var(--acc); animation: nt-pulse 1.9s ease-in-out infinite; }
         .panel[data-state="paused"] .led { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
@@ -8800,7 +8845,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         /* Mini-grafica de model Δ: la linea de puntos es el cero; el area y la
            linea usan el acento del tema y no necesitan ningun canvas. */
         .spark { display: block; width: calc(100% - 22px); height: 24px; margin: 0 11px 6px; overflow: visible; }
-        .spark-line { fill: none; stroke: var(--acc); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--acc) 55%, transparent)); transition: opacity .2s ease; }
+        .spark-line { fill: none; stroke: var(--acc); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; transition: opacity .2s ease; }
         .spark-area { fill: color-mix(in srgb, var(--acc) 16%, transparent); stroke: none; }
         .spark-zero { stroke: color-mix(in srgb, var(--acc) 22%, transparent); stroke-width: .6; stroke-dasharray: 2 3; }
         .spark[data-empty="1"] { opacity: .35; }
@@ -8843,9 +8888,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         .theme i.sw-violet { background: linear-gradient(135deg, #120b1b, #c08bff 55%, #f0a9ff); }
         .theme i.sw-rgb {
           background: conic-gradient(from 0deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
-          animation: nt-rgb-sw 6s linear infinite;
         }
-        @keyframes nt-rgb-sw { to { filter: hue-rotate(360deg); } }
 
         /* ---------- plegado -------------------------------------------------- */
         /* Plegado: cabecera con el LED y el nombre, y los tres botones. Todo lo
@@ -8900,6 +8943,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           .rail-glide { display: none; }
           .rail-btn { width: 24px; height: 24px; border-radius: 7px; }
           .rail-btn svg { width: 13px; height: 13px; }
+          .rail-btn::after { display: none; }
           .views { flex: 1 1 auto; min-height: 0; max-height: none; padding: 8px; }
           .foot { display: none; }
           .actions { flex: none; gap: 5px; padding: 0 8px 8px; }
@@ -8920,7 +8964,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           .panel[data-theme="rgb"] { animation: nt-rgb-hue 16s linear infinite !important; }
         }
       </style>
-      <div class="panel" data-state="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
+      <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
         <div class="head">
           <span class="dot"></span>
           <span class="brand">
@@ -8929,32 +8973,34 @@ All of this only aims at believable statistics. It is your call and your risk.
           </span>
           <span class="who" title="Account this pace is calibrated for"><i></i>HUMAN PACE</span>
           <button class="upd" type="button" data-field="update" hidden>update</button>
-          <button class="iconbtn collapse" type="button" data-act="expand" title="Collapse / expand the panel">−</button>
+          <button class="iconbtn collapse" type="button" data-act="expand" aria-label="Collapse panel" aria-expanded="true" title="Collapse / expand the panel">−</button>
         </div>
         <div class="chips-row">
           <button class="pace" type="button">LEGIT · balanced</button>
           <span class="mode" role="status" aria-live="polite" title="Always AUTO: the bot starts by itself. Stop stops it; it comes back on the next garage visit.">AUTO</span>
           <span class="cap" data-field="cap" title="Hard ceiling: no race is ever allowed above this WPM">≤ 120 wpm</span>
         </div>
+        <div class="race-line" aria-hidden="true"><i></i></div>
         <div class="main">
-          <div class="rail" data-index="0">
+          <div class="rail" data-index="0" role="tablist" aria-label="Panel views">
             <i class="rail-glide"></i>
-            <button class="rail-btn" type="button" data-tab-btn="stats" title="Live race, session and history">
+            <button class="rail-btn" type="button" role="tab" aria-selected="true" aria-controls="nt-view-stats" aria-label="Live" data-tab-btn="stats" data-label="Live">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/><circle cx="12" cy="13" r="1.4" fill="currentColor" stroke="none"/></svg>
             </button>
-            <button class="rail-btn" type="button" data-tab-btn="tune" title="Pace profile, switches, session limit and config">
+            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-tune" aria-label="Tune" data-tab-btn="tune" data-label="Tune" tabindex="-1">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M17 6h3M4 18h3M11 18h9M4 12h13M20 12h0"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/><circle cx="18" cy="12" r="2"/></svg>
             </button>
-            <button class="rail-btn" type="button" data-tab-btn="log" title="Closed sessions and recent notices">
+            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-log" aria-label="Log" data-tab-btn="log" data-label="Log" tabindex="-1">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h11M8 12h11M8 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>
             </button>
-            <button class="rail-btn" type="button" data-tab-btn="info" title="Keys, guard and what each row means">
+            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-info" aria-label="Info" data-tab-btn="info" data-label="Info" tabindex="-1">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="1.1" fill="currentColor" stroke="none"/></svg>
             </button>
           </div>
           <div class="views">
             <!-- ------------------------------ STATS ------------------------- -->
-            <section class="view v-stats">
+            <section class="view v-stats" id="nt-view-stats" role="tabpanel" aria-label="Live">
+              <div class="view-head"><span>Live</span><b>race telemetry</b></div>
               <div class="card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
                 <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span></div>
@@ -9026,7 +9072,8 @@ All of this only aims at believable statistics. It is your call and your risk.
             </section>
 
             <!-- ------------------------------ TUNE -------------------------- -->
-            <section class="view v-tune cfg">
+            <section class="view v-tune cfg" id="nt-view-tune" role="tabpanel" aria-label="Tune">
+              <div class="view-head"><span>Tune</span><b>pace · switches · limits</b></div>
               <div class="card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
                 <div class="card-h"><span class="card-t">Pace</span><span class="card-s">all under the ceiling</span></div>
@@ -9173,7 +9220,8 @@ All of this only aims at believable statistics. It is your call and your risk.
             </section>
 
             <!-- ------------------------------ LOG --------------------------- -->
-            <section class="view v-log">
+            <section class="view v-log" id="nt-view-log" role="tabpanel" aria-label="Log">
+              <div class="view-head"><span>Log</span><b>sessions · challenges</b></div>
               <div class="card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 1.8"/></svg></span>
                 <div class="card-h"><span class="card-t" data-field="prevLabel">prev</span><span class="card-s">click for the table</span></div>
@@ -9235,7 +9283,8 @@ All of this only aims at believable statistics. It is your call and your risk.
             </section>
 
             <!-- ------------------------------ INFO -------------------------- -->
-            <section class="view v-info">
+            <section class="view v-info" id="nt-view-info" role="tabpanel" aria-label="Info">
+              <div class="view-head"><span>Info</span><b>keys · guardrails</b></div>
               <div class="card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/></svg></span>
                 <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>
@@ -9544,6 +9593,27 @@ All of this only aims at believable statistics. It is your call and your risk.
         showTab(btn.dataset.tabBtn);
         btn.blur();
       });
+
+      // Patron tablist: flechas, Home y End mueven la vista y el foco. No toca
+      // el teclado del juego porque solo se activa con el foco dentro del rail.
+      panel.refs.rail.addEventListener('keydown', (event) => {
+        const btn = event.target && event.target.closest ? event.target.closest('[data-tab-btn]') : null;
+        if (!btn) return;
+        const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        const buttons = Array.from(panel.refs.rail.querySelectorAll('[data-tab-btn]'));
+        const current = buttons.indexOf(btn);
+        if (current < 0) return;
+        let next = current;
+        if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = buttons.length - 1;
+        else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (current + 1) % buttons.length;
+        else next = (current - 1 + buttons.length) % buttons.length;
+        event.preventDefault();
+        event.stopPropagation();
+        showTab(buttons[next].dataset.tabBtn);
+        buttons[next].focus();
+      });
     }
 
     // Tope de tanda con deslizador: los mismos escalones que el clic en la fila
@@ -9838,6 +9908,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     panel.root.dataset.collapsed = collapsed ? 'true' : 'false';
     panel.refs.collapse.textContent = collapsed ? '+' : '−';
     panel.refs.collapse.title = collapsed ? 'Expand' : 'Minimize';
+    panel.refs.collapse.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    panel.refs.collapse.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
     disk.set(KEYS.panelCollapsed, collapsed ? '1' : '0');
   }
 
@@ -10534,12 +10606,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     setTimeout(() => clearInterval(timer), 12000);
   }
 
-  function updatePanel() {
+  function updatePanel(force = false) {
     publishState();
     // Un panel que ya no esta en el documento (React lo quito al navegar) no
-    // se sigue pintando dos veces por segundo: se reconstruye en el latido y
-    // hasta entonces cada escritura era basura para el GC.
+    // se sigue pintando: se reconstruye en el latido y hasta entonces cada
+    // escritura era basura para el GC.
     if (!panel.root || !panel.root.isConnected) return;
+    // Con la pestaña en segundo plano nadie ve el panel. El estado para la cola
+    // ya se publico arriba, asi que se puede saltar todo el DOM hasta volver.
+    if (document.hidden && !force) return;
     perfCounters.panelPaints += 1;
 
     if (panel.refs.update) {
@@ -10779,7 +10854,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (panel.refs.prevRow) {
       const previous = tandaLog.length ? tandaLog[tandaLog.length - 1] : null;
       const show = Boolean(previous && previous.races >= 1);
-      panel.refs.prevRow.style.display = show ? 'flex' : 'none';
+      setDisplay(panel.refs.prevRow, show);
 
       if (show) {
         const dev = Number.isFinite(previous.wpm) && previous.target > 0
@@ -10823,8 +10898,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       const timeLeft = timeLimitLeft();
       if (panel.refs.timeLeftRow) {
         const show = session.timeLimit > 0;
-        const display = show ? 'flex' : 'none';
-        if (panel.refs.timeLeftRow.style.display !== display) panel.refs.timeLeftRow.style.display = display;
+        setDisplay(panel.refs.timeLeftRow, show);
         if (show) {
           setText(panel.refs.timeLeft, timeLeft === null ? '—' : clockSpan(timeLeft));
           panel.refs.timeLeftRow.title = timeLeft === null
@@ -10841,8 +10915,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       if (panel.refs.xpRow) {
         const show = session.xpLimit > 0;
-        const display = show ? 'flex' : 'none';
-        if (panel.refs.xpRow.style.display !== display) panel.refs.xpRow.style.display = display;
+        setDisplay(panel.refs.xpRow, show);
         if (show) {
           const left = Math.max(0, session.xpLimit - session.xp);
           const xpPlan = xpEta();
@@ -10911,10 +10984,19 @@ All of this only aims at believable statistics. It is your call and your risk.
     // marcador. Sin leccion cargada (resultados, descanso) se muestra un guion.
     const total = session.total;
     const pos = clamp(session.pos, 0, total || 0);
+    const racePct = total > 0 ? progressPct(pos, total) : 0;
     setText(panel.refs.progress, total > 0 ? `${pos}/${total}` : '—');
     if (panel.refs.progFill) {
-      const width = `${progressPct(pos, total).toFixed(1)}%`;
+      const width = `${racePct.toFixed(1)}%`;
       if (panel.refs.progFill.style.width !== width) panel.refs.progFill.style.width = width;
+    }
+    // La linea de la cabecera usa scaleX, no width: se queda en el compositor
+    // aunque el panel este en otra pestaña o haya una animacion de fondo.
+    if (panel.root) {
+      const fill = (racePct / 100).toFixed(4);
+      if (panel.root.style.getPropertyValue('--race-fill') !== fill) {
+        panel.root.style.setProperty('--race-fill', fill);
+      }
     }
 
     if (breaking) {
@@ -10932,14 +11014,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     // El autocalibrado solo se muestra cuando ya se ha movido: si esta a 1.00
     // no aporta nada y ocupa una fila.
     const trimmed = Math.abs(session.trim - 1) >= 0.005;
-    if (panel.refs.trimRow) panel.refs.trimRow.style.display = trimmed ? 'flex' : 'none';
+    setDisplay(panel.refs.trimRow, trimmed);
     if (trimmed) setText(panel.refs.trim, `x${session.trim.toFixed(2)}`);
 
 
     // Racha de descalificaciones: solo aparece cuando hay alguna. Es la razon
     // por la que el bot se para solo a las dos seguidas.
     const dqStreak = session.dqStreak | 0;
-    if (panel.refs.dqRow) panel.refs.dqRow.style.display = dqStreak > 0 ? 'flex' : 'none';
+    setDisplay(panel.refs.dqRow, dqStreak > 0);
     if (dqStreak > 0) setText(panel.refs.dq, `×${dqStreak}`);
 
     // The game's own reading (the number Nitro Type counts) next to the ceiling.
@@ -10948,7 +11030,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     const cap = CONFIG.wpm.hardCap;
     const hud = session.startedAt && !session.endedAt ? hudWpm() : null;
     if (hud !== null && session.typing) session.lastHudWpm = hud;
-    if (panel.refs.hudRow) panel.refs.hudRow.style.display = hud === null ? 'none' : 'flex';
+    setDisplay(panel.refs.hudRow, hud !== null);
     if (hud !== null) {
       setText(panel.refs.hud, Number.isFinite(cap) ? `${hud.toFixed(0)} / ${cap}` : hud.toFixed(0));
       setGood(panel.refs.hud, Number.isFinite(cap) ? hud < cap : null);
@@ -10962,7 +11044,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     // escondido en el informe de diagnostico.
     if (panel.refs.clockRow) {
       const slowClock = preciseClockKind !== 'worker';
-      panel.refs.clockRow.style.display = slowClock ? 'flex' : 'none';
+      setDisplay(panel.refs.clockRow, slowClock);
       if (slowClock) {
         setText(panel.refs.clock, 'page timers');
         setGood(panel.refs.clock, false);
@@ -10975,7 +11057,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (panel.refs.resultRow) {
       const lastResult = raceHistory[raceHistory.length - 1];
       const hasResult = Boolean(lastResult && (lastResult.place || lastResult.cash || lastResult.xp));
-      panel.refs.resultRow.style.display = hasResult ? 'flex' : 'none';
+      setDisplay(panel.refs.resultRow, hasResult);
       if (hasResult) {
         const bits = [
           ordinal(lastResult.place),
@@ -11013,7 +11095,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       else if (session.carefulRaces > 0) guardText = `careful · ${session.carefulRaces}`;
       else if (session.breakUntil > Date.now()) guardText = 'long break';
 
-      panel.refs.guardRow.style.display = guardText ? 'flex' : 'none';
+      setDisplay(panel.refs.guardRow, Boolean(guardText));
       if (guardText) setText(panel.refs.guard, guardText);
       const standby = !primaryRole && !session.stopped ? '1' : '0';
       if (panel.root.dataset.standby !== standby) panel.root.dataset.standby = standby;
@@ -11036,7 +11118,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (day.xp > 0) parts.push(`${day.xp.toLocaleString()} XP`);
       if (day.dq > 0) parts.push(`${day.dq} DQ`);
 
-      panel.refs.todayRow.style.display = parts.length ? 'flex' : 'none';
+      setDisplay(panel.refs.todayRow, parts.length > 0);
       if (parts.length) setText(panel.refs.today, parts.join(' · '));
 
       // El detalle del dia va en el tooltip (la fila es corta a proposito):
@@ -11096,7 +11178,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     const boxReadySynced = boxReadyAt > 0 && Date.now() - boxReadyAt < BOX_STATE_READY_MS && !boxSettled;
 
     if (panel.refs.boxRow) {
-      panel.refs.boxRow.style.display = boxLast || saneBoxNext || siteBoxAt || boxReadySynced ? 'flex' : 'none';
+      setDisplay(panel.refs.boxRow, Boolean(boxLast || saneBoxNext || siteBoxAt || boxReadySynced));
 
       // El tooltip lleva la ultima reclamacion completa (premio y cuando): es el
       // unico sitio donde cabe sin cargar la fila.
@@ -11128,18 +11210,18 @@ All of this only aims at believable statistics. It is your call and your risk.
     // token no se puede leer, la fila se queda fuera en vez de mentir.
     if (panel.refs.sessionRow) {
       const exp = sessionExpiryAt();
-      panel.refs.sessionRow.style.display = exp ? 'flex' : 'none';
+      setDisplay(panel.refs.sessionRow, Boolean(exp));
       if (exp) {
         const left = exp - Date.now();
         if (left <= 0) {
           setText(panel.refs.sessionLeft, 'expired');
-          panel.refs.sessionLeft.style.color = 'var(--bad)';
+          setColor(panel.refs.sessionLeft, 'var(--bad)');
           panel.refs.sessionRow.title = 'Session token expired: the queue logs in again from the login page.';
         } else {
           setText(panel.refs.sessionLeft, left >= 3600000
             ? `${(left / 3600000).toFixed(1)}h`
             : `${Math.max(1, Math.round(left / 60000))}m`);
-          panel.refs.sessionLeft.style.color = left <= 5 * 60000 ? 'var(--warn)' : '';
+          setColor(panel.refs.sessionLeft, left <= 5 * 60000 ? 'var(--warn)' : '');
           panel.refs.sessionRow.title = `Site session: expires in ${Math.max(1, Math.round(left / 60000))} min. The queue renews it on the garage, between races.`;
         }
       }
@@ -16757,6 +16839,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     document.addEventListener('keydown', onKeyDown, true);
 
     createPanel();
+
+    // Al volver de segundo plano se pinta una vez aunque el latido venga
+    // frenado; mientras esta oculto updatePanel no toca el DOM.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) updatePanel(true);
+    });
 
     // Un latido no puede llevarse por delante a los demas. Si `watchRaceResults`
     // tropieza con un DOM a medio montar (React remontando la carrera), sin esto
