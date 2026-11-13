@@ -1096,6 +1096,12 @@ All of this only aims at believable statistics. It is your call and your risk.
   let todayCache = null;
   let todayCacheAt = 0;
 
+  // Un storage event dice que otra ventana cambio el dia o un tope. El latido
+  // normal puede esperar 1,5 s, pero un evento tiene que ver el dato nuevo ya.
+  function invalidateTodayCache() {
+    todayCacheAt = 0;
+  }
+
   function todayRead() {
     const now = Date.now();
     // Se pinta muchas veces por carrera; el resumen no cambia tan rapido.
@@ -6976,6 +6982,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     addEventListener('storage', (event) => {
       const key = event.key;
       if (!key || !event.newValue) return;
+      if (key === KEYS.dailyRaceLimit || key === KEYS.dailyXpLimit) invalidateTodayCache();
       const value = Number(event.newValue);
       let changed = false;
 
@@ -14380,6 +14387,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     addEventListener('storage', (event) => {
       const key = event.key;
       if (!key || !event.newValue) return;
+      if (key === KEYS.dailyRaceLimit || key === KEYS.dailyXpLimit) invalidateTodayCache();
       const value = Number(event.newValue);
       let changed = false;
 
