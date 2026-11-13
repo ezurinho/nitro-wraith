@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NITRO WRAITH
 // @namespace    nitro.wraith
-// @version      8.14.4
+// @version      8.14.5
 // @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
 // @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
 // @description  Human-paced Nitro Type racer for one account: calibrated 104-117 WPM under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.

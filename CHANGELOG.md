@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.5 — 2026-11-13
+
+- perf: paint the idle panel once per second
+
 ## 8.14.4 — 2026-11-13
 
 - perf: throttle optional DOM scans while racing
