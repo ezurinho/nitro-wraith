@@ -1,5 +1,17 @@
 # Changelog
 
+## 8.14.2 — 2026-11-13
+
+- Paint the live panel at the game HUD rate (1 Hz) and skip the full DOM paint
+  while the panel is folded or the tab is in the background.
+- Cache the day summary and 7-day history, invalidate them immediately on
+  storage changes, and reuse one modal read per queue tick.
+- Remove paint-heavy panel effects (boot blur, sparkline drop shadow, animated
+  RGB swatch) and pause RGB while racing or folded.
+- Add view headers, rail tooltips, ARIA tabs with keyboard navigation, a global
+  race progress line, a stable footer, and guarded DOM writes.
+- Fix the season card so it repaints after the panel is rebuilt.
+
 ## 8.14.1 — 2026-11-13
 
 - Refresh the read-only Friends/Team panel on focus, visibility, and route changes.
