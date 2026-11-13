@@ -9788,8 +9788,10 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     panel.refs.collapse.addEventListener('click', (event) => {
       event.stopPropagation();
-      applyCollapsed(panel.root.dataset.collapsed !== 'true');
+      const collapsed = panel.root.dataset.collapsed !== 'true';
+      applyCollapsed(collapsed);
       restorePosition();
+      if (!collapsed) updatePanel(true);
       panel.refs.collapse.blur();
     });
 
@@ -10613,6 +10615,30 @@ All of this only aims at believable statistics. It is your call and your risk.
     setTimeout(() => clearInterval(timer), 12000);
   }
 
+  // Lo unico visible con el panel plegado. El resto del panel se queda tal
+  // cual y se repinta entero al desplegarlo, no en cada latido.
+  function paintPanelActions() {
+    const pauseLeft = session.paused && session.pauseEndsAt
+      ? Math.max(0, Math.ceil((session.pauseEndsAt - Date.now()) / 1000))
+      : 0;
+    setText(panel.refs.toggle, session.paused
+      ? (pauseLeft ? `Resume · ${pauseLeft}` : 'Resume')
+      : 'Pause');
+    if (panel.refs.toggle && panel.refs.toggle.disabled !== session.stopped) {
+      panel.refs.toggle.disabled = session.stopped;
+    }
+    if (panel.refs.stop) {
+      const pending = session.stopAfterRace ? 'true' : 'false';
+      if (panel.refs.stop.dataset.pending !== pending) panel.refs.stop.dataset.pending = pending;
+      setText(panel.refs.stop, session.stopped ? 'Resume' : 'Stop');
+      const title = session.stopped
+        ? 'Resume now · Alt+A (daily budget and active hours still apply)'
+        : 'Stop after the current race · Alt+S';
+      if (panel.refs.stop.title !== title) panel.refs.stop.title = title;
+      if (panel.refs.stop.disabled !== false) panel.refs.stop.disabled = false;
+    }
+  }
+
   function updatePanel(force = false) {
     publishState();
     // Un panel que ya no esta en el documento (React lo quito al navegar) no
@@ -10656,6 +10682,13 @@ All of this only aims at believable statistics. It is your call and your risk.
     const acc = measured ? accuracyNow() : 0;
 
     if (panel.root.dataset.pace !== session.pace) panel.root.dataset.pace = session.pace;
+
+    // Plegado solo queda la cabecera y los tres botones: no hay ninguna fila
+    // visible que actualizar. Se pinta lo minimo y se libera el hilo.
+    if (panel.root.dataset.collapsed === 'true' && !force) {
+      paintPanelActions();
+      return;
+    }
 
     // El chip dice el MODO, nunca un OFF que se parezca a NORMAL: AUTO siempre.
     // Que este esperando lo dicen el LED, la barra de estado y el motivo, sin
@@ -10968,24 +11001,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
     const limitMode = session.raceLimit ? 'on' : 'off';
     if (panel.root.dataset.limit !== limitMode) panel.root.dataset.limit = limitMode;
-    // Dentro de una carrera la pausa tiene fecha de caducidad: el boton la
-    // enseña para que no te sorprenda que se reanude sola.
-    const pauseLeft = session.paused && session.pauseEndsAt
-      ? Math.max(0, Math.ceil((session.pauseEndsAt - Date.now()) / 1000))
-      : 0;
-    setText(panel.refs.toggle, session.paused
-      ? (pauseLeft ? `Resume · ${pauseLeft}` : 'Resume')
-      : 'Pause');
-    if (panel.refs.toggle) panel.refs.toggle.disabled = session.stopped;
-    if (panel.refs.stop) {
-      const stoppedNow = session.stopped;
-      panel.refs.stop.dataset.pending = session.stopAfterRace ? 'true' : 'false';
-      setText(panel.refs.stop, stoppedNow ? 'Resume' : 'Stop');
-      panel.refs.stop.title = stoppedNow
-        ? 'Resume now · Alt+A (daily budget and active hours still apply)'
-        : 'Stop after the current race · Alt+S';
-      panel.refs.stop.disabled = false;
-    }
+    paintPanelActions();
 
     // Avance de la carrera: numero de letras aceptadas y barra fina debajo del
     // marcador. Sin leccion cargada (resultados, descanso) se muestra un guion.
