@@ -1668,6 +1668,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // `rewardCountdown` de la Mystery Box y para el nombre/ID del corredor.
   let siteUserAt = 0;
   let siteUserValue = null;
+  let siteUserRaw = null;
 
   // Lectura unica del JWT del sitio. `player_token` puede estar como JWT crudo,
   // con comillas (la app lo guardo con JSON.stringify) o con el prefijo
@@ -1711,10 +1712,17 @@ All of this only aims at believable statistics. It is your call and your risk.
     const now = Date.now();
     if (siteUserAt && now - siteUserAt < maxAge) return siteUserValue;
 
-    siteUserAt = now;
-    siteUserValue = null;
     try {
       const raw = disk.get('persist:nt', '');
+      // `persist:nt` puede ser grande. Si el texto no cambio, el objeto cacheado
+      // sigue siendo valido: no hay que volver a parsearlo cada pocos segundos.
+      if (raw === siteUserRaw) {
+        siteUserAt = now;
+        return siteUserValue;
+      }
+      siteUserRaw = raw;
+      siteUserValue = null;
+      siteUserAt = now;
       const root = raw ? JSON.parse(raw) : null;
       if (!root || !root.user) return siteUserValue;
       const user = typeof root.user === 'string' ? JSON.parse(root.user) : root.user;
@@ -2216,7 +2224,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (CONFIG.challenges.enabled === false) return false;
     if (!document.body) return false;
     if (Date.now() - challengeClosedAt < CONFIG.challenges.cooldownMs) return false;
-    if (Date.now() - challengeScanAt < 1200) return false;
+    // Con carrera viva no hace falta barrer el DOM cada 1,2 s: el popup es de
+    // despues de la carrera y sigue visible varios segundos.
+    if (Date.now() - challengeScanAt < (session.typing ? 2000 : 1200)) return false;
     challengeScanAt = Date.now();
 
     const selector = String(CONFIG.challenges.selector || '').trim();
@@ -3449,7 +3459,17 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   // Devuelve true si el aviso esta en pantalla (lo haya pulsado o no): mientras
   // se ve, la cola no debe navegar ni abrir carreras por detras.
-  function handleSessionWarning() {
+  let sessionWarningScanAt = 0;
+
+  function handleSessionWarning(force = false) {
+    // El aviso no aparece de golpe y desaparece: con una carrera viva, mirar
+    // todas las instancias una vez por segundo basta. El latido de 500 ms solo
+    // mira los botones cuando no hay tecleo en curso.
+    const now = Date.now();
+    const every = session.typing ? 1000 : 500;
+    if (!force && now - sessionWarningScanAt < every) return false;
+    sessionWarningScanAt = now;
+
     for (const doc of candidateDocs()) {
       const button = findSessionWarningButton(doc);
       if (!button) continue;
@@ -3481,7 +3501,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Ganchos inertes del banco: programar el aviso sin esperar al latido y ver
   // el enfriamiento local/compartido.
   window.__ntaDebug = window.__ntaDebug || {};
-  window.__ntaDebug.sessionWarningHandle = () => handleSessionWarning();
+  window.__ntaDebug.sessionWarningHandle = () => handleSessionWarning(true);
   window.__ntaDebug.sessionKick = () => {
     let shared = 0;
     try { shared = Number(window.top.__ntaSessionKickAt) || 0; } catch { /* otro origen */ }
@@ -6747,7 +6767,10 @@ All of this only aims at believable statistics. It is your call and your risk.
    * 12. FLOATING PANEL
    * ========================================================================== */
   const PANEL_ID = 'nt-autotyper-panel';
-  const panel = { root: null, refs: null, host: null, historySig: '', logSig: '', noticeSig: '', weekSig: '', chSig: '', seasonSig: '' };
+  const panel = {
+    root: null, refs: null, host: null, historySig: '', logSig: '', noticeSig: '',
+    weekSig: '', chSig: '', seasonSig: '', seasonBaseSig: '',
+  };
 
   function setText(el, value) {
     if (el && el.textContent !== value) el.textContent = value;
@@ -6983,7 +7006,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         seasonRefreshFromUser(true);
       } else if (event.key !== KEYS.season) return;
       if (panel.refs) panel.seasonSig = '';
-      paintSeason();
+      paintSeason(true);
     });
   } catch { /* almacenamiento bloqueado */ }
 
@@ -7536,7 +7559,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.parseSeason = (root) => parseSeasonPage(root || document);
   window.__ntaDebug.paintSeason = () => {
     panel.seasonSig = '';
-    paintSeason();
+    paintSeason(true);
     return seasonRead();
   };
   // El banco fuerza el repintado del panel de carrera para comprobar el
@@ -7896,9 +7919,19 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(el, text);
     if (!had) return;
 
+    // Reiniciar la animacion leyendo offsetWidth fuerza un layout sincrono
+    // dentro de la carrera. El bump puede empezar en el siguiente frame: se ve
+    // igual y no bloquea el hilo que esta mandando las teclas.
     el.classList.remove('bump');
-    void el.offsetWidth;   // reinicia la animacion sin esperar al siguiente frame
-    el.classList.add('bump');
+    if (typeof requestAnimationFrame === 'function') {
+      if (el.__ntaBumpFrame) cancelAnimationFrame(el.__ntaBumpFrame);
+      el.__ntaBumpFrame = requestAnimationFrame(() => {
+        el.__ntaBumpFrame = 0;
+        if (el.isConnected) el.classList.add('bump');
+      });
+    } else {
+      el.classList.add('bump');
+    }
   }
 
   // Export: al portapapeles y al cuadro de texto a la vez. Si el portapapeles
@@ -8429,6 +8462,17 @@ All of this only aims at believable statistics. It is your call and your risk.
         }
         @keyframes nt-rgb-hue { to { --nt-hue: 360; } }
         @keyframes nt-rgb-angle { to { --nt-angle: 360deg; } }
+
+        /* Con una carrera viva no se animan propiedades registradas del panel:
+           cada frame obligaria a recalcular todos los color-mix y el borde
+           conico, y el juego necesita ese tiempo. Al terminar la carrera los
+           colores vuelven a girar solos. */
+        .panel[data-theme="rgb"][data-state="running"] {
+          animation-play-state: paused;
+        }
+        .panel[data-theme="rgb"][data-state="running"] .title {
+          animation-play-state: paused;
+        }
 
         /* El marco arcoiris: una capa conica recortada a 1 px con mask. Solo se
            enciende en RGB; en el resto queda transparente y no cuesta nada. */
@@ -10342,9 +10386,23 @@ All of this only aims at believable statistics. It is your call and your risk.
     return alerts;
   }
 
-  function paintSeason() {
+  let seasonPaintAt = 0;
+
+  function paintSeason(force = false) {
     if (!panel.refs || !panel.refs.seasonName) return;
     const snap = seasonRead();
+    // La firma barata evita calcular el ritmo y leer el historial en cada tick
+    // del panel. Con datos iguales basta con refrescar cada 15 s (el ritmo
+    // diario no cambia de un tick a otro); si llega XP nuevo, `snap.at` cambia
+    // y la tarjeta se repinta en el acto.
+    const baseSig = snap
+      ? `${snap.at}|${snap.tier}|${snap.nextTier}|${snap.progress}|${snap.xp}|${snap.nextXp}|${snap.endsAt}`
+      : 'empty';
+    const now = Date.now();
+    if (!force && panel.seasonBaseSig === baseSig && now - seasonPaintAt < 15000) return;
+    panel.seasonBaseSig = baseSig;
+    seasonPaintAt = now;
+
     const pace = seasonPace(snap);
     const perRace = seasonXpPerRace();
     const leftToNext = snap && Number.isFinite(Number(snap.xp)) && Number.isFinite(Number(snap.nextXp))
@@ -11016,7 +11074,10 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     // La hora que da el propio sitio manda sobre la estimacion local, pero solo
     // si es creible y viene como epoch; un valor raro se ignora.
-    const siteProfile = siteUser();
+    // Dentro de carrera el panel se pinta dos veces por segundo y este JSON
+    // puede ser grande. La cuenta atras de la caja no necesita refrescarse tan
+    // a menudo como el WPM: se lee como mucho una vez cada 15 s.
+    const siteProfile = siteUser(15000);
     const countdownRaw = Number(siteProfile && siteProfile.rewardCountdown);
     const site = countdownRaw > 0
       ? boxWaitFromNext(countdownRaw, CONFIG.mysteryBox.retryAfterMs, { pastMeansReady: true, epochOnly: true })
@@ -15681,7 +15742,13 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       // La captcha es la excepcion: su frase no consta en el bundle y puede
       // venir fuera de un modal, asi que conserva el barrido completo del body.
-      if (handleCaptcha(pageText())) return;
+      // En una carrera viva el tipador ya vigila el CAPTCHA desde su marco. Leer
+      // `body.innerText` aqui cada segundo fuerza layout en la ventana padre y
+      // se nota como tirones justo mientras el juego esta pintando la carrera.
+      const liveRace = Boolean(state && !state.stopped
+        && (state.typing || state.chars > 0)
+        && (location.pathname === '/race' || location.pathname.startsWith('/race/')));
+      if (!liveRace && handleCaptcha(pageText())) return;
 
       // Otra pestaña tiene el lease: esta cola no abre carreras ni reclama la
       // caja. Sigue atendiendo sesion, DQ y CAPTCHA, que son cosas de la pagina
@@ -16368,7 +16435,9 @@ All of this only aims at believable statistics. It is your call and your risk.
   // la primera lectura del tick vale para todas. La clave incluye el arranque y
   // el cierre de la carrera, asi que un cambio de carrera invalida el memo sin
   // tocar `resetRaceState` (que vive antes en el archivo).
-  const HUD_TTL_MS = 600;
+  // El HUD del juego se refresca una vez por segundo. Leerlo con mas frecuencia
+  // solo fuerza layout en la carrera sin traer un numero nuevo.
+  const HUD_TTL_MS = 1000;
   let hudCacheAt = 0;
   let hudCacheKey = '';
   let hudCacheValue = null;
