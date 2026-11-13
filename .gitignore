@@ -19,6 +19,10 @@ NITRO WRAITH*.txt
 tests/live/live-history.csv
 tests/live/live-history.json
 
+# Repository artwork (the global *.png rule is for local screenshots)
+!assets/
+!assets/*.png
+
 # Historical working copies and archives
 archive/
 lote1/

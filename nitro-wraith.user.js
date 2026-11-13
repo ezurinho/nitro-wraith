@@ -72,7 +72,7 @@ above the game for the whole race.
 Garage panel: the typer's panel only exists inside the race frame, so the garage
 (where the daily Mystery Box lives) had no panel at all and the box looked like
 it was never claimed. A small second panel lives in the top window, only on the
-home page and the garage: LED, AUTOTYPER and the queue build, a MODE chip that
+home page and the garage: LED, NITRO WRAITH and the queue build, a MODE chip that
 always reads AUTO, the state, the Mystery Box (ready, when the next check is, or
 when it was claimed), the next race, and two buttons:
 "Claim box" (presses the site's own button and closes the reward modal; from any
@@ -1148,7 +1148,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   // no repite DOM ni almacenamiento en cada tick.
   const perfCounters = {
     hudReads: 0, dayScans: 0, panelPaints: 0, userParses: 0,
-    warningScans: 0, challengeScans: 0, captchaScans: 0,
+    warningScans: 0, challengeScans: 0, captchaScans: 0, captchaUiScans: 0,
+    resultsWatches: 0,
   };
 
   // Acceso propio para las funciones que viven antes de `disk`: `dayHistoryRead`,
@@ -3342,6 +3343,7 @@ All of this only aims at believable statistics. It is your call and your risk.
    * app y, si esa recarga no ocurre, no queremos martillearlo.
    * -------------------------------------------------------------------------- */
   let captchaContinueAt = 0;
+  let captchaContinueScanAt = 0;
 
   // Ultima vez que se vio el modal de descalificacion. Lo refresca un vigilante
   // cada segundo (leer innerText es caro para hacerlo en cada tecla).
@@ -3356,7 +3358,13 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   function clickCaptchaContinue(doc) {
     const target = doc || document;
-    if (!target || Date.now() - captchaContinueAt < 4000) return false;
+    const now = Date.now();
+    if (!target || now - captchaContinueAt < 4000) return false;
+    // El modal no cambia de un latido a otro: una lectura por segundo basta y
+    // deja libre el hilo para las teclas. El clic mantiene su enfriamiento de 4 s.
+    if (now - captchaContinueScanAt < 1000) return false;
+    captchaContinueScanAt = now;
+    perfCounters.captchaUiScans += 1;
 
     let validated = false;
     for (const el of target.querySelectorAll('.tc-i')) {
@@ -13673,7 +13681,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         <div class="p" data-mode="auto" data-theme="${panelTheme}">
           <div class="h" title="Drag to move · double-click to put it back in the corner">
             <i class="dot"></i>
-            <span><b class="t">AUTOTYPER</b><span class="s" data-f="sub">garage · queue</span></span>
+            <span><b class="t">NITRO WRAITH</b><span class="s" data-f="sub">garage · queue</span></span>
             <span class="mode" role="status" aria-live="polite" title="Always AUTO: it starts and re-arms by itself. To stop it, use Stop / Esc in the race.">AUTO</span>
             <button class="upd" type="button" data-f="update" hidden>update</button>
             <button class="fold" type="button" data-f="fold" aria-expanded="true" aria-label="Fold the garage panel" title="Fold the garage panel (Alt+G)">−</button>
@@ -16943,6 +16951,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     };
 
     let lastPanelPaintAt = 0;
+    let lastResultsWatchAt = 0;
 
     setInterval(() => {
       // Eleccion de copia en este marco: una escribe, las demas esperan. Se
@@ -16951,7 +16960,16 @@ All of this only aims at believable statistics. It is your call and your risk.
       heart('panel', () => {
         if (!document.getElementById(PANEL_ID)) createPanel();
       });
-      heart('results', watchRaceResults);
+      // Con un listener ya suscrito no hace falta recorrer el arbol de React dos
+      // veces por segundo: el juego tarda ~25 s en cerrar una carrera y un segundo
+      // de retraso no pierde el paquete. Sin listener se sigue mirando a 2 Hz.
+      heart('results', () => {
+        const now = Date.now();
+        if (resultServerObj && now - lastResultsWatchAt < 1000) return;
+        lastResultsWatchAt = now;
+        perfCounters.resultsWatches += 1;
+        watchRaceResults();
+      });
       // Un panel en espera o en carrera no necesita 2 Hz: sus relojes cambian
       // como mucho una vez por segundo y los eventos que importan ya llaman a
       // updatePanel(). Se pinta en el siguiente latido y se libera el hilo
