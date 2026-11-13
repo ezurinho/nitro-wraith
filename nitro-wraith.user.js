@@ -16952,12 +16952,13 @@ All of this only aims at believable statistics. It is your call and your risk.
         if (!document.getElementById(PANEL_ID)) createPanel();
       });
       heart('results', watchRaceResults);
-      // Con una carrera viva el panel no necesita 2 Hz: el HUD del juego se
-      // refresca una vez por segundo. Se pinta en el siguiente latido y se
-      // libera el hilo justo cuando la app esta procesando las teclas.
+      // Un panel en espera o en carrera no necesita 2 Hz: sus relojes cambian
+      // como mucho una vez por segundo y los eventos que importan ya llaman a
+      // updatePanel(). Se pinta en el siguiente latido y se libera el hilo
+      // justo cuando la app esta procesando las teclas.
       heart('paint', () => {
         const now = Date.now();
-        if (session.typing && now - lastPanelPaintAt < 1000) return;
+        if (now - lastPanelPaintAt < 1000) return;
         lastPanelPaintAt = now;
         updatePanel();
       });
