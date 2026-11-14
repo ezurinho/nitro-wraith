@@ -150,7 +150,7 @@ manual by design.
   - The panel reads the game's own persisted state where possible; it does not invent XP or race results.
   - The social panel is GET-only and never posts, accepts, denies, invites, applies, or sends.
   - The guard stops the race on impossible WPM readings and warns when two copies are publishing at the same time.
-  - The periodic panel paint is capped at once per second, skips all DOM work in a hidden tab, caches unchanged calibration/update text and keeps the read-only social GETs for two minutes.
+  - The periodic panel paint runs at 1 Hz during a race and drops to one paint every two seconds while the bot is waiting; hidden tabs skip all DOM work. Unchanged calibration/update text is cached, and read-only social GETs are kept for two minutes.
 
 </details>
 

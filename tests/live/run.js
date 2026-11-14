@@ -856,11 +856,13 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       xp: 0, best: 0, bestAcc: 0, clean: 0, firstAt: 0, lastAt: 0, dqAt: 0,
       cash: 0, chKeys: ['11', '12'], updatedAt: Date.now(),
     }));
-    await new Promise((resolve) => setTimeout(resolve, 2600));
+    // En espera el panel pinta cada 2 s y el historico tiene 1.5 s de cache:
+    // hay que dejar pasar dos latidos completos para no competir con el borde.
+    await new Promise((resolve) => setTimeout(resolve, 3600));
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const text = shadow.querySelector('[data-field="weekList"]').textContent;
     store.removeItem(key);
-    await new Promise((resolve) => setTimeout(resolve, 2600));
+    await new Promise((resolve) => setTimeout(resolve, 3600));
     return { text };
   })()`, true);
   check('the 7-day card counts completed challenges per day',
@@ -934,6 +936,22 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('20 HUD reads share one DOM read inside the tick', perf.hudReads === 1, perf);
   check('panel ticks still repaint a connected panel', perf.paints === 20, perf);
   check('a steady panel tick stays well inside a frame', perf.medianMs < 8, perf);
+
+  // En espera el panel no necesita 1 Hz: baja a 2 s. Durante el tecleo vuelve
+  // a 1 Hz para no perder ningun cambio visible de la carrera.
+  const cadence = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const original = d.typing();
+    d.patchSession({ typing: false });
+    const waiting = d.paintEveryMs();
+    d.patchSession({ typing: true });
+    const racing = d.paintEveryMs();
+    d.patchSession({ typing: original });
+    return { waiting, racing, restored: d.typing() === original };
+  })()`, true);
+  check('the panel halves its paint cadence while waiting',
+    cadence.waiting === 2000 && cadence.racing === 1000 && cadence.restored, cadence);
 
   // Perfil de rendimiento del panel: el mismo tick con datos nuevos cuesta
   // distinto plegado, desplegado y con la pestaña en segundo plano. El plegado

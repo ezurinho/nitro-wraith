@@ -7661,6 +7661,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     return abandonRaceForConnectionError();
   };
   window.__ntaDebug.perf = () => ({ ...perfCounters });
+  window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
+  window.__ntaDebug.typing = () => Boolean(session.typing);
   window.__ntaDebug.perfReset = () => {
     for (const key of Object.keys(perfCounters)) perfCounters[key] = 0;
     return { ...perfCounters };
@@ -10828,6 +10830,13 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (panel.refs.stop.title !== title) panel.refs.stop.title = title;
       if (panel.refs.stop.disabled !== false) panel.refs.stop.disabled = false;
     }
+  }
+
+  // En espera no hay una carrera que seguir: 2 s bastan para el reloj y el
+  // estado. Durante el tecleo se vuelve a 1 s para que el panel no pierda
+  // ningun cambio visible de la carrera.
+  function panelPaintEveryMs() {
+    return session.typing ? 1000 : 2000;
   }
 
   function updatePanel(force = false) {
@@ -17120,7 +17129,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       // justo cuando la app esta procesando las teclas.
       heart('paint', () => {
         const now = Date.now();
-        if (now - lastPanelPaintAt < 1000) return;
+        if (now - lastPanelPaintAt < panelPaintEveryMs()) return;
         lastPanelPaintAt = now;
         updatePanel();
       });
