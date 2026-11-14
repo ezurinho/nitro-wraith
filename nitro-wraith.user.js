@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NITRO WRAITH
 // @namespace    nitro.wraith
-// @version      8.14.14
+// @version      8.14.15
 // @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
 // @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
 // @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
@@ -9,7 +9,7 @@
 // @supportURL   https://github.com/ezurinho/nitro-wraith/issues
 // @author       NITRO WRAITH
 // @match        https://www.nitrotype.com/*
-// @icon         https://cdn2.steamgriddb.com/icon/2b16a44bb65751bb0ebe5d8b42644bc4/32/512x512.png
+// @icon         https://raw.githubusercontent.com/ezurinho/nitro-wraith/main/assets/logo.svg
 // @license      MIT
 // @grant        none
 // @run-at       document-idle
@@ -725,7 +725,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   };
 
-  const VERSION = '8.14.14';
+  const VERSION = '8.14.15';
 
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se guarda el ultimo resultado y se
@@ -889,6 +889,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       const response = await fetch(UPDATE_META_URL, {
         cache: 'no-store',
         credentials: 'omit',
+        referrerPolicy: 'no-referrer',
         signal: controller ? controller.signal : undefined,
       });
       if (!response || !response.ok) {
@@ -8828,6 +8829,13 @@ All of this only aims at believable statistics. It is your call and your risk.
         }
         .head:active { cursor: grabbing; }
         .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim-2) 14%, transparent); transition: background .25s ease, box-shadow .25s ease; }
+        /* La marca: la W del hero, en un cuadrado de cristal. El punto de estado
+           sigue dentro, asi que no se pierde el LED al cambiar el icono. */
+        .mark { position: relative; flex: none; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; color: var(--acc); background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 13%, rgba(255, 255, 255, .04)), rgba(255, 255, 255, .015)); border: 1px solid var(--line-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 16px -9px var(--acc); }
+        .mark svg { width: 18px; height: 18px; display: block; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 55%, transparent)); }
+        .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px; box-shadow: 0 0 0 2px var(--bg-hi), 0 0 7px color-mix(in srgb, var(--acc) 70%, transparent); }
+        .panel[data-state="running"] .mark .dot { animation: nt-pulse 1.7s ease-in-out infinite; }
+        .panel[data-collapsed="true"] .mark { width: 23px; height: 23px; border-radius: 7px; }
         .panel[data-state="running"] .dot { background: var(--acc); box-shadow: 0 0 0 3px var(--acc-dim), 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent); animation: nt-pulse 1.7s ease-in-out infinite; }
         .panel[data-state="paused"] .dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 12px color-mix(in srgb, var(--warn) 60%, transparent); }
         .panel[data-state="break"] .dot { background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 16%, transparent), 0 0 12px color-mix(in srgb, var(--info) 60%, transparent); }
@@ -9274,7 +9282,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       </style>
       <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
         <div class="head">
-          <span class="dot"></span>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
+            <i class="dot"></i>
+          </span>
           <span class="brand">
             <b class="title" data-field="title">NITRO WRAITH</b>
             <span class="sub">nitro type · <b data-field="ver">v7.0.0</b></span>
@@ -13809,6 +13820,15 @@ All of this only aims at believable statistics. It is your call and your risk.
           .dot { flex: none; width: 8px; height: 8px; border-radius: 50%;
                  background: var(--dim-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim-2) 14%, transparent);
                  transition: background .25s ease, box-shadow .25s ease; }
+          .mark { position: relative; flex: none; display: grid; place-items: center;
+                  width: 23px; height: 23px; border-radius: 7px; color: var(--acc);
+                  background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 13%, rgba(255, 255, 255, .04)), rgba(255, 255, 255, .015));
+                  border: 1px solid var(--line-strong);
+                  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 14px -8px var(--acc); }
+          .mark svg { width: 16px; height: 16px; display: block;
+                      filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 55%, transparent)); }
+          .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px;
+                       box-shadow: 0 0 0 2px var(--bg-hi), 0 0 7px color-mix(in srgb, var(--acc) 70%, transparent); }
           /* El LED dice si corre o espera; el chip ya no tiene estado OFF. */
           .p[data-armed="1"] .dot { background: var(--acc);
                  box-shadow: 0 0 0 3px var(--acc-dim), 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent); }
@@ -13995,7 +14015,10 @@ All of this only aims at believable statistics. It is your call and your risk.
         </style>
         <div class="p" data-mode="auto" data-theme="${panelTheme}">
           <div class="h" title="Drag to move · double-click to put it back in the corner">
-            <i class="dot"></i>
+            <span class="mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
+              <i class="dot"></i>
+            </span>
             <span><b class="t">NITRO WRAITH</b><span class="s" data-f="sub">garage · queue</span></span>
             <span class="mode" role="status" aria-live="polite" title="Always AUTO: it starts and re-arms by itself. To stop it, use Stop / Esc in the race.">AUTO</span>
             <button class="upd" type="button" data-f="update" hidden>update</button>

@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.15 — 2026-11-14
+
+- feat: give the panel and garage the Nitro Wraith mark
+- privacy: replace the third-party userscript icon and omit the referrer on update checks
+
 ## 8.14.14 — 2026-11-14
 
 - perf: lazy-mount panel views and trim startup reads
