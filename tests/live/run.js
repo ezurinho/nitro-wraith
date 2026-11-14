@@ -5005,6 +5005,28 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && /download/i.test(panelUpdate.shown.title) && /download/i.test(panelUpdate.shown.aria)
       && panelUpdate.hidden === true, panelUpdate);
 
+  const githubUpdate = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const link = s.querySelector('.ghlink');
+    if (!link) return { has: false };
+    const rect = link.getBoundingClientRect();
+    return {
+      has: true,
+      text: (link.textContent || '').trim(),
+      href: link.href,
+      target: link.target,
+      rel: link.rel,
+      width: rect.width,
+      display: getComputedStyle(link).display,
+    };
+  })()`);
+  check('the panel always exposes the GitHub update link',
+    githubUpdate.has && /^update$/i.test(githubUpdate.text)
+      && /^https:\/\/github\.com\/ezurinho\/nitro-wraith\/releases\/latest\/download\/nitro-wraith\.user\.js$/.test(githubUpdate.href)
+      && githubUpdate.target === '_blank' && /noopener/.test(githubUpdate.rel)
+      && githubUpdate.width > 0 && githubUpdate.display !== 'none', githubUpdate);
+
   // Las dos puertas que no se saltan con Resume: tope diario y horas activas.
   // Se usa el override del banco para no depender de las carreras de hoy.
   const gateResume = await cdp.evaluate(`(() => {

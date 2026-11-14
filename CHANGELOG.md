@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.16 — 2026-11-14
+
+- feat: add an always-visible GitHub Update link and a simpler, flatter panel layout
+
 ## 8.14.15 — 2026-11-14
 
 - feat: give the panel and garage the Nitro Wraith mark

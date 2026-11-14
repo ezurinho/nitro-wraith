@@ -1,6 +1,6 @@
 {
   "name": "nitro-wraith",
-  "version": "8.14.15",
+  "version": "8.14.16",
   "private": true,
   "description": "NITRO WRAITH — human-paced Nitro Type userscript and browser harness",
   "scripts": {

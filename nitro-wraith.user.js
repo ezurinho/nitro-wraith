@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NITRO WRAITH
 // @namespace    nitro.wraith
-// @version      8.14.15
+// @version      8.14.16
 // @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
 // @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
 // @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
@@ -725,7 +725,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   };
 
-  const VERSION = '8.14.15';
+  const VERSION = '8.14.16';
 
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se guarda el ultimo resultado y se
@@ -733,6 +733,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Un fallo de red no borra un aviso anterior ni bloquea la partida.
   const UPDATE_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
   const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+  const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
+  const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
   const UPDATE_KEY = 'nta:update';
   const UPDATE_RECHECK_MS = 3600000;
   const UPDATE_RETRY_MS = 30 * 60000;
@@ -834,8 +836,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   function paintUpdateHealth(force = false) {
-    const node = panel.refs && panel.refs.up;
-    if (!node) return;
+    const nodes = panel.refs ? [panel.refs.up, panel.refs.upInfo].filter(Boolean) : [];
+    if (!nodes.length) return;
     const now = Date.now();
     // La edad del chequeo cambia como mucho cada minuto: no hay razon para
     // leer `nta:update` ni tocar el DOM dos veces por segundo. Una comprobacion
@@ -843,9 +845,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (!force && panel.updateHealthAt && now - panel.updateHealthAt < 30000) return;
     panel.updateHealthAt = now;
     const health = updateHealth();
-    setText(node, health.text);
-    setGood(node, health.good);
-    if (node.title !== health.title) node.title = health.title;
+    for (const node of nodes) {
+      setText(node, health.text);
+      setGood(node, health.good);
+      if (node.title !== health.title) node.title = health.title;
+    }
   }
 
   function paintUpdateBadge(node) {
@@ -8824,7 +8828,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           content: '';
           position: absolute;
           left: 11px; right: 11px; bottom: 0; height: 1px;
-          background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 55%, transparent), transparent);
+          background: var(--line);
           pointer-events: none;
         }
         .head:active { cursor: grabbing; }
@@ -8846,7 +8850,11 @@ All of this only aims at believable statistics. It is your call and your risk.
         .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font: 600 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .13em; text-transform: uppercase; color: var(--dim-2); }
         .sub b { color: var(--acc); font-weight: 700; }
 
-        .who { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 7px; font: 600 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .06em; color: var(--ink-2); background: rgba(255, 255, 255, .045); border: 1px solid var(--line); }
+        .who { display: none; }
+        .ghlink { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 7px; text-decoration: none; font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--acc-2); background: var(--acc-dim); border: 1px solid var(--line-strong); transition: color .15s ease, background .15s ease, border-color .15s ease; }
+        .ghlink:hover { color: var(--ink); background: color-mix(in srgb, var(--acc) 20%, transparent); border-color: var(--acc); }
+        .ghlink:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+        .ghlink svg { width: 10px; height: 10px; display: block; }
         .upd { all: unset; flex: none; cursor: pointer; padding: 4px 7px; border-radius: 7px;
                font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
                letter-spacing: .08em; text-transform: uppercase; color: #20160a;
@@ -9164,7 +9172,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         .spark-line { fill: none; stroke: var(--acc); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; transition: opacity .2s ease; }
         .spark-area { fill: color-mix(in srgb, var(--acc) 16%, transparent); stroke: none; }
         .spark-zero { stroke: color-mix(in srgb, var(--acc) 22%, transparent); stroke-width: .6; stroke-dasharray: 2 3; }
-        .spark[data-empty="1"] { opacity: .35; }
+        .spark[data-empty="1"] { display: none; }
 
         .actions { display: flex; gap: 6px; padding: 0 11px 11px; }
         .toggle { all: unset; flex: 1 1 auto; padding: 9px 0; text-align: center; border-radius: 9px; cursor: pointer; font: 800 9.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--ink); background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 22%, transparent), color-mix(in srgb, var(--acc) 10%, transparent)); border: 1px solid color-mix(in srgb, var(--acc) 34%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1); transition: filter .15s ease, transform .1s ease, box-shadow .25s ease; }
@@ -9184,6 +9192,82 @@ All of this only aims at believable statistics. It is your call and your risk.
         .gear:active { transform: scale(.94); }
         .gear[data-open="1"] { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); box-shadow: 0 0 18px -8px var(--acc); }
         .gear svg { width: 14px; height: 14px; display: block; }
+
+        /* ---------- acabado simple ----------------------------------------- */
+        /* Una segunda pasada, plana y silenciosa: menos adornos, mas aire y una
+           sola jerarquia. Las vistas siguen siendo las mismas; solo cambia la
+           piel que las contiene. */
+        .panel {
+          width: 330px;
+          background: linear-gradient(180deg, var(--bg-hi), var(--bg-lo));
+          border-radius: 12px;
+          box-shadow: 0 18px 42px -22px rgba(0, 0, 0, .95), 0 0 0 1px rgba(0, 0, 0, .65);
+          font-family: ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+        }
+        .head { gap: 7px; padding: 10px 11px 8px; }
+        .mark { width: 27px; height: 27px; border-radius: 8px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
+        .mark svg { width: 19px; height: 19px; filter: none; }
+        .title { font-size: 13px; letter-spacing: .1em; text-shadow: none; }
+        .sub { margin-top: 3px; font-size: 8px; letter-spacing: .08em; color: var(--dim); }
+        .chips-row { flex-wrap: wrap; row-gap: 5px; padding: 0 11px 9px; }
+        .pace, .mode, .cap { padding: 4px 7px; border-radius: 6px; font-size: 8px; letter-spacing: .08em; }
+        .cap { flex: 0 1 auto; }
+        .upd { margin-left: auto; }
+
+        .main { border-top-color: var(--line); }
+        .rail { padding: 8px 5px; background: transparent; }
+        .rail-glide { left: 5px; top: 8px; width: 30px; height: 30px; border-radius: 7px; background: var(--acc-dim); box-shadow: none; }
+        .rail-btn { width: 30px; height: 30px; border-radius: 7px; }
+        .views { padding: 10px 11px 11px; }
+        .view-head { align-items: center; margin-bottom: 9px; padding-bottom: 7px; border-bottom-color: var(--line); }
+        .view-head span { gap: 6px; font-size: 8px; letter-spacing: .13em; color: var(--dim); }
+        .view-head span::before { width: 5px; height: 5px; border-radius: 2px; box-shadow: none; }
+        .view-head b { font-size: 8px; color: var(--dim-2); }
+
+        .card { margin-bottom: 8px; padding: 10px; border-radius: 9px; background: var(--card); border-color: var(--line); transition: none; }
+        .card:hover { border-color: var(--line); box-shadow: none; }
+        .card::before, .card > .ghost { display: none; }
+        .card-h { align-items: center; margin-bottom: 7px; }
+        .card-t { font-size: 9px; letter-spacing: .13em; color: var(--ink-2); }
+        .card-s { font-size: 8px; color: var(--dim); }
+        .hero { padding: 10px 0 9px; }
+        .stat b { font-size: 28px; text-shadow: none; }
+        .stat b[data-good="1"] { text-shadow: none; }
+        .stat b[data-good="0"] { text-shadow: none; }
+        .stat span { margin-top: 5px; font-size: 7.5px; letter-spacing: .13em; color: var(--dim); }
+        .auto-pace { margin-top: 3px; padding: 3px 7px; border-color: var(--line); background: transparent; color: var(--dim); font-size: 7.5px; letter-spacing: .05em; }
+        .auto-pace::before { width: 4px; height: 4px; box-shadow: none; }
+
+        /* Las metricas de Live y Season se leen como una cuadricula, no como
+           una lista larga: dos columnas, etiqueta arriba y valor debajo. */
+        .v-stats .live-card .rows,
+        .v-stats .season-card .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 8px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--line); }
+        .v-stats .season-card .rows { grid-template-columns: .9fr 1.1fr; }
+        .v-stats .live-card .rows .row,
+        .v-stats .season-card .rows .row { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px; min-width: 0; padding: 7px 8px; border: 0; background: rgba(0, 0, 0, .16); }
+        .v-stats .live-card .rows .row > span,
+        .v-stats .season-card .rows .row > span { font-size: 7.5px; letter-spacing: .08em; color: var(--dim-2); }
+        .v-stats .live-card .rows .row b,
+        .v-stats .season-card .rows .row b { width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 10.5px; line-height: 1.3; color: var(--ink-2); }
+        .v-stats .live-card .rows .result-row { grid-column: 1 / -1; }
+        .v-stats .season-card .rows .row b { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .v-stats .live-card .rows .row.secondary { display: none; }
+        .season-card .season-name { margin: 1px 0 7px; font-size: 13px; }
+        .season-card .season-actions { margin-top: 7px; }
+        .season-card .season-actions .act { font-size: 8px; padding: 5px 9px; }
+        .update-card .season-actions .act { flex: 0 1 auto; }
+
+        .foot { padding: 7px 11px 8px; background: transparent; }
+        .status { min-height: 0; margin-bottom: 6px; font-size: 9px; color: var(--dim); }
+        .foot-bar { font-size: 8px; letter-spacing: .03em; }
+        .actions { padding: 0 11px 11px; }
+        .toggle { padding: 9px 0; border-radius: 8px; background: var(--acc-dim); border-color: var(--line-strong); box-shadow: none; }
+        .toggle:hover { box-shadow: none; }
+        .stop { border-radius: 8px; background: color-mix(in srgb, var(--bad) 12%, transparent); border-color: color-mix(in srgb, var(--bad) 28%, transparent); }
+        .stop:hover { box-shadow: none; }
+        .gear { border-radius: 8px; }
+        .act { border-radius: 7px; text-decoration: none; }
+        .theme { border-radius: 7px; }
 
         /* ---------- selector de tema ---------------------------------------- */
         .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 2px; }
@@ -9212,8 +9296,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         .panel[data-collapsed="true"] { width: auto; min-width: 210px; }
         .panel[data-collapsed="true"] .main,
         .panel[data-collapsed="true"] .foot,
-        .panel[data-collapsed="true"] .chips-row,
-        .panel[data-collapsed="true"] .who { display: none; }
+        .panel[data-collapsed="true"] .chips-row { display: none; }
         .panel[data-collapsed="true"] .head { padding-bottom: 9px; }
         .panel[data-collapsed="true"] .actions { padding-top: 0; }
 
@@ -9240,8 +9323,9 @@ All of this only aims at believable statistics. It is your call and your risk.
           .head::after { left: 8px; right: 8px; }
           .head .dot,
           .head .who,
-          .head .sub,
-          .head .upd { display: none; }
+          .head .sub { display: none; }
+          .head .ghlink { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; }
+          .head .ghlink span { display: none; }
           .title { font-size: 11px; letter-spacing: .08em; }
           .chips-row { flex: none; flex-wrap: wrap; row-gap: 5px; padding: 0 8px 7px; }
           .chips-row > * { flex: 0 1 auto; white-space: nowrap; }
@@ -9288,16 +9372,18 @@ All of this only aims at believable statistics. It is your call and your risk.
           </span>
           <span class="brand">
             <b class="title" data-field="title">NITRO WRAITH</b>
-            <span class="sub">nitro type · <b data-field="ver">v7.0.0</b></span>
+            <span class="sub">human pace · <b data-field="ver">v7.0.0</b></span>
           </span>
-          <span class="who" title="Account this pace is calibrated for"><i></i>HUMAN PACE</span>
-          <button class="upd" type="button" data-field="update" hidden>update</button>
+          <a class="ghlink" href="${UPDATE_GITHUB_URL}" target="_blank" rel="noopener noreferrer" title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
+          </a>
           <button class="iconbtn collapse" type="button" data-act="expand" aria-label="Collapse panel" aria-expanded="true" title="Collapse / expand the panel">−</button>
         </div>
         <div class="chips-row">
           <button class="pace" type="button">LEGIT · balanced</button>
           <span class="mode" role="status" aria-live="polite" title="Always AUTO: the bot starts by itself. Stop stops it; it comes back on the next garage visit.">AUTO</span>
           <span class="cap" data-field="cap" title="Hard ceiling: no race is ever allowed above this WPM">≤ 120 wpm</span>
+          <button class="upd" type="button" data-field="update" hidden>update</button>
         </div>
         <div class="race-line" aria-hidden="true"><i></i></div>
         <div class="main">
@@ -9620,8 +9706,17 @@ All of this only aims at believable statistics. It is your call and your risk.
             <template data-view="info">
             <section class="view v-info" id="nt-view-info" role="tabpanel" aria-label="Info">
               <div class="view-head"><span>Info</span><b>keys · guardrails</b></div>
+              <div class="card update-card">
+                <div class="card-h"><span class="card-t">Updates</span><span class="card-s">GitHub releases</span></div>
+                <div class="rows">
+                  <div class="row" title="Last public update check. A newer build is downloaded from GitHub, never installed without your click."><span>check</span><b data-field="upInfo">—</b></div>
+                </div>
+                <div class="season-actions">
+                  <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
+                </div>
+                <div class="cfg-note">The Gist meta is checked once an hour; the installed copy changes only when you download a release.</div>
+              </div>
               <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/></svg></span>
                 <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>
                 <p class="about">Human-paced racer for one account: calibrated typing inside the account's own envelope, human breaks, a queue that recovers the garage, reloads, CAPTCHAs and re-logins, and a guard that stops everything on an impossible reading. <b>There is no fast mode.</b></p>
               </div>
@@ -9841,6 +9936,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       cfgText: pick('[data-field="cfgText"]'),
       cfgNote: pick('[data-field="cfgNote"]'),
       up: pick('[data-field="up"]'),
+      upInfo: pick('[data-field="upInfo"]'),
       nitroStrategy: pick('[data-field="nitroStrategy"]'),
       nitroPreview: pick('[data-field="nitroPreview"]'),
       foot: pick('[data-field="foot"]'),
