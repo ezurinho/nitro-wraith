@@ -4650,6 +4650,63 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('a lost race-server connection is not recorded as a race',
     connection.exit === false && connection.ended === 0, connection);
 
+  // El aviso «Too Many Disqualifications» no se cierra ni se reintenta. Antes
+  // el modal dejaba seguir pulsando botones y el garaje abria otra carrera.
+  const dqBlock = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d.recoverDq || !d.siteBlock || !d.clearSiteBlock) return { hasHook: false };
+
+    d.clearSiteBlock();
+    const modal = w.document.createElement('div');
+    modal.className = 'modal';
+    modal.style.cssText = 'position:fixed;left:20px;top:20px;width:420px;height:180px;background:#300;color:#fff;z-index:999999';
+    modal.innerHTML = '<h2>Too Many Disqualifications</h2>'
+      + '<p>You have disqualified 5 times in a row. You will need to wait a few minutes before you can race again.</p>'
+      + '<button id="dq-block-garage">Go To Your Garage</button>'
+      + '<button id="dq-block-retry" disabled>Try Again</button>';
+    w.__dqBlockClicks = [];
+    modal.querySelector('#dq-block-garage').addEventListener('click', () => { w.__dqBlockClicks.push('garage'); });
+    modal.querySelector('#dq-block-retry').addEventListener('click', () => { w.__dqBlockClicks.push('retry'); });
+    w.document.body.appendChild(modal);
+
+    const result = d.recoverDq();
+    const until = d.siteBlock();
+    const clicks = w.__dqBlockClicks.slice();
+    const counted = Boolean(d.clock && d.clock().endedAt);
+
+    // Pasada la espera, el aviso viejo se abandona por el garaje; nunca por
+    // «Race Again», que abriria una carrera sin comprobar antes el castigo.
+    modal.remove();
+    d.clearSiteBlock();
+    w.localStorage.setItem('ntQueue:dqBlockUntil', String(Date.now() - 1000));
+    const expired = w.document.createElement('div');
+    expired.className = 'modal';
+    expired.style.cssText = modal.style.cssText;
+    expired.innerHTML = '<h2>Too Many Disqualifications</h2>'
+      + '<button id="dq-expired-garage">Go To Your Garage</button>'
+      + '<button id="dq-expired-retry">Try Again</button>';
+    w.__dqExpiredClicks = [];
+    expired.querySelector('#dq-expired-garage').addEventListener('click', () => { w.__dqExpiredClicks.push('garage'); });
+    expired.querySelector('#dq-expired-retry').addEventListener('click', () => { w.__dqExpiredClicks.push('retry'); });
+    w.document.body.appendChild(expired);
+    const expiredResult = d.recoverDq();
+    const expiredClicks = w.__dqExpiredClicks.slice();
+    expired.remove();
+    d.clearSiteBlock();
+
+    return { hasHook: true, result, until, clicks, counted, now: Date.now(), expiredResult, expiredClicks };
+  })()`);
+  check('the site block modal waits instead of clicking a race button',
+    dqBlock.hasHook && dqBlock.result === true
+      && dqBlock.until > dqBlock.now + 600000
+      && dqBlock.clicks.length === 0
+      && dqBlock.counted === false, dqBlock);
+  check('after the block wait, the stale modal leaves through the garage',
+    dqBlock.expiredResult === true
+      && dqBlock.expiredClicks.includes('garage')
+      && !dqBlock.expiredClicks.includes('retry'), dqBlock);
+
   // La firma de la serie tiene que llevar el perfil: antes setPaceProfile la
   // llamaba sin el y la firma quedaba en ':count:min:max', asi que la serie de
   // otro perfil con el mismo rango se reutilizaba.
@@ -4991,10 +5048,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     const w = document.querySelector('iframe').contentWindow;
     const d = w.__ntaDebug;
     const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
-    const badge = s.querySelector('[data-field="update"]');
+    const badge = s.querySelector('.ghlink');
     w.localStorage.setItem('nta:update', JSON.stringify({ at: Date.now(), latest: '99.0.0' }));
     d.paint();
-    const shown = { hidden: badge.hidden, display: getComputedStyle(badge).display, text: badge.textContent, title: badge.title, aria: badge.getAttribute('aria-label') };
+    const shown = { hidden: badge.hidden, display: getComputedStyle(badge).display, text: badge.textContent.trim(), title: badge.title, aria: badge.getAttribute('aria-label') };
     w.localStorage.removeItem('nta:update');
     d.paint();
     return { shown, hidden: badge.hidden };
@@ -5007,25 +5064,39 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
 
   const githubUpdate = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
     const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const link = s.querySelector('.ghlink');
     if (!link) return { has: false };
+    w.localStorage.removeItem('nta:update');
+    d.paint();
+    const hidden = { hidden: link.hidden, display: getComputedStyle(link).display };
+    w.localStorage.setItem('nta:update', JSON.stringify({ at: Date.now(), latest: '99.0.0' }));
+    d.paint();
     const rect = link.getBoundingClientRect();
-    return {
-      has: true,
+    const shown = {
+      hidden: link.hidden,
       text: (link.textContent || '').trim(),
       href: link.href,
       target: link.target,
       rel: link.rel,
       width: rect.width,
       display: getComputedStyle(link).display,
+      title: link.title,
+      aria: link.getAttribute('aria-label'),
     };
+    w.localStorage.removeItem('nta:update');
+    d.paint();
+    return { has: true, hidden, shown };
   })()`);
-  check('the panel always exposes the GitHub update link',
-    githubUpdate.has && /^update$/i.test(githubUpdate.text)
-      && /^https:\/\/github\.com\/ezurinho\/nitro-wraith\/releases\/latest\/download\/nitro-wraith\.user\.js$/.test(githubUpdate.href)
-      && githubUpdate.target === '_blank' && /noopener/.test(githubUpdate.rel)
-      && githubUpdate.width > 0 && githubUpdate.display !== 'none', githubUpdate);
+  check('the header update link only appears when a newer version is available',
+    githubUpdate.has && githubUpdate.hidden.hidden === true && githubUpdate.hidden.display === 'none'
+      && githubUpdate.shown.hidden === false && githubUpdate.shown.display !== 'none'
+      && /^update$/i.test(githubUpdate.shown.text)
+      && /^https:\/\/github\.com\/ezurinho\/nitro-wraith\/releases\/latest\/download\/nitro-wraith\.user\.js$/.test(githubUpdate.shown.href)
+      && githubUpdate.shown.target === '_blank' && /noopener/.test(githubUpdate.shown.rel)
+      && githubUpdate.shown.width > 0 && /99\.0\.0/.test(githubUpdate.shown.title)
+      && /download/i.test(githubUpdate.shown.aria), githubUpdate);
 
   // Las dos puertas que no se saltan con Resume: tope diario y horas activas.
   // Se usa el override del banco para no depender de las carreras de hoy.

@@ -857,7 +857,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     const info = updateInfo();
     if (node.hidden !== !info) node.hidden = !info;
     if (!info) return;
-    if (node.textContent !== 'update') node.textContent = 'update';
+    const textNode = node.querySelector('span') || node;
+    if (textNode.textContent !== 'update') textNode.textContent = 'update';
     const title = `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
     if (node.title !== title) node.title = title;
     const label = `Update available: v${info.latest}. Download the new userscript.`;
@@ -5027,6 +5028,14 @@ All of this only aims at believable statistics. It is your call and your risk.
   function resumeAuto() {
     if (!session.stopped) return false;
 
+    // Un castigo por racha sigue vigente aunque pulses A: reanudar aqui solo
+    // volveria a abrir la carrera que el sitio acaba de rechazar.
+    if (siteBlockedUntil() > Date.now()) {
+      log('Site block: the account cannot race yet; wait for the block to pass.');
+      updatePanel();
+      return false;
+    }
+
     // El presupuesto del dia no se salta con A: si ya esta gastado, la cuenta
     // espera a manana. Es la unica parada que no se puede reanudar a mano.
     if (dailyLimitReached()) {
@@ -5495,8 +5504,54 @@ All of this only aims at believable statistics. It is your call and your risk.
   // El modal de DQ tapa la app y no queda carrera viva. Sin esto habia que
   // esperar al empujon de 25 s (CONFIG.idleNudgeMs) para volver a jugar.
   let lastDqClickAt = 0;
+
+  function siteBlockedUntil() {
+    return Number(disk.get(DQ_BLOCK_UNTIL, 0)) || 0;
+  }
+
+  // El aviso de bloqueo puede salir dentro del iframe de la carrera. El
+  // vigilante de la ventana de arriba no lo ve, asi que el bloqueo tiene que
+  // quedar escrito tambien desde aqui. Si la cola ya lo anoto, no se escala dos
+  // veces: solo se copia a la sesion para que ningun camino abra otra carrera.
+  function rememberFrameDqBlock() {
+    let until = siteBlockedUntil();
+    if (until <= Date.now()) {
+      const stage = Math.max(0, Number(disk.get(DQ_BLOCK_STAGE, 0)) || 0);
+      const ms = dqBlockWaitMs(stage);
+      until = Date.now() + ms;
+      disk.set(DQ_BLOCK_STAGE, String(Math.min(stage + 1, DQ_BLOCK_STAGE_MAX)));
+      disk.set(DQ_BLOCK_UNTIL, String(until));
+      log(`The site blocked the account for too many disqualifications: no race for ${Math.round(ms / 60000)} min.`);
+      beep('block');
+    }
+    session.breakUntil = Math.max(session.breakUntil, until);
+    saveCounters();
+    updatePanel();
+    return until;
+  }
+
   function recoverFromDqModal() {
-    if (!document.body || !looksDisqualified(modalText())) return false;
+    if (!document.body) return false;
+    const text = modalText();
+    if (!looksDisqualified(text)) return false;
+
+    // El castigo por racha no se cierra ni se reintenta: cada intento gasta
+    // otra vuelta de las que el sitio cuenta. Se deja el aviso quieto y se
+    // guarda la espera donde la leen la cola y el bucle de carreras.
+    if (looksDqBlocked(text)) {
+      dqBlockedNoted = true;
+      const until = siteBlockedUntil();
+      if (!until || until > Date.now()) {
+        rememberFrameDqBlock();
+        return true;
+      }
+
+      // La espera ya vencio y el aviso sigue pintado: se sale por el garaje.
+      // «Race Again» no se toca ni aqui: el siguiente intento lo hace la cola
+      // con su retardo, no este modal viejo.
+      if (clickByText(['go to your garage', 'view garage', 'your garage'])) notifyTopNeedGarage();
+      return true;
+    }
 
     // Con el farmeo AFK activo tambien se cierra el modal en segundo plano; si
     // esta apagado, se deja y se vuelve al entrar en foco.
@@ -5701,10 +5756,18 @@ All of this only aims at believable statistics. It is your call and your risk.
         if (!recoverFromDqModal() && !closeDqModalInTopFrame()) handleBlockingModal();
       }
 
+      // Castigo por racha: no se pulsa nada mientras dure. Sin esto el empujon
+      // de los 25 s buscaba un boton de carrera por detras del aviso y el
+      // garaje volvia a abrir una carrera en pleno bloqueo.
+      if (siteBlockedUntil() > Date.now()) {
+        await preciseSleep(CONFIG.pollMs);
+        continue;
+      }
+
       // Sin carrera en pantalla durante un rato (descanso largo, recarga,
       // modal): se empuja la interfaz. Antes esto se quedaba esperando para
       // siempre y habia que refrescar a mano.
-      if (!hiddenBlocked() && Date.now() - lastNudge > CONFIG.idleNudgeMs) {
+      if (!hiddenBlocked() && siteBlockedUntil() <= Date.now() && Date.now() - lastNudge > CONFIG.idleNudgeMs) {
         lastNudge = Date.now();
         if (clickByText(['race now', 'race again', 'play again', 'next race'])) {
           log('No race on screen: pressing "Race Now".');
@@ -5806,6 +5869,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   function clickNextRace() {
+    if (siteBlockedUntil() > Date.now()) return false;
     if (clickByText(['race again', 'play again', 'next race'])) return true;
 
     // Sin boton que pulsar, queda el otro camino.
@@ -5884,6 +5948,31 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   // Un descanso que estaba en curso cuando la app se recargo se retoma aqui:
   // el bucle no puede abrir carrera hasta que termine.
+  async function waitWhileSiteBlocked() {
+    let until = siteBlockedUntil();
+    if (until <= Date.now()) return false;
+
+    session.breakUntil = Math.max(session.breakUntil, until);
+    saveCounters();
+    log(`Site block: waiting ${Math.max(1, Math.round((until - Date.now()) / 60000))} min before opening another race.`);
+    updatePanel();
+
+    while (!session.stopped) {
+      await waitWhilePaused();
+      until = siteBlockedUntil();
+      if (until <= Date.now()) break;
+      session.breakUntil = Math.max(session.breakUntil, until);
+      await preciseSleep(1000);
+    }
+
+    if (!session.stopped) {
+      session.breakUntil = 0;
+      saveCounters();
+      updatePanel();
+    }
+    return true;
+  }
+
   async function waitWhileBreaking() {
     if (session.breakUntil <= Date.now()) return false;
 
@@ -6449,6 +6538,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     // Racha de DQ: el hueco se respeta antes de abrir otra carrera. Sin esto la
     // carrera siguiente arrancaba antes de que pasara el castigo.
     await waitWhileBreaking();
+    await waitWhileSiteBlocked();
+    if (session.stopped) return false;
 
     // Caja lista: la cola va a reclamarla al garaje. Se retiene "Race Again"
     // unos segundos para que esa navegacion llegue antes de abrir otra carrera
@@ -6498,6 +6589,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     // Primero con Enter, que es el OTRO camino del juego: repetir el mismo clic
     // que acaba de fallar no aporta nada cuando el boton esta y su handler ya no
     // responde, que es justo el caso en el que la carrera no arranca.
+    if (siteBlockedUntil() > Date.now()) {
+      log('Site block: the next race is not started again until the wait passes.');
+      return false;
+    }
     log('The next race did not start; trying Enter (the game takes it too)...');
     pressNextRaceKey();
 
@@ -6554,6 +6649,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     // Si se recargo la pagina en mitad de un descanso, se termina antes de
     // abrir carrera: para eso estaba el descanso.
     await waitWhileBreaking();
+    await waitWhileSiteBlocked();
     if (session.stopped) return false;
 
     // Ninguna carrera empieza con los temporizadores frenados: saldria lenta y
@@ -7761,6 +7857,18 @@ All of this only aims at believable statistics. It is your call and your risk.
     lastConnExitAt = 0;
     return abandonRaceForConnectionError();
   };
+  // El castigo por racha se prueba sin tocar la red: el banco inyecta el aviso
+  // y comprueba que no se pulsa ningun boton y que la espera queda guardada.
+  window.__ntaDebug.recoverDq = () => recoverFromDqModal();
+  window.__ntaDebug.siteBlock = () => siteBlockedUntil();
+  window.__ntaDebug.clearSiteBlock = () => {
+    disk.remove(DQ_BLOCK_UNTIL);
+    disk.remove(DQ_BLOCK_STAGE);
+    disk.remove(DQ_BLOCK_CHECKED_AT);
+    session.breakUntil = 0;
+    saveCounters();
+    return true;
+  };
   window.__ntaDebug.perf = () => ({ ...perfCounters });
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
@@ -8854,6 +8962,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         .ghlink { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 7px; text-decoration: none; font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--acc-2); background: var(--acc-dim); border: 1px solid var(--line-strong); transition: color .15s ease, background .15s ease, border-color .15s ease; }
         .ghlink:hover { color: var(--ink); background: color-mix(in srgb, var(--acc) 20%, transparent); border-color: var(--acc); }
         .ghlink:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+        .ghlink[hidden] { display: none !important; }
         .ghlink svg { width: 10px; height: 10px; display: block; }
         .upd { all: unset; flex: none; cursor: pointer; padding: 4px 7px; border-radius: 7px;
                font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
@@ -9374,7 +9483,7 @@ All of this only aims at believable statistics. It is your call and your risk.
             <b class="title" data-field="title">NITRO WRAITH</b>
             <span class="sub">human pace · <b data-field="ver">v7.0.0</b></span>
           </span>
-          <a class="ghlink" href="${UPDATE_GITHUB_URL}" target="_blank" rel="noopener noreferrer" title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
+          <a class="ghlink" href="${UPDATE_GITHUB_URL}" target="_blank" rel="noopener noreferrer" hidden title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
           </a>
           <button class="iconbtn collapse" type="button" data-act="expand" aria-label="Collapse panel" aria-expanded="true" title="Collapse / expand the panel">−</button>
@@ -9383,7 +9492,6 @@ All of this only aims at believable statistics. It is your call and your risk.
           <button class="pace" type="button">LEGIT · balanced</button>
           <span class="mode" role="status" aria-live="polite" title="Always AUTO: the bot starts by itself. Stop stops it; it comes back on the next garage visit.">AUTO</span>
           <span class="cap" data-field="cap" title="Hard ceiling: no race is ever allowed above this WPM">≤ 120 wpm</span>
-          <button class="upd" type="button" data-field="update" hidden>update</button>
         </div>
         <div class="race-line" aria-hidden="true"><i></i></div>
         <div class="main">
@@ -9846,7 +9954,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       // --- rediseno v7: rail, cabecera, ajustes y barra de estado ---
       title: pick('[data-field="title"]'),
       ver: pick('[data-field="ver"]'),
-      update: pick('[data-field="update"]'),
+      update: pick('.ghlink'),
       rail: pick('.rail'),
       views: pick('.views'),
       liveTag: pick('[data-field="liveTag"]'),
@@ -12596,6 +12704,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     function scheduleContinue(button) {
       if (continueTimer) return;
+      if (blockUntil() > Date.now()) return;
 
       const hours = activeGate();
       if (hours) {
@@ -12635,6 +12744,10 @@ All of this only aims at believable statistics. It is your call and your risk.
         }
         if (savedBreakUntil()) {
           queueLog('A break is in progress; the next race waits for it.');
+          return;
+        }
+        if (blockUntil() > Date.now()) {
+          queueLog('Site block: the next race waits for it.');
           return;
         }
         const hours = activeGate();
@@ -12829,6 +12942,13 @@ All of this only aims at believable statistics. It is your call and your risk.
 
 
     function handleModal(modalBody) {
+      // El castigo por racha se atiende antes que cualquier boton del modal:
+      // no se pulsa «Try Again» ni se navega por detras del aviso.
+      if (looksDqBlocked(modalBody)) {
+        noteDqBlock();
+        return true;
+      }
+
       // El servidor de la carrera cerro la conexion. Si el aviso se pinta en
       // esta ventana, se toma su salida; el marco avisa por `__ntaNeedGarage`.
       if (looksLikeConnectionError(modalBody)) {
@@ -12905,6 +13025,13 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     function handleRacePage() {
+      // Mientras dura el castigo no se toca ningun boton de carrera ni se
+      // borra la marca: un /race con el aviso encima no es una carrera buena.
+      if (blockUntil() > Date.now()) {
+        clearContinue();
+        return;
+      }
+
       // Solo cuenta si el modal se ve: un nodo oculto con el texto validado
       // mandaba a /garage y la cola volvia a /race en bucle.
       const validated = [...document.querySelectorAll('.tc-i')]
@@ -12963,8 +13090,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (hiddenBlocked()) return;
 
       // Castigo por racha de DQ en curso: abrir otra carrera solo repite el
-      // aviso y gasta un intento mas de los que el sitio cuenta.
-      if (blockUntil() > Date.now()) return;
+      // aviso y gasta un intento mas de los que el sitio cuenta. Se cancela
+      // tambien el «Race Now» que ya estuviera programado antes del aviso.
+      if (blockUntil() > Date.now()) {
+        clearRaceNow();
+        return;
+      }
 
       // Fuera de la ventana de horas no se programa «Race Now». El latido de la
       // cola vuelve a pasar por aqui; al abrir, la carrera sale sola.
@@ -13037,6 +13168,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         raceNowDelay = 0;
         if (!isArmed() || !button.isConnected) return;
         if (hiddenBlocked()) return;
+        if (blockUntil() > Date.now()) return;
         if (!claimTabLease('race now')) return;
         // Un clic que no llega a carrera cuenta: es la senal de que la sesion o
         // el servidor no dejan jugar y el garaje va a volver a la misma pagina.
@@ -14284,6 +14416,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       // boton que ya no existe (o sobre la carrera siguiente).
       refs.raceBtn.addEventListener('click', (event) => {
         event.stopPropagation();
+        if (blockUntil() > Date.now()) {
+          queueLog('Site block: the account cannot race yet; wait for the block to pass.');
+          paintGaragePanel();
+          return;
+        }
         const hours = activeGate();
         if (hours) {
           queueLog(`Active hours closed; races resume at ${hours.nextText}.`);
@@ -16165,6 +16302,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       // bloquea el clic, solo tapa): la carrera se abre, vuelve el modal y el
       // rebote suma. Se cancela aqui, que es donde se sabe que hay castigo.
       clearRaceNow();
+      if (dqPressTimer) {
+        clearLater(dqPressTimer);
+        dqPressTimer = null;
+      }
+      dqPressAt = 0;
+      dqPressTries = 0;
 
       const until = blockUntil();
       if (until > Date.now()) return until;
@@ -16262,6 +16405,9 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       dqPressTimer = later(() => {
         dqPressTimer = null;
+        // El aviso puede haber cambiado a «Too Many Disqualifications» mientras
+        // esperabamos: ese cierre ya no vale y no se pulsa nada.
+        if (blockUntil() > Date.now()) return;
         // El modal puede haberse repintado mientras se esperaba: se busca de
         // nuevo, en vez de pulsar el nodo viejo (que ya no esta en el documento).
         const fresh = dqButton();
@@ -17442,19 +17588,18 @@ All of this only aims at believable statistics. It is your call and your risk.
       // No se para el bot (una parada pegajosa era la que dejaba al script mudo
       // para siempre): se abre un hueco largo y el bucle vuelve solo.
       if (looksDqBlocked(text)) {
-        if (!dqBlockedNoted) {
-          dqBlockedNoted = true;
-          // Un bloqueo detras de otro alarga la espera: si el primero no basto,
-          // repetir los mismos 15 min solo gasta el dia.
-          const stage = Math.max(0, Number(disk.get(DQ_BLOCK_STAGE, 0)) || 0);
-          const ms = dqBlockWaitMs(stage);
-          disk.set(DQ_BLOCK_STAGE, String(Math.min(stage + 1, DQ_BLOCK_STAGE_MAX)));
-          session.breakUntil = Math.max(session.breakUntil, Date.now() + ms);
-          saveCounters();
-          log(`The site blocked the account for too many disqualifications. Backing off ${Math.round(ms / 60000)} min${stage ? ` (block ${stage + 1} in a row)` : ''}; the bot checks again by itself.`);
-          beep('block');
-          updatePanel();
+        const until = siteBlockedUntil();
+        if (!until || until > Date.now()) {
+          if (!dqBlockedNoted) {
+            dqBlockedNoted = true;
+            rememberFrameDqBlock();
+          }
+          return;
         }
+
+        // La espera vencio: se abandona el aviso por el garaje para que el
+        // siguiente intento sea una carrera nueva, no un clic sobre el modal.
+        if (clickByText(['go to your garage', 'view garage', 'your garage'])) notifyTopNeedGarage();
         return;
       }
 
