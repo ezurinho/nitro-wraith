@@ -8964,14 +8964,6 @@ All of this only aims at believable statistics. It is your call and your risk.
         .ghlink:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
         .ghlink[hidden] { display: none !important; }
         .ghlink svg { width: 10px; height: 10px; display: block; }
-        .upd { all: unset; flex: none; cursor: pointer; padding: 4px 7px; border-radius: 7px;
-               font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
-               letter-spacing: .08em; text-transform: uppercase; color: #20160a;
-               background: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 70%, #fff 30%);
-               box-shadow: 0 0 12px -4px var(--warn); }
-        .upd[hidden] { display: none; }
-        .upd:hover { filter: brightness(1.08); }
-        .upd:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
         .who i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
         .iconbtn { all: unset; flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; cursor: pointer; color: var(--dim); background: rgba(255, 255, 255, .04); border: 1px solid var(--line); transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
         .iconbtn:hover { color: var(--acc-2); background: var(--acc-dim); border-color: var(--line-strong); }
@@ -9321,7 +9313,6 @@ All of this only aims at believable statistics. It is your call and your risk.
         .chips-row { flex-wrap: wrap; row-gap: 5px; padding: 0 11px 9px; }
         .pace, .mode, .cap { padding: 4px 7px; border-radius: 6px; font-size: 8px; letter-spacing: .08em; }
         .cap { flex: 0 1 auto; }
-        .upd { margin-left: auto; }
 
         .main { border-top-color: var(--line); }
         .rail { padding: 8px 5px; background: transparent; }
@@ -14077,14 +14068,6 @@ All of this only aims at believable statistics. It is your call and your risk.
                   color: var(--acc-2); background: var(--acc-dim);
                   border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
                   transition: color .2s ease, background .2s ease, border-color .2s ease; }
-          .upd { all: unset; flex: none; cursor: pointer; padding: 4px 7px; border-radius: 7px;
-                 font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
-                 letter-spacing: .08em; text-transform: uppercase; color: #20160a;
-                 background: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 70%, #fff 30%);
-                 box-shadow: 0 0 12px -4px var(--warn); }
-          .upd[hidden] { display: none; }
-          .upd:hover { filter: brightness(1.08); }
-          .upd:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
           .fold { all: unset; flex: none; display: grid; place-items: center;
                   width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
                   font: 800 13px/1 ui-monospace, monospace; color: var(--dim);
@@ -14249,7 +14232,6 @@ All of this only aims at believable statistics. It is your call and your risk.
             </span>
             <span><b class="t">NITRO WRAITH</b><span class="s" data-f="sub">garage · queue</span></span>
             <span class="mode" role="status" aria-live="polite" title="Always AUTO: it starts and re-arms by itself. To stop it, use Stop / Esc in the race.">AUTO</span>
-            <button class="upd" type="button" data-f="update" hidden>update</button>
             <button class="fold" type="button" data-f="fold" aria-expanded="true" aria-label="Fold the garage panel" title="Fold the garage panel (Alt+G)">−</button>
           </div>
           <div class="rows">
@@ -14317,7 +14299,6 @@ All of this only aims at believable statistics. It is your call and your risk.
         nextRow: root.querySelector('[data-f="nextRow"]'),
         next: root.querySelector('[data-f="next"]'),
         theme: root.querySelector('[data-f="theme"]'),
-        update: root.querySelector('[data-f="update"]'),
         fold: root.querySelector('[data-f="fold"]'),
         renewedRow: root.querySelector('[data-f="renewedRow"]'),
         renewed: root.querySelector('[data-f="renewed"]'),
@@ -14739,18 +14720,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     function paintGaragePanel() {
       if (!qpanel) return;
 
-      paintUpdateBadge(qpanel.update);
       paintUpdateHealth();
-      if (qpanel.update && qpanel.update.dataset.bound !== '1') {
-        qpanel.update.dataset.bound = '1';
-        qpanel.update.addEventListener('pointerdown', (event) => event.stopPropagation());
-        qpanel.update.addEventListener('click', (event) => {
-          event.stopPropagation();
-          openUpdateDownload();
-        });
-        checkForUpdate();
-        setInterval(checkForUpdate, UPDATE_RETRY_MS);
-      }
 
       const signed = signedIn();
       const armed = signed && isArmed();

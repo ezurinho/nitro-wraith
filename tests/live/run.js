@@ -3888,22 +3888,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && /cleared manually at/.test(garageStop.cleared.title)
         && garageStop.afterHidden === true, garageStop);
 
-    // Aviso de version nueva en el garaje, sin tocar la red: se siembra el
-    // resultado que dejaria el fetch del meta y se pinta el panel.
+    // El aviso de version vive una sola vez, en la cabecera del panel de carrera.
+    // El garaje ya no crea un segundo boton que abria la misma descarga.
     const garageUpdate = await cdp.evaluate(`(() => {
       const root = document.getElementById('nt-queue-panel').shadowRoot;
-      const badge = root.querySelector('[data-f="update"]');
-      localStorage.setItem('nta:update', JSON.stringify({ at: Date.now(), latest: '99.0.0' }));
-      window.__ntaDebug.garagePaint();
-      const shown = { hidden: badge.hidden, display: getComputedStyle(badge).display, text: badge.textContent, title: badge.title };
-      localStorage.removeItem('nta:update');
-      window.__ntaDebug.garagePaint();
-      return { shown, hidden: badge.hidden };
+      return { badges: root.querySelectorAll('[data-f="update"], .upd').length };
     })()`);
-    check('the garage panel flags a newer Gist version',
-      garageUpdate.shown.hidden === false && garageUpdate.shown.display !== 'none'
-        && garageUpdate.shown.text === 'update' && /99\.0\.0/.test(garageUpdate.shown.title)
-        && garageUpdate.hidden === true, garageUpdate);
+    check('the garage panel does not duplicate the header update control',
+      garageUpdate.badges === 0, garageUpdate);
 
     // Los tres Daily Challenges en el garaje, con su reinicio. Se siembra el
     // mismo estado que deja el juego y se fuerza la cache de 5 s.
