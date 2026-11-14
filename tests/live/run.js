@@ -298,6 +298,15 @@ async function capturePanelThemes(cdp, appUrl) {
       progress: 34, xp: 76701, currentXp: 70000, nextXp: 90000,
       endsAt: now + 27 * 86400000, endsText: 'Nov 29',
     }));
+    const today = new Date();
+    const todayKey = today.getFullYear() + '-'
+      + String(today.getMonth() + 1).padStart(2, '0') + '-'
+      + String(today.getDate()).padStart(2, '0');
+    w.localStorage.setItem('ntQueue:todayPart:shot', JSON.stringify({
+      date: todayKey, races: 128, sumWpm: 14080, sumTarget: 14080,
+      boxes: 2, dq: 0, xp: 1240, clean: 120, firstAt: now - 7200000,
+      lastAt: now, dqAt: 0, updatedAt: now,
+    }));
     d.patchSession({
       races: 128, raceLimit: 310, xp: 1240,
       chars: 550, correct: 543, errors: 7,
