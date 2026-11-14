@@ -14859,9 +14859,11 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       // El Stop no es un interruptor: una vez parado, Resume es la salida. Se
       // desactiva para que dos clics seguidos no confundan la parada con un
-      // arranque ni dejen la marca a medias.
+      // arranque ni dejen la marca a medias. Con una carrera viva manda su
+      // estado, no la marca vieja: si se reanudo a mano, el boton debe poder
+      // pararla otra vez.
       const liveTyper = typerState();
-      const alreadyStopped = stoppedRecently() || Boolean(liveTyper && liveTyper.stopped);
+      const alreadyStopped = liveTyper ? Boolean(liveTyper.stopped) : stoppedRecently();
       qpanel.stopBtn.disabled = alreadyStopped;
       qpanel.stopBtn.title = alreadyStopped
         ? 'Already stopped; use Resume or Alt+A to start again'
