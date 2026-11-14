@@ -276,7 +276,7 @@ async function capturePanelThemes(cdp, appUrl) {
   await sleep(300);
 
   await cdp.send('Emulation.setDeviceMetricsOverride', {
-    width: 520, height: 1100, deviceScaleFactor: 2, mobile: false,
+    width: 520, height: 1200, deviceScaleFactor: 2, mobile: false,
   });
   await sleep(180);
 
@@ -289,8 +289,8 @@ async function capturePanelThemes(cdp, appUrl) {
     const panel = root && root.querySelector('.panel');
     if (!d || !panel) return { ready: false };
 
-    frame.style.height = '1100px';
-    w.document.body.style.minHeight = '1100px';
+    frame.style.height = '1200px';
+    w.document.body.style.minHeight = '1200px';
     const now = Date.now();
     w.localStorage.setItem('autoTyperSeason', JSON.stringify({
       v: 2, at: now, auto: true, source: 'user', seasonID: 73,
@@ -317,6 +317,9 @@ async function capturePanelThemes(cdp, appUrl) {
       const collapse = root.querySelector('.collapse');
       if (collapse) collapse.click();
     }
+    // La barra compacta evita que el estado vivo (WPM y precision) empuje el
+    // texto del pie fuera del ancho fijo del panel en la captura.
+    panel.dataset.foot = 'compact';
     // La pagina del harness queda en segundo plano durante la captura: se pide
     // el repintado forzado para que el panel no dependa de document.hidden.
     d.paint(true);
@@ -337,7 +340,7 @@ async function capturePanelThemes(cdp, appUrl) {
         return true;
       })()`);
       if (!changed) throw new Error(`theme button not found: ${theme}`);
-      await sleep(180);
+      await sleep(300);
 
       const clip = await cdp.evaluate(`(() => {
         const frame = document.querySelector('iframe');
