@@ -7,7 +7,8 @@
 <p align="center">
   <strong>Human pace. Zero fast mode.</strong><br>
   A Tampermonkey userscript for one Nitro Type account: an automatic race queue,
-  calibrated typing, and a live panel that shows exactly what is happening.
+  typing calibrated to your own WPM average, and a live panel that shows exactly
+  what is happening.
 </p>
 
 <p align="center">
@@ -54,17 +55,25 @@
 ## The panel
 
 <p align="center">
-  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: 110.0 WPM, 98.7% accuracy, season progress and session controls">
+  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: 107.0 WPM, 98.7% accuracy, an AUTO pace badge with 110 average and 230 top, season progress and session controls">
 </p>
 
 <p align="center"><sub>A real capture from the browser harness, with seeded demo values. The panel lives in the bottom-right corner of the game.</sub></p>
 
 The panel is the control surface, not a black box:
 
-- **Live view:** WPM, accuracy, target range, race count, session average, trim, and the game HUD.
+- **Live view:** WPM, accuracy, the account-backed AUTO pace badge, target range, race count, session average, result, and the game HUD.
 - **Garage queue:** what it is waiting for, the next race, Mystery Box timing, and a one-line reason for every hold.
 - **TUNE:** pace profile, limits, breaks, stickers, sound, and the safety guard.
 - **LOG / INFO:** history, season snapshot, diagnostics, and the keyboard map.
+
+### Pace that looks like you
+
+The first start reads the average and top WPM that the site already stores for
+the account, then the stats API refreshes it. A 30 WPM account gets a 26–34 WPM
+range; a 43 WPM account gets 37–49. The target is the average, not the top: the
+best WPM is shown as a reference, while every race is drawn around the player's
+normal pace. Nothing starts at a generic 100+ WPM.
 
 ### Six themes
 
@@ -79,7 +88,7 @@ The panel is the control surface, not a black box:
 | Feature | What it does |
 | --- | --- |
 | **Race loop** | Chains races from the garage and results screen with human delays. Re-arms after a stop. |
-| **Typing** | Calibrated 104–117 WPM under a hard 120 WPM ceiling, with accuracy kept at 96% or above. |
+| **Typing** | Reads your account average and top WPM, then races around that average (30 WPM stays near 30, 43 near 43) under a hard 120 WPM ceiling. Accuracy stays at the 96% reward floor or above. |
 | **Rewards** | Claims the Mystery Box, closes daily challenges, and uses stickers when the settings allow it. |
 | **Session care** | Renews the session when needed. Never types a username or password, and never solves a CAPTCHA. |
 | **Limits** | Session races, time, XP, active hours, and daily race/XP budgets. |

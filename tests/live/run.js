@@ -250,6 +250,19 @@ async function captureShot(cdp, file, clip) {
 async function capturePanelThemes(cdp, appUrl) {
   if (!SHOT_DIR) return;
 
+  // La captura documenta la funcion nueva: una cuenta de 110 WPM con top 230.
+  // Se deja la calibracion y el perfil en el almacenamiento antes de navegar
+  // para que el panel arranque como en una instalacion real, sin esperar al API.
+  await cdp.evaluate(`(() => {
+    localStorage.setItem('autoTyperCalibratedRange', JSON.stringify({ min: 103, max: 117 }));
+    localStorage.setItem('persist:nt', JSON.stringify({
+      user: JSON.stringify({
+        avgSpeed: 110, avgAcc: 98.7, highestSpeed: 230, racesPlayed: 48756,
+      }),
+    }));
+    return true;
+  })()`);
+
   await cdp.send('Page.navigate', { url: appUrl });
   await waitFor(async () => {
     try {
@@ -309,6 +322,7 @@ async function capturePanelThemes(cdp, appUrl) {
     }));
     d.patchSession({
       races: 128, raceLimit: 310, xp: 1240,
+      sumRaces: 128, sumWpm: 13696, sumTarget: 13696, sumAcc: 12633.6,
       chars: 550, correct: 543, errors: 7,
       startedAt: now - 60000, endedAt: 0, clockDone: true, typing: true,
       stopped: 0, closed: 0,
@@ -335,6 +349,10 @@ async function capturePanelThemes(cdp, appUrl) {
     return { ready: true, theme: panel.dataset.theme, races: d.session().races };
   })()`);
   if (!seeded.ready) throw new Error('the panel is not ready for screenshots');
+  // La fila `today` cachea 1.5 s; se deja pasar la cache y se repinta antes de
+  // fotografiar para no ensenar un guion junto a una sesion viva.
+  await sleep(1700);
+  await cdp.evaluate(`(() => document.querySelector('iframe').contentWindow.__ntaDebug.paint(true))()`);
 
   const themes = ['carbon', 'aurora', 'sunset', 'ice', 'violet', 'rgb'];
   try {
@@ -358,7 +376,11 @@ async function capturePanelThemes(cdp, appUrl) {
         const panel = root.querySelector('.panel');
         if (!panel) return null;
         const status = root.querySelector('[data-field="status"]');
-        if (status) status.textContent = 'Live · target 111 WPM';
+        if (status) status.textContent = 'Live · auto pace';
+        const guardRow = root.querySelector('[data-field="guard"]');
+        if (guardRow && guardRow.closest('.row')) {
+          guardRow.closest('.row').style.setProperty('display', 'none', 'important');
+        }
         const f = frame.getBoundingClientRect();
         const r = panel.getBoundingClientRect();
         return {
@@ -464,6 +486,7 @@ const READ = `(() => {
     cal: txt('[data-field="cal"]'),
     calAcc: txt('[data-field="calAcc"]'),
     calAccount: txt('[data-field="calAccount"]'),
+    paceSource: txt('[data-field="paceSource"]'),
     chCount: txt('[data-field="chCount"]'),
     chRows: q('[data-field="chList"]') ? q('[data-field="chList"]').children.length : -1,
     raceLimit: txt('[data-field="limit"]'),
@@ -2336,7 +2359,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     w.fetch = (url, options) => {
       if (String(url).includes('/api/v2/stats/summary')) {
         return Promise.resolve(new w.Response(
-          JSON.stringify({ success: true, data: { stats: { wpm: 112.4, accuracy: 98.7 } } }),
+          JSON.stringify({ success: true, data: { stats: {
+            wpm: 112.4, accuracy: 98.7, highestSpeed: 230, racesPlayed: 48756,
+          } } }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         ));
       }
@@ -2351,6 +2376,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         range: shadow.querySelector('[data-field="calWpm"]').textContent,
         acc: shadow.querySelector('[data-field="calAcc"]').textContent,
         account: shadow.querySelector('[data-field="calAccount"]').textContent,
+        paceSource: shadow.querySelector('[data-field="paceSource"]').textContent,
         stored: JSON.parse(w.localStorage.getItem('autoTyperCalibratedRange') || 'null'),
         storedAcc: JSON.parse(w.localStorage.getItem('autoTyperCalibratedAccuracy') || 'null'),
         logWpm: shadow.querySelector('[data-field="calLogWpm"]').textContent,
@@ -2370,6 +2396,21 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     calibration.logWpm === '106-118 WPM' && calibration.logWhen !== 'never', calibration);
   check('panel shows the account average',
     calibration.account === '112.4 WPM · 98.7%', calibration);
+  check('Live shows the auto pace and the account top WPM',
+    calibration.paceSource === 'auto · 112 avg · 230 top', calibration.paceSource);
+
+  // La media de una cuenta principiante tambien manda: 30 WPM no puede caer
+  // en el 40+ del suelo viejo, y 43 WPM tiene que quedar centrado en 43.
+  const paceMath = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    return { low: d.paceRangeFor(30), mid: d.paceRangeFor(43), high: d.paceRangeFor(112) };
+  })()`);
+  check('the target range follows a beginner account average',
+    paceMath.low && paceMath.low.min === 26 && paceMath.low.max === 34, paceMath.low);
+  check('the target range follows the 43 WPM example',
+    paceMath.mid && paceMath.mid.min === 37 && paceMath.mid.max === 49, paceMath.mid);
+  check('the target range still wraps a 112 WPM account',
+    paceMath.high && paceMath.high.min === 106 && paceMath.high.max === 118, paceMath.high);
 
   // Respaldo: si el API responde 200 sin medias (solo contadores), la media
   // sale de `persist:nt`, que es lo que el garaje pinta en el perfil.
@@ -4771,6 +4812,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const next = await follower.evaluate(roleRead);
       return Boolean(next.role) && next.role.primary === true;
     }, 5000, 'the other tab to take the lease');
+    // La pestaña que solto el turno puede tardar un latido en pintar su propio
+    // rol: se espera a que se declare standby antes de comparar los dos estados.
+    await waitFor(async () => {
+      const next = await leader.tab.evaluate(roleRead);
+      return Boolean(next.role) && next.role.primary === false && next.role.standby === true;
+    }, 5000, 'the old owner to stand by');
 
     const afterStop = await follower.evaluate(roleRead);
     const stopped = await leader.tab.evaluate(roleRead);

@@ -4,7 +4,7 @@
 // @version      8.14.9
 // @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
 // @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
-// @description  Human-paced Nitro Type racer for one account: calibrated 104-117 WPM under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
+// @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
 // @homepageURL  https://github.com/ezurinho/nitro-wraith
 // @supportURL   https://github.com/ezurinho/nitro-wraith/issues
 // @author       NITRO WRAITH
@@ -59,9 +59,11 @@ the chip always reads AUTO and a waiting bot says "waiting" in amber. The queue
 re-arms by itself when the stop hold expires, so the bot never waits for a click
 to get going again.
 
-Since 7.13.0 the middle pace profile is BALANCED (104-117 WPM, the account's own
-range). It used to be called "normal"; a value saved under that old name is read
-as balanced, so the chip and the TUNE control never show the word again.
+The middle pace profile is BALANCED: the account's own average, read from the
+site profile and the stats API. Soft and fast move half a range below or above
+it, never to a fixed 100+ range. It used to be called "normal"; a value saved
+under that old name is read as balanced, so the chip and the TUNE control never
+show the word again.
 
 The panel's WPM uses the same clock as Nitro Type. A race starts when the light
 goes out and the first accepted key lands slightly later, so the start is set
@@ -278,9 +280,9 @@ bot signature. The panel can be dragged by its header and the position is
 remembered across reloads.
 
 Pace profiles: the "LEGIT" chip is a button now and cycles three targets, all of
-them inside the calibrated envelope and under the hard ceiling - soft (98-108
-WPM, for a fresh account), balanced (the account's own 104-117) and fast
-(110-119). Only the range the session target is drawn from changes; the cadence
+     them inside the calibrated envelope and under the hard ceiling - soft (half a
+     range below the account average), balanced (the account average) and fast
+     (half a range above). Only the range the session target is drawn from changes; the cadence
 is the same human one in all three, and the choice is saved in localStorage. The
 same three sit in the TUNE view as a segmented control.
 
@@ -394,13 +396,14 @@ Ritmo (dentro de AUTO): SOLO LEGIT.
              reference text, so the structure does not move the measured WPM;
              errors come from a fixed per-race budget (the ones that fit the
              target accuracy) and the pace auto-calibrates itself (+-10%).
-             Target: 104-117 WPM (profile balanced), around the account's average.
-             On top of that, a hard ceiling of 120 WPM is enforced at three
-             levels: the planner never plans above it, a live governor holds the
-             race average under it key by key, and the guard aborts if the
-             game's HUD ever shows more. The soft (98-108) and fast (110-119)
-             profiles move only that target range, never the cadence; the ceiling
-             holds for all three.
+             Target: the account's own recent average (profile balanced), with a
+             proportional range (a 30 WPM account races around 30, a 110 WPM
+             account around 110). On top of that, a hard ceiling of 120 WPM is
+             enforced at three levels: the planner never plans above it, a live
+             governor holds the race average under it key by key, and the guard
+             aborts if the game's HUD ever shows more. Soft and fast move that
+             range down or up, never to a fixed fast range; the ceiling holds
+             for all three.
 
   There is no fast pace in the old sense. The BLATANT mode was removed completely
   in 5.0.0 and there is no way to bring it back: no key, no saved value and no
@@ -432,11 +435,11 @@ All of this only aims at believable statistics. It is your call and your risk.
    * 1. CONFIGURATION
    * ========================================================================== */
   const CONFIG = {
-    // Calibrated against the account's own profile (nitrotype.com/racer/schoolaccezur,
-    // 2026-10-26): 110 WPM historical average over 44,575 races, 97% accuracy and
-    // the nitro used in almost every race. Targets are drawn around that average
-    // rather than over a generic range: twelve races in a row at 120-125 would be
-    // an anomalous block against 44k races at 110.
+    // Este es solo el rango de respaldo cuando el sitio todavia no ha dejado
+    // ninguna media en disco. En una instalacion normal manda el perfil de la
+    // cuenta: `persist:nt` trae avgSpeed/highestSpeed desde el primer arranque y
+    // el API de stats lo refresca despues. Los objetivos se sortean alrededor de
+    // ESA media, no de un 104-117 fijo que haria cantar a una cuenta de 30 WPM.
     //
     // hardCap is a ceiling for the whole script, not a suggestion: the planner
     // never plans above it, the live governor slows a race down if its running
@@ -448,14 +451,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     sessions: 10,
 
     // Auto-calibracion del perfil balanced contra la media real de la cuenta
-    // (GET /api/v2/stats/summary, la misma sesion que usa el garaje). No es un
-    // modo nuevo: solo mueve el centro del rango para que no se quede viejo si
-    // la cuenta sube o baja de ritmo. El techo duro manda igual.
+    // (GET /api/v2/stats/summary + persist:nt desde el primer arranque). No es
+    // un modo nuevo: mueve el centro y el ancho del rango para que una cuenta
+    // de 30 WPM no empiece a 104. El mejor WPM de la cuenta se lee y se pinta
+    // como referencia, pero no se usa como objetivo: el objetivo es su media.
     calibration: {
       auto: true,
       refreshMs: 21600000,   // 6 h entre lecturas
-      halfWidth: 6,          // rango total 13 WPM, como el 104-117 de origen
-      minWpm: 60,
+      halfWidth: 6,          // ancho maximo del rango; con 43 WPM da 37-49
+      minWpm: 15,            // cuentas principiantes tambien son validas
       timeoutMs: 8000,
     },
 
@@ -1824,7 +1828,6 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Media de precision leida del API. `null` = nunca se ha leido y manda el
   // 96-98 escrito a mano.
   let accountStats = null;
-  let accountStatsRead = false;
 
   let calibratedAccuracy = (() => {
     try {
@@ -1836,15 +1839,49 @@ All of this only aims at believable statistics. It is your call and your risk.
     return null;
   })();
 
-  function paceRange(name = paceProfile) {
-    // El perfil balanced sigue la media de la cuenta cuando la auto-calibracion
-    // esta encendida; soft y fast se quedan como estaban.
-    const tier = (name === 'balanced' && CONFIG.calibration.auto && calibratedRange)
-      || PACE_PROFILES[name]
-      || PACE_PROFILES.balanced;
+  // Un rango simetrico alrededor de la media real. La mitad crece con el ritmo
+  // (2 WPM en una cuenta de 15, 6 a partir de 86) para que la media de los
+  // objetivos sea la media de la persona, sin convertir cada carrera en una
+  // copia exacta. El techo duro sigue mandando.
+  function wpmRangeFor(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) return null;
+
     const cap = Number.isFinite(CONFIG.wpm.hardCap) ? CONFIG.wpm.hardCap : 120;
-    const max = clamp(tier.max, 40, cap);
-    const min = clamp(tier.min, 40, max);
+    const floor = Math.max(1, Number(CONFIG.calibration.minWpm) || 15);
+    const center = clamp(Math.round(number), floor, cap - 1);
+    const half = clamp(Math.round(center * 0.14), 2, Math.max(2, CONFIG.calibration.halfWidth | 0));
+    let min = clamp(center - half, floor, cap);
+    let max = clamp(center + half, floor, cap);
+    if (max - min < 6) {
+      const middle = (min + max) / 2;
+      min = clamp(Math.floor(middle - 3), floor, cap);
+      max = clamp(min + 6, floor, cap);
+    }
+    return { min, max };
+  }
+
+  function paceRange(name = paceProfile) {
+    const cap = Number.isFinite(CONFIG.wpm.hardCap) ? CONFIG.wpm.hardCap : 120;
+    const floor = Math.max(1, Number(CONFIG.calibration.minWpm) || 15);
+
+    // Con una media de cuenta, los tres perfiles se mueven alrededor de ELLA:
+    // soft baja media anchura, fast sube media anchura y balanced se queda en
+    // el centro. Antes soft/fast eran 98-108/110-119 fijos: una cuenta de 43
+    // que tocara fast saltaba a 90+ y eso es justo lo que hay que evitar.
+    if (CONFIG.calibration.auto && calibratedRange) {
+      const width = Math.max(0, calibratedRange.max - calibratedRange.min);
+      const shift = name === 'soft'
+        ? -Math.round(width / 2)
+        : name === 'fast' ? Math.round(width / 2) : 0;
+      const max = clamp(calibratedRange.max + shift, floor, cap);
+      const min = clamp(calibratedRange.min + shift, floor, max);
+      return { min: Math.min(min, max), max };
+    }
+
+    const tier = PACE_PROFILES[name] || PACE_PROFILES.balanced;
+    const max = clamp(tier.max, floor, cap);
+    const min = clamp(tier.min, floor, max);
     return { min: Math.min(min, max), max };
   }
 
@@ -1898,6 +1935,25 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.challenges.enabled = prefs.challenges;
     CONFIG.calibration.auto = prefs.calibration;
     CONFIG.challenges.selector = disk.get(KEYS.challengeSelector, '') || '';
+
+    // Primera foto SIN esperar al fetch: el garaje ya dejo avgSpeed y
+    // highestSpeed en persist:nt. Asi el primer objetivo de una instalacion
+    // nueva ya sale de la media del jugador y nunca del 104-117 de respaldo.
+    if (CONFIG.calibration.auto) {
+      const persisted = readPersistedUser();
+      const range = wpmRangeFor(persisted && persisted.wpm);
+      if (range) {
+        const savedCenter = calibratedRange
+          ? (calibratedRange.min + calibratedRange.max) / 2 : null;
+        // Si la media guardada se alejo de la cuenta (otra cuenta, o el
+        // jugador mejoro), se corrige ya; no se espera a las 6 h del API.
+        if (!calibratedRange || Math.abs(savedCenter - persisted.wpm) > 8) {
+          calibratedRange = range;
+          disk.set(KEYS.calibratedRange, JSON.stringify(range));
+        }
+        if (!accountStats) accountStats = persisted;
+      }
+    }
 
     const range = paceRange();
     CONFIG.wpm.min = range.min;
@@ -2035,9 +2091,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       const user = JSON.parse(raw.user);
       const wpm = Number(user.avgSpeed);
       const accuracy = Number(user.avgAcc);
+      const bestWpm = Number(user.highestSpeed !== undefined ? user.highestSpeed : user.bestSpeed);
+      const races = Number(user.racesPlayed !== undefined ? user.racesPlayed : user.races);
       return {
-        wpm: Number.isFinite(wpm) && wpm >= 20 && wpm <= 300 ? wpm : null,
+        wpm: Number.isFinite(wpm) && wpm >= 15 && wpm <= 300 ? wpm : null,
         accuracy: Number.isFinite(accuracy) && accuracy >= 50 && accuracy <= 100 ? accuracy : null,
+        bestWpm: Number.isFinite(bestWpm) && bestWpm >= 15 && bestWpm <= 400 ? bestWpm : null,
+        races: Number.isFinite(races) && races >= 0 ? Math.round(races) : null,
+        source: 'persist:nt',
       };
     } catch {
       return null;
@@ -2068,17 +2129,23 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       const body = await response.json();
       const data = (body && (body.data || body.results)) || body;
-      const wpm = pickAccountStat(data, ['wpm', 'avgWpm', 'averageWpm', 'avg_wpm', 'average_wpm', 'speed'], 20, 300);
+      const wpm = pickAccountStat(data, ['wpm', 'avgWpm', 'averageWpm', 'avg_wpm', 'average_wpm', 'speed'], 15, 300);
       const accuracy = pickAccountStat(data, ['accuracy', 'acc', 'avgAccuracy', 'averageAccuracy', 'avg_accuracy'], 50, 100);
+      // El resumen tampoco tiene un contrato publico estable. Se buscan los
+      // nombres que usa el perfil; si faltan, persist:nt los completa.
+      const persisted = readPersistedUser();
+      const bestWpm = pickAccountStat(data, ['bestWpm', 'highestSpeed', 'highestWpm', 'bestSpeed', 'topWpm', 'topSpeed'], 15, 400)
+        || (persisted && persisted.bestWpm) || null;
+      const races = pickAccountStat(data, ['racesPlayed', 'totalRaces', 'races'], 0, 100000000)
+        || (persisted && persisted.races) || null;
       if (wpm || accuracy) {
-        accountStats = { wpm, accuracy, source: 'api' };
-        return { wpm, accuracy, reason: null };
+        accountStats = { wpm, accuracy, bestWpm, races, source: 'api' };
+        return { wpm, accuracy, bestWpm, races, reason: null };
       }
 
-      const persisted = readPersistedUser();
       if (persisted && (persisted.wpm || persisted.accuracy)) {
-        accountStats = { wpm: persisted.wpm, accuracy: persisted.accuracy, source: 'persist:nt' };
-        return { wpm: persisted.wpm, accuracy: persisted.accuracy, reason: null, source: 'persist:nt' };
+        accountStats = persisted;
+        return { ...persisted, reason: null };
       }
       return failed('no average in the response');
     } catch (error) {
@@ -2088,25 +2155,22 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
-  // Coloca el centro del rango balanced en la media real, con el mismo ancho que
-  // el rango calibrado a mano. Nunca pasa del techo duro.
+  // Coloca el centro del rango balanced en la media real de la cuenta. El
+  // ancho lo decide wpmRangeFor; el techo duro se aplica alli.
   function applyCalibration(stats) {
-    const cap = Number.isFinite(CONFIG.wpm.hardCap) ? CONFIG.wpm.hardCap : 120;
     const beforeWpm = { min: CONFIG.wpm.min, max: CONFIG.wpm.max };
     const beforeAcc = { min: CONFIG.accuracy.min, max: CONFIG.accuracy.max };
 
     if (stats.wpm) {
-      const center = clamp(Math.round(stats.wpm), CONFIG.calibration.minWpm, cap - 1);
-      const half = Math.max(3, CONFIG.calibration.halfWidth | 0);
-      let max = clamp(center + half, 40, cap);
-      let min = clamp(center - half, 40, max);
-      if (max - min < 6) min = Math.max(40, max - 6);
-      if (max - min < 6) max = Math.min(cap, min + 6);
-
-      calibratedRange = { min, max };
-      disk.set(KEYS.calibratedRange, JSON.stringify(calibratedRange));
-      log(`Pace auto-calibrated: account average ${stats.wpm.toFixed(1)} WPM -> ${min}-${max}.`);
-      setPaceProfile(paceProfile, { force: true });
+      const range = wpmRangeFor(stats.wpm);
+      if (range) {
+        calibratedRange = range;
+        disk.set(KEYS.calibratedRange, JSON.stringify(calibratedRange));
+        const top = Number(stats.bestWpm) > 0 ? ` (top ${Number(stats.bestWpm).toFixed(0)} WPM)` : '';
+        const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
+        log(`Pace auto-calibrated: account average ${Number(stats.wpm).toFixed(1)} WPM${top}${count} -> ${range.min}-${range.max}.`);
+        setPaceProfile(paceProfile, { force: true });
+      }
     }
 
     if (stats.accuracy) {
@@ -2188,10 +2252,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   function paintCalibration() {
     if (!panel.refs || !panel.refs.cal) return;
 
-    if (!accountStats && !accountStatsRead) {
-      accountStatsRead = true;
-      accountStats = readPersistedUser();
-    }
+    if (!accountStats) accountStats = readPersistedUser();
     const accountText = accountStats && (accountStats.wpm || accountStats.accuracy)
       ? [
         accountStats.wpm ? `${accountStats.wpm.toFixed(1)} WPM` : '',
@@ -2206,6 +2267,26 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.calWpm, wpmText);
     setText(panel.refs.calAcc, accText);
     setText(panel.refs.calAccount, accountText);
+
+    // La chapa de la vista Live: el usuario ve de donde sale su objetivo sin
+    // abrir TUNE. La media manda; el top se ensena como referencia.
+    if (panel.refs.paceSource) {
+      const average = accountStats && Number(accountStats.wpm) > 0
+        ? Math.round(Number(accountStats.wpm)) : null;
+      const top = accountStats && Number(accountStats.bestWpm) > 0
+        ? Math.round(Number(accountStats.bestWpm)) : null;
+      const label = !auto
+        ? 'manual pace'
+        : average
+          ? `auto · ${average} avg${top ? ` · ${top} top` : ''}`
+          : calibratedRange
+            ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm`
+            : 'auto · reading account';
+      setText(panel.refs.paceSource, label);
+      panel.refs.paceSource.title = auto
+        ? `Pace target ${wpmText} WPM, centred on this account's average${top ? `; account top ${top} WPM` : ''}. Read automatically from the site profile and the stats API.`
+        : `Manual pace: target ${wpmText} WPM. Auto-calibration is off.`;
+    }
 
     // La tarjeta de la vista LOG: cuando se leyo y que rango dejo. Se pinta
     // aqui porque este es el unico sitio que corre al calibrar y al crear el
@@ -6617,7 +6698,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       await preciseSleep(nextDelay(content, index));
 
       // Hard ceiling: if this race is running faster than CONFIG.wpm.hardCap, hold
-      // here until its average is legal again. At the calibrated 104-117 WPM this
+      // here until its average is legal again. At the calibrated account pace this
       // never triggers; it exists so that no combination of settings, lessons or
       // calibration can ever push a race past the cap.
       const capWait = paceCapWait();
@@ -7381,6 +7462,12 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.paceProfile = () => paceProfile;
   window.__ntaDebug.paceSignature = () => disk.get(`${KEYS.wpmSeries}:signature`, '');
   window.__ntaDebug.setPaceProfile = (name) => setPaceProfile(String(name || ''), { persist: false });
+  window.__ntaDebug.paceRangeFor = (wpm) => wpmRangeFor(wpm);
+  window.__ntaDebug.autoPace = () => ({
+    range: paceRange(),
+    account: accountStats ? { ...accountStats } : null,
+    calibrated: calibratedRange ? { ...calibratedRange } : null,
+  });
   window.__ntaDebug.progressWpm = (progress) => progressWpm(progress);
   window.__ntaDebug.lastProgress = () => session.lastProgress || null;
   window.__ntaDebug.liveCompareCsv = () => {
@@ -7465,7 +7552,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Mueve los contadores de la tanda sin esperar a que lleguen carreras. Solo
   // escribe en memoria: no guarda el resumen del dia ni el historico.
   window.__ntaDebug.patchSession = (patch = {}) => {
-    for (const key of ['races', 'xp', 'tandaStartedAt', 'raceLimit', 'timeLimit', 'xpLimit', 'dailyRaceLimit', 'dailyXpLimit', 'activeOn', 'activeStart', 'activeEnd', 'nitroRaces', 'nitroCharsTotal', 'lastEndAt']) {
+    for (const key of ['races', 'xp', 'tandaStartedAt', 'raceLimit', 'timeLimit', 'xpLimit', 'dailyRaceLimit', 'dailyXpLimit', 'activeOn', 'activeStart', 'activeEnd', 'nitroRaces', 'nitroCharsTotal', 'lastEndAt', 'sumRaces', 'sumWpm', 'sumTarget', 'sumAcc']) {
       const value = Number(patch[key]);
       if (Number.isFinite(value)) session[key] = Math.max(0, value);
     }
@@ -8735,7 +8822,23 @@ All of this only aims at believable statistics. It is your call and your risk.
         @keyframes nt-sheen { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(100%); } }
 
         /* ---------- filas ---------------------------------------------------- */
+        .auto-pace {
+          display: flex; align-items: center; justify-content: center; gap: 6px;
+          width: max-content; max-width: 100%; margin: 5px auto 0; padding: 3px 8px;
+          border: 1px solid var(--line); border-radius: 999px;
+          background: color-mix(in srgb, var(--acc) 7%, transparent);
+          color: var(--acc-2); font: 600 8px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+        }
+        .auto-pace::before {
+          content: ''; width: 5px; height: 5px; flex: none; border-radius: 50%;
+          background: var(--acc); box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 70%, transparent);
+        }
         .rows { display: grid; gap: 1px; margin-top: 8px; }
+        /* La vista Live ensena lo que se mira de verdad. El resto sigue en el DOM
+           (y en los tooltips) para no romper el contrato del panel, pero no
+           convierte la tarjeta en una lista de telemetria. */
+        .v-stats .live-card .rows .row.secondary { display: none; }
         .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 2.5px 0; font: 500 10.5px/1.45 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); border-bottom: 1px solid rgba(255, 255, 255, .03); }
         .row:last-child { border-bottom: 0; }
         .row span { letter-spacing: .05em; }
@@ -9024,7 +9127,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           <span class="dot"></span>
           <span class="brand">
             <b class="title" data-field="title">NITRO WRAITH</b>
-            <span class="sub">nitro type · <b data-field="ver">v7.0.0</b> · build <b data-field="build">7</b></span>
+            <span class="sub">nitro type · <b data-field="ver">v7.0.0</b></span>
           </span>
           <span class="who" title="Account this pace is calibrated for"><i></i>HUMAN PACE</span>
           <button class="upd" type="button" data-field="update" hidden>update</button>
@@ -9056,7 +9159,7 @@ All of this only aims at believable statistics. It is your call and your risk.
             <!-- ------------------------------ STATS ------------------------- -->
             <section class="view v-stats" id="nt-view-stats" role="tabpanel" aria-label="Live">
               <div class="view-head"><span>Live</span><b>race telemetry</b></div>
-              <div class="card">
+              <div class="card live-card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
                 <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span></div>
                 <div class="hero">
@@ -9064,6 +9167,7 @@ All of this only aims at believable statistics. It is your call and your risk.
                   <i class="sep"></i>
                   <div class="stat"><b data-field="acc">—</b><span>accuracy</span></div>
                 </div>
+                <div class="auto-pace" data-field="paceSource">auto · reading account</div>
                 <div class="prog"><i data-field="progfill"></i></div>
                 <svg class="spark" data-field="accSpark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img" aria-label="Accuracy model delta history: no samples yet.">
                   <line class="spark-zero" x1="0" y1="12" x2="100" y2="12"></line>
@@ -9072,16 +9176,16 @@ All of this only aims at believable statistics. It is your call and your risk.
                 </svg>
                 <div class="rows">
                   <div class="row"><span>target</span><b data-field="target">—</b></div>
-                  <div class="row"><span>race</span><b data-field="progress">—</b></div>
+                  <div class="row race-row secondary" title="Race progress"><span>race</span><b data-field="progress">—</b></div>
                   <div class="row"><span>races</span><b data-field="races">0</b></div>
                   <div class="row day-xp-row" title="XP the game awarded today, read from the same daily summary as the 7-day card"><span>today</span><b data-field="dayXp">—</b></div>
                   <div class="row tanda-row" title="Average of every measured race in this session, not just the ones in the list"><span>session</span><b data-field="tanda">—</b></div>
-                  <div class="row"><span>set</span><b data-field="session">—</b></div>
-                  <div class="row rate-row" title="XP per hour at the current session pace"><span>rate</span><b data-field="rate">—</b></div>
-                  <div class="row nitro-row" title="Nitro this session: races that used it, characters the game typed for you and the time they would have taken at the planned pace"><span>nitro</span><b data-field="nitro">—</b></div>
-                  <div class="row nitro-delta-row" title="Nitro WPM check: races with nitro minus races without it, over the last 10 measured races. Zero or below means the nitro is not lifting the average; positive is a warning"><span>nitro Δ</span><b data-field="nitroDelta">—</b></div>
-                  <div class="row cycle-row" title="Dead time between races: median and best gap from the end of one race to the first key of the next"><span>cycle</span><b data-field="cycle">—</b></div>
-                  <div class="row xp-break-row" title="Last race XP split into place, speed, accuracy and session or other bonuses"><span>xp/race</span><b data-field="xpBreak">—</b></div>
+                  <div class="row secondary" title="Which WPM calibration sample is active"><span>set</span><b data-field="session">—</b></div>
+                  <div class="row rate-row secondary" title="XP per hour at the current session pace"><span>rate</span><b data-field="rate">—</b></div>
+                  <div class="row nitro-row secondary" title="Nitro this session: races that used it, characters the game typed for you and the time they would have taken at the planned pace"><span>nitro</span><b data-field="nitro">—</b></div>
+                  <div class="row nitro-delta-row secondary" title="Nitro WPM check: races with nitro minus races without it, over the last 10 measured races. Zero or below means the nitro is not lifting the average; positive is a warning"><span>nitro Δ</span><b data-field="nitroDelta">—</b></div>
+                  <div class="row cycle-row secondary" title="Dead time between races: median and best gap from the end of one race to the first key of the next"><span>cycle</span><b data-field="cycle">—</b></div>
+                  <div class="row xp-break-row secondary" title="Last race XP split into place, speed, accuracy and session or other bonuses"><span>xp/race</span><b data-field="xpBreak">—</b></div>
                   <div class="row session-row" style="display:none" title="Site session token: time left before it expires. The queue renews it on the garage, between races"><span>login</span><b data-field="sessionLeft">—</b></div>
                   <div class="row trim-row" style="display:none"><span>trim</span><b data-field="trim">—</b></div>
                   <div class="row hud-row" style="display:none" title="The WPM Nitro Type itself is printing right now, next to the hard ceiling"><span>game</span><b data-field="hud">—</b></div>
@@ -9089,7 +9193,7 @@ All of this only aims at believable statistics. It is your call and your risk.
                   <div class="row clock-row" style="display:none" title="The precise clock could not start (the site's CSP blocked the Worker). In a background tab the browser slows page timers down and typing can stall long enough for a disqualification."><span>clock</span><b data-field="clock">page</b></div>
                   <div class="row guard-row" style="display:none" title="Why the bot is waiting: a guard break, duplicate copies of the script or a site block"><span>guard</span><b data-field="guard">—</b></div>
                   <div class="row box-row" style="display:none" title="Daily Mystery Box in the garage"><span>box</span><b data-field="box">—</b></div>
-                  <div class="row break-row"><span>break</span><b data-field="break">—</b></div>
+                  <div class="row break-row secondary"><span>break</span><b data-field="break">—</b></div>
                   <div class="row dq-row" style="display:none"><span>dq streak</span><b data-field="dq">×0</b></div>
                 </div>
               </div>
@@ -9136,13 +9240,13 @@ All of this only aims at believable statistics. It is your call and your risk.
                   <div class="card-h"><span class="card-t">Pace</span><span class="card-s">all under the ceiling</span></div>
                   <div class="seg" data-index="1">
                     <i class="seg-glide"></i>
-                    <button class="seg-btn" type="button" data-pace="soft" title="Softer target: 98-108 WPM, for a fresh account">soft</button>
-                    <button class="seg-btn" type="button" data-pace="balanced" title="Calibrated target: the account's own range">balanced</button>
-                    <button class="seg-btn" type="button" data-pace="fast" title="Top of the calibrated envelope: 110-119 WPM, still under the ceiling">fast</button>
+                    <button class="seg-btn" type="button" data-pace="soft" title="A little below the account average, for an easier session">soft</button>
+                    <button class="seg-btn" type="button" data-pace="balanced" title="The account's own average and calibrated range">balanced</button>
+                    <button class="seg-btn" type="button" data-pace="fast" title="A little above the account average, still under the ceiling">fast</button>
                   </div>
                   <div class="rows">
                     <div class="row"><span>ceiling</span><b data-field="tuneCap">≤ 120 wpm</b></div>
-                    <div class="row"><span>range</span><b data-field="tuneRange">104-117</b></div>
+                    <div class="row"><span>range</span><b data-field="tuneRange">—</b></div>
                     <div class="row cal-row" data-field="calRow" title="Reads the account average from the stats API and centres the balanced range on it"><span>auto</span><b data-field="cal">on</b></div>
                     <div class="row"><span>calibrated</span><b data-field="calWpm">—</b></div>
                     <div class="row"><span>accuracy</span><b data-field="calAcc">—</b></div>
@@ -9433,6 +9537,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       target: shadow.querySelector('[data-field="target"]'),
       live: shadow.querySelector('[data-field="live"]'),
       acc: shadow.querySelector('[data-field="acc"]'),
+      paceSource: shadow.querySelector('[data-field="paceSource"]'),
       session: shadow.querySelector('[data-field="session"]'),
       sessionRow: shadow.querySelector('.session-row'),
       sessionLeft: shadow.querySelector('[data-field="sessionLeft"]'),
@@ -9461,7 +9566,6 @@ All of this only aims at believable statistics. It is your call and your risk.
       // --- rediseno v7: rail, cabecera, ajustes y barra de estado ---
       title: shadow.querySelector('[data-field="title"]'),
       ver: shadow.querySelector('[data-field="ver"]'),
-      build: shadow.querySelector('[data-field="build"]'),
       update: shadow.querySelector('[data-field="update"]'),
       rail: shadow.querySelector('.rail'),
       views: shadow.querySelector('.views'),
@@ -9586,9 +9690,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     paintPace();
     paintTheme();
 
-    // Cabecera: version y build. No cambian en caliente, se pintan una vez.
+    // Cabecera: version. No cambia en caliente, se pinta una vez.
     setText(panel.refs.ver, `v${VERSION}`);
-    setText(panel.refs.build, VERSION.split('.').slice(0, 2).join('.'));
     setText(panel.refs.aboutVer, `v${VERSION}`);
     paintLogLists();
     paintChallengeList();
