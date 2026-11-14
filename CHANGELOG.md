@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.11 — 2026-11-14
+
+- feat: keep pace always synced to account stats
+
 ## 8.14.10 — 2026-11-14
 
 - feat: calibrate pace to the account's own WPM
