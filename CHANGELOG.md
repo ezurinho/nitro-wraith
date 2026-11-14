@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.8 — 2026-11-14
+
+- test: stop the boot loop before seeding panel screenshots
+- fix: repaint the week card when completed challenges change
+
 ## 8.14.7 — 2026-11-14
 
 - test: seed a live panel for the theme captures
