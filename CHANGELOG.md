@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.17 — 2026-11-14
+
+- fix: wait out the site block before opening another race
+
 ## 8.14.16 — 2026-11-14
 
 - feat: add an always-visible GitHub Update link and a simpler, flatter panel layout
