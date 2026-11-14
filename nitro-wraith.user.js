@@ -1166,15 +1166,52 @@ All of this only aims at believable statistics. It is your call and your risk.
   const perfCounters = {
     hudReads: 0, dayScans: 0, panelPaints: 0, userParses: 0,
     warningScans: 0, challengeScans: 0, captchaScans: 0, captchaUiScans: 0,
-    resultsWatches: 0,
+    resultsWatches: 0, storageReads: 0, panelNodes: 0,
   };
+
+  function noteStorageRead() {
+    perfCounters.storageReads += 1;
+  }
+
+  // El arranque pide las mismas claves varias veces (perfil, calibracion,
+  // challenges). Una cache de un segundo, invalidada en cada escritura, evita
+  // repetir getItem sin dejar valores viejos cuando algo cambia.
+  let persistRawAt = 0;
+  let persistRawValue = null;
+  const countReadCache = new Map();
+  let calibrationReadAt = 0;
+  let calibrationReadValue = 0;
+
+  function clearPersistRaw() {
+    persistRawAt = 0;
+    persistRawValue = null;
+  }
+
+  function persistRaw() {
+    const now = Date.now();
+    if (persistRawAt && now - persistRawAt < 1000) return persistRawValue;
+    persistRawAt = now;
+    persistRawValue = disk.get('persist:nt', 'null');
+    return persistRawValue;
+  }
+
+  function calibrationStamp() {
+    const now = Date.now();
+    if (calibrationReadAt && now - calibrationReadAt < 500) return calibrationReadValue;
+    calibrationReadAt = now;
+    calibrationReadValue = Number(disk.get(KEYS.calibrationAt, 0)) || 0;
+    return calibrationReadValue;
+  }
 
   // Acceso propio para las funciones que viven antes de `disk`: `dayHistoryRead`,
   // `todayBump` y las marcas de la Mystery Box no pueden depender de una constante
   // declarada mas abajo (TDZ) ni de que el objeto ya exista si un dia se llama
   // durante la inicializacion.
   const dayStore = {
-    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    get(key) {
+      noteStorageRead(key);
+      try { return localStorage.getItem(key); } catch { return null; }
+    },
     set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
     remove(key) { try { localStorage.removeItem(key); return true; } catch { return false; } },
   };
@@ -1645,6 +1682,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // memoria y todo lo que dependa de el se comporta como recien instalado.
   const disk = {
     get(key, fallback = null) {
+      noteStorageRead(key);
       try {
         const raw = localStorage.getItem(key);
         return raw === null ? fallback : raw;
@@ -1655,6 +1693,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     set(key, value) {
       try {
         localStorage.setItem(key, value);
+        countReadCache.delete(key);
+        if (key === KEYS.calibrationAt) calibrationReadAt = 0;
+        if (key === 'persist:nt') clearPersistRaw();
         return true;
       } catch {
         return false;
@@ -1663,6 +1704,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     remove(key) {
       try {
         localStorage.removeItem(key);
+        countReadCache.delete(key);
+        if (key === KEYS.calibrationAt) calibrationReadAt = 0;
+        if (key === 'persist:nt') clearPersistRaw();
         return true;
       } catch {
         return false;
@@ -1671,11 +1715,16 @@ All of this only aims at believable statistics. It is your call and your risk.
   };
 
   function readCount(key) {
-    const value = parseInt(disk.get(key, '') || '', 10);
+    const now = Date.now();
+    const hit = countReadCache.get(key);
+    if (hit && now - hit.at < 500) return hit.value;
+    const parsed = parseInt(disk.get(key, '') || '', 10);
     // 0 es un valor valido: es el estado "sin ciclo" y hace que el primer
     // advanceSessions empiece en 1. Un valor corrupto tambien cae a 0; devolver
     // 1 retrasaba el reinicio de la serie hasta que el contador volvia a 1.
-    return Number.isFinite(value) && value >= 0 ? value : 0;
+    const value = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    countReadCache.set(key, { at: now, value });
+    return value;
   }
 
   // Escribir de verdad, no preguntar si se puede: un almacenamiento bloqueado
@@ -1744,7 +1793,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (siteUserAt && now - siteUserAt < maxAge) return siteUserValue;
 
     try {
-      const raw = disk.get('persist:nt', '');
+      const raw = persistRaw();
       // `persist:nt` puede ser grande. Si el texto no cambio, el objeto cacheado
       // sigue siendo valido: no hay que volver a parsearlo cada pocos segundos.
       if (raw === siteUserRaw) {
@@ -2104,7 +2153,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // solo devuelve contadores de carreras.
   function readPersistedUser() {
     try {
-      const raw = JSON.parse(disk.get('persist:nt', 'null'));
+      const raw = JSON.parse(persistRaw());
       if (!raw || !raw.user) return null;
       const user = JSON.parse(raw.user);
       const wpm = Number(user.avgSpeed);
@@ -2237,7 +2286,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (!force && now - calibrationProbeAt < 60000) return;
     calibrationProbeAt = now;
 
-    const last = Number(disk.get(KEYS.calibrationAt, 0)) || 0;
+    const last = calibrationStamp();
     if (!force && now - last < CONFIG.calibration.refreshMs) return;
 
     calibrating = true;
@@ -2259,6 +2308,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // La calibracion es siempre automatica; este pequeño gesto solo adelanta la
   // lectura. No existe un estado "off" que pueda dejar el ritmo congelado.
   function refreshCalibration() {
+    clearPersistRaw();
     log('Pace auto-calibration: refreshing from the account stats.');
     maybeCalibrate(true);
     paintCalibration();
@@ -2277,7 +2327,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const wpmText = calibratedRange ? `${calibratedRange.min}-${calibratedRange.max}` : '—';
     const accText = calibratedAccuracy ? `${calibratedAccuracy.min}-${calibratedAccuracy.max}%` : '—';
-    const at = Number(disk.get(KEYS.calibrationAt, 0)) || 0;
+    const at = calibrationStamp();
     const calSig = [wpmText, accText, accountText, at,
       Number(accountStats && accountStats.bestWpm) || 0,
       Number(accountStats && accountStats.races) || 0].join('|');
@@ -6910,7 +6960,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   const panel = {
     root: null, refs: null, host: null, historySig: '', logSig: '', noticeSig: '',
     weekSig: '', chSig: '', seasonSig: '', seasonBaseSig: '',
-    calSig: '', accSig: null, updateHealthAt: 0,
+    calSig: '', accSig: null, updateHealthAt: 0, mountedViews: new Set(['stats']),
   };
 
   function setText(el, value) {
@@ -7153,6 +7203,23 @@ All of this only aims at believable statistics. It is your call and your risk.
     });
   } catch { /* almacenamiento bloqueado */ }
 
+  // Las caches cortas del arranque no pueden sobrevivir a un cambio hecho en
+  // otra ventana. Este evento las invalida antes de que el siguiente tick lea.
+  try {
+    addEventListener('storage', (event) => {
+      const key = event.key;
+      if (!key) {
+        clearPersistRaw();
+        countReadCache.clear();
+        calibrationReadAt = 0;
+        return;
+      }
+      if (key === 'persist:nt') clearPersistRaw();
+      if (key === KEYS.calibrationAt) calibrationReadAt = 0;
+      countReadCache.delete(key);
+    });
+  } catch { /* almacenamiento bloqueado */ }
+
   // La foto de temporada la escribe la pestana /season y la lee el panel de la
   // carrera. El evento storage es el puente entre las dos, sin recargar.
   try {
@@ -7230,9 +7297,34 @@ All of this only aims at believable statistics. It is your call and your risk.
   // El rail cambia de vista y la vista de ajustes ES el cajon (⚙): asi el boton
   // de siempre sigue significando "ajustes" y no hay dos mecanicas peleandose
   // por el mismo espacio.
+  // Una vista inactiva se monta la primera vez que se abre. Sus campos ya
+  // existen dentro del <template>, asi que los repintados de fondo no se
+  // pierden: al mover el contenido al DOM aparece con los datos al dia.
+  function hydrateView(name) {
+    if (!panel.host || !panel.host.shadowRoot || !panel.mountedViews) return false;
+    if (panel.mountedViews.has(name)) return false;
+
+    const shadow = panel.host.shadowRoot;
+    const template = shadow.querySelector(`template[data-view="${name}"]`);
+    const views = shadow.querySelector('.views');
+    if (!template || !views) return false;
+
+    views.appendChild(template.content);
+    template.remove();
+    panel.mountedViews.add(name);
+    if (name === 'log') {
+      panel.logSig = '';
+      panel.chSig = '';
+      paintLogLists();
+      paintChallengeList();
+    }
+    return true;
+  }
+
   function showTab(name) {
     if (!panel.root || !TAB_ORDER.includes(name)) return;
 
+    hydrateView(name);
     const index = TAB_ORDER.indexOf(name);
     panel.root.dataset.tab = name;
     if (panel.refs.rail) {
@@ -7470,7 +7562,11 @@ All of this only aims at believable statistics. It is your call and your risk.
   };
   window.__ntaDebug.watchRaceResults = () => watchRaceResults();
   window.__ntaDebug.versionNewer = (candidate, current) => versionNewer(candidate, current || VERSION);
-  window.__ntaDebug.readCount = (key) => readCount(String(key || ''));
+  window.__ntaDebug.readCount = (key) => {
+    const name = String(key || '');
+    countReadCache.delete(name);
+    return readCount(name);
+  };
   window.__ntaDebug.accuracyTrend = () => ({
     n: accDeltas.length,
     avg: accDeltas.length ? accDeltas.reduce((sum, n) => sum + n, 0) / accDeltas.length : null,
@@ -7663,6 +7759,21 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.perf = () => ({ ...perfCounters });
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
+  window.__ntaDebug.startup = () => ({
+    nodes: panel.host && panel.host.shadowRoot
+      ? panel.host.shadowRoot.querySelectorAll('*').length
+      : 0,
+    createdNodes: perfCounters.panelNodes,
+    views: panel.host && panel.host.shadowRoot
+      ? panel.host.shadowRoot.querySelectorAll('.view').length
+      : 0,
+    storageReads: perfCounters.storageReads,
+    at: Date.now(),
+  });
+  window.__ntaDebug.hydrateAllViews = () => {
+    for (const name of ['tune', 'log', 'info']) hydrateView(name);
+    return window.__ntaDebug.startup();
+  };
   window.__ntaDebug.perfReset = () => {
     for (const key of Object.keys(perfCounters)) perfCounters[key] = 0;
     return { ...perfCounters };
@@ -7856,7 +7967,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     let user = null;
     try {
-      const raw = JSON.parse(disk.get('persist:nt', 'null'));
+      const raw = JSON.parse(persistRaw());
       if (raw && raw.user) user = JSON.parse(raw.user);
     } catch { user = null; }
 
@@ -7919,7 +8030,11 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.challengeProgress = () => readChallengeProgress();
   window.__ntaDebug.challengeProgressAll = () => challengeProgressAll();
   window.__ntaDebug.challengeReset = () => chResetAt;
-  window.__ntaDebug.refreshChallenges = () => { chReadAt = 0; return readChallengeProgress(); };
+  window.__ntaDebug.refreshChallenges = () => {
+    chReadAt = 0;
+    clearPersistRaw();
+    return readChallengeProgress();
+  };
 
   function paintChallengeList() {
     if (!panel.refs || !panel.refs.chList) return;
@@ -9265,7 +9380,9 @@ All of this only aims at believable statistics. It is your call and your risk.
               </div>
             </section>
 
-            <!-- ------------------------------ TUNE -------------------------- -->
+            <!-- Las vistas que no estan activas se montan al abrirlas. Asi el
+                 primer segundo solo cuesta la vista Live, no las cuatro. -->
+            <template data-view="tune">
             <section class="view v-tune cfg" id="nt-view-tune" role="tabpanel" aria-label="Tune">
               <div class="view-head"><span>Tune</span><b>rhythm · limits · automation</b></div>
               <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
@@ -9421,8 +9538,10 @@ All of this only aims at believable statistics. It is your call and your risk.
                 </div>
               </div>
             </section>
+            </template>
 
             <!-- ------------------------------ LOG --------------------------- -->
+            <template data-view="log">
             <section class="view v-log" id="nt-view-log" role="tabpanel" aria-label="Log">
               <div class="view-head"><span>Log</span><b>sessions · challenges</b></div>
               <div class="card">
@@ -9484,8 +9603,10 @@ All of this only aims at believable statistics. It is your call and your risk.
                 <div class="log-list" data-field="noticeList"></div>
               </div>
             </section>
+            </template>
 
             <!-- ------------------------------ INFO -------------------------- -->
+            <template data-view="info">
             <section class="view v-info" id="nt-view-info" role="tabpanel" aria-label="Info">
               <div class="view-head"><span>Info</span><b>keys · guardrails</b></div>
               <div class="card">
@@ -9519,6 +9640,7 @@ All of this only aims at believable statistics. It is your call and your risk.
                 </div>
               </div>
             </section>
+            </template>
           </div>
         </div>
         <div class="foot">
@@ -9549,169 +9671,186 @@ All of this only aims at believable statistics. It is your call and your risk.
       </div>
     `;
 
-    document.body.appendChild(host);
-    panel.host = host;
+    // Las vistas inactivas viven en <template>: sus nodos se parsean, pero no
+    // entran en el arbol del documento ni en el layout. `pick` las encuentra
+    // para que el codigo que ya las pinta siga funcionando, y `hydrateView`
+    // las mueve a su sitio la primera vez que se abre la pestana.
+    const templates = [...shadow.querySelectorAll('template[data-view]')];
+    const pick = (selector) => {
+      const found = shadow.querySelector(selector);
+      if (found) return found;
+      for (const template of templates) {
+        const node = template.content.querySelector(selector);
+        if (node) return node;
+      }
+      return null;
+    };
 
-    panel.root = shadow.querySelector('.panel');
+    document.body.appendChild(host);
+    perfCounters.panelNodes = shadow.querySelectorAll('*').length;
+    panel.host = host;
+    panel.mountedViews = new Set(['stats']);
+
+    panel.root = pick('.panel');
     panel.refs = {
-      mode: shadow.querySelector('.mode'),
-      pace: shadow.querySelector('.pace'),
-      cap: shadow.querySelector('[data-field="cap"]'),
-      hudRow: shadow.querySelector('.hud-row'),
-      hud: shadow.querySelector('[data-field="hud"]'),
-      clockRow: shadow.querySelector('.clock-row'),
-      clock: shadow.querySelector('[data-field="clock"]'),
-      resultRow: shadow.querySelector('.result-row'),
-      result: shadow.querySelector('[data-field="result"]'),
-      guardRow: shadow.querySelector('.guard-row'),
-      guard: shadow.querySelector('[data-field="guard"]'),
-      todayRow: shadow.querySelector('[data-field="todayRow"]'),
-      today: shadow.querySelector('[data-field="today"]'),
-      boxRow: shadow.querySelector('.box-row'),
-      box: shadow.querySelector('[data-field="box"]'),
-      target: shadow.querySelector('[data-field="target"]'),
-      live: shadow.querySelector('[data-field="live"]'),
-      acc: shadow.querySelector('[data-field="acc"]'),
-      paceSource: shadow.querySelector('[data-field="paceSource"]'),
-      session: shadow.querySelector('[data-field="session"]'),
-      sessionRow: shadow.querySelector('.session-row'),
-      sessionLeft: shadow.querySelector('[data-field="sessionLeft"]'),
-      breakLeft: shadow.querySelector('[data-field="break"]'),
-      dqRow: shadow.querySelector('.dq-row'),
-      dq: shadow.querySelector('[data-field="dq"]'),
-      status: shadow.querySelector('[data-field="status"]'),
-      trimRow: shadow.querySelector('.trim-row'),
-      trim: shadow.querySelector('[data-field="trim"]'),
-      history: shadow.querySelector('[data-field="history"]'),
-      progress: shadow.querySelector('[data-field="progress"]'),
-      progFill: shadow.querySelector('[data-field="progfill"]'),
-      races: shadow.querySelector('[data-field="races"]'),
-      dayXp: shadow.querySelector('[data-field="dayXp"]'),
-      rate: shadow.querySelector('[data-field="rate"]'),
-      nitro: shadow.querySelector('[data-field="nitro"]'),
-      nitroDelta: shadow.querySelector('[data-field="nitroDelta"]'),
-      cycle: shadow.querySelector('[data-field="cycle"]'),
-      xpBreak: shadow.querySelector('[data-field="xpBreak"]'),
-      tanda: shadow.querySelector('[data-field="tanda"]'),
-      raceLimitRow: shadow.querySelector('[data-field="raceLimitRow"]'),
-      limit: shadow.querySelector('[data-field="limit"]'),
-      prevRow: shadow.querySelector('.prev-row'),
-      prevLabel: shadow.querySelector('[data-field="prevLabel"]'),
-      prev: shadow.querySelector('[data-field="prev"]'),
+      mode: pick('.mode'),
+      pace: pick('.pace'),
+      cap: pick('[data-field="cap"]'),
+      hudRow: pick('.hud-row'),
+      hud: pick('[data-field="hud"]'),
+      clockRow: pick('.clock-row'),
+      clock: pick('[data-field="clock"]'),
+      resultRow: pick('.result-row'),
+      result: pick('[data-field="result"]'),
+      guardRow: pick('.guard-row'),
+      guard: pick('[data-field="guard"]'),
+      todayRow: pick('[data-field="todayRow"]'),
+      today: pick('[data-field="today"]'),
+      boxRow: pick('.box-row'),
+      box: pick('[data-field="box"]'),
+      target: pick('[data-field="target"]'),
+      live: pick('[data-field="live"]'),
+      acc: pick('[data-field="acc"]'),
+      paceSource: pick('[data-field="paceSource"]'),
+      session: pick('[data-field="session"]'),
+      sessionRow: pick('.session-row'),
+      sessionLeft: pick('[data-field="sessionLeft"]'),
+      breakLeft: pick('[data-field="break"]'),
+      dqRow: pick('.dq-row'),
+      dq: pick('[data-field="dq"]'),
+      status: pick('[data-field="status"]'),
+      trimRow: pick('.trim-row'),
+      trim: pick('[data-field="trim"]'),
+      history: pick('[data-field="history"]'),
+      progress: pick('[data-field="progress"]'),
+      progFill: pick('[data-field="progfill"]'),
+      races: pick('[data-field="races"]'),
+      dayXp: pick('[data-field="dayXp"]'),
+      rate: pick('[data-field="rate"]'),
+      nitro: pick('[data-field="nitro"]'),
+      nitroDelta: pick('[data-field="nitroDelta"]'),
+      cycle: pick('[data-field="cycle"]'),
+      xpBreak: pick('[data-field="xpBreak"]'),
+      tanda: pick('[data-field="tanda"]'),
+      raceLimitRow: pick('[data-field="raceLimitRow"]'),
+      limit: pick('[data-field="limit"]'),
+      prevRow: pick('.prev-row'),
+      prevLabel: pick('[data-field="prevLabel"]'),
+      prev: pick('[data-field="prev"]'),
       // --- rediseno v7: rail, cabecera, ajustes y barra de estado ---
-      title: shadow.querySelector('[data-field="title"]'),
-      ver: shadow.querySelector('[data-field="ver"]'),
-      update: shadow.querySelector('[data-field="update"]'),
-      rail: shadow.querySelector('.rail'),
-      views: shadow.querySelector('.views'),
-      liveTag: shadow.querySelector('[data-field="liveTag"]'),
-      footState: shadow.querySelector('[data-field="footState"]'),
-      footMode: shadow.querySelector('[data-field="footMode"]'),
-      footWpm: shadow.querySelector('[data-field="footWpm"]'),
-      footAcc: shadow.querySelector('[data-field="footAcc"]'),
-      footClock: shadow.querySelector('[data-field="footClock"]'),
-      footCap: shadow.querySelector('[data-field="footCap"]'),
-      footHint: shadow.querySelector('[data-field="footHint"]'),
-      seg: shadow.querySelector('.seg'),
-      themes: shadow.querySelector('[data-field="themes"]'),
-      themeName: shadow.querySelector('[data-field="themeName"]'),
-      tuneCap: shadow.querySelector('[data-field="tuneCap"]'),
-      tuneRange: shadow.querySelector('[data-field="tuneRange"]'),
-      limitSlider: shadow.querySelector('[data-field="limitSlider"]'),
-      etaLeft: shadow.querySelector('[data-field="etaLeft"]'),
-      timeLimitRow: shadow.querySelector('[data-field="timeLimitRow"]'),
-      timeLimit: shadow.querySelector('[data-field="timeLimit"]'),
-      timeSlider: shadow.querySelector('[data-field="timeSlider"]'),
-      timeLeftRow: shadow.querySelector('[data-field="timeLeftRow"]'),
-      timeLeft: shadow.querySelector('[data-field="timeLeft"]'),
-      xpLimitRow: shadow.querySelector('[data-field="xpLimitRow"]'),
-      xpLimit: shadow.querySelector('[data-field="xpLimit"]'),
-      xpSlider: shadow.querySelector('[data-field="xpSlider"]'),
-      xpRow: shadow.querySelector('[data-field="xpRow"]'),
-      xpTotal: shadow.querySelector('[data-field="xpTotal"]'),
-      dailyRaceRow: shadow.querySelector('[data-field="dailyRaceRow"]'),
-      dailyRaces: shadow.querySelector('[data-field="dailyRaces"]'),
-      dailyRaceSlider: shadow.querySelector('[data-field="dailyRaceSlider"]'),
-      dailyXpRow: shadow.querySelector('[data-field="dailyXpRow"]'),
-      dailyXp: shadow.querySelector('[data-field="dailyXp"]'),
-      dailyXpSlider: shadow.querySelector('[data-field="dailyXpSlider"]'),
-      dailyLeft: shadow.querySelector('[data-field="dailyLeft"]'),
-      activeRow: shadow.querySelector('[data-field="activeRow"]'),
-      activeState: shadow.querySelector('[data-field="activeState"]'),
-      activeStartRow: shadow.querySelector('[data-field="activeStartRow"]'),
-      activeStart: shadow.querySelector('[data-field="activeStart"]'),
-      activeStartSlider: shadow.querySelector('[data-field="activeStartSlider"]'),
-      activeEndRow: shadow.querySelector('[data-field="activeEndRow"]'),
-      activeEnd: shadow.querySelector('[data-field="activeEnd"]'),
-      activeEndSlider: shadow.querySelector('[data-field="activeEndSlider"]'),
-      activeNow: shadow.querySelector('[data-field="activeNow"]'),
-      calRow: shadow.querySelector('[data-field="calRow"]'),
-      cal: shadow.querySelector('[data-field="cal"]'),
-      calWpm: shadow.querySelector('[data-field="calWpm"]'),
-      calAcc: shadow.querySelector('[data-field="calAcc"]'),
-      calAccount: shadow.querySelector('[data-field="calAccount"]'),
-      calDelta: shadow.querySelector('[data-field="calDelta"]'),
-      accSpark: shadow.querySelector('[data-field="accSpark"]'),
-      accSparkLine: shadow.querySelector('[data-field="accSparkLine"]'),
-      accSparkArea: shadow.querySelector('[data-field="accSparkArea"]'),
-      liveCount: shadow.querySelector('[data-field="liveCount"]'),
-      liveLoad: shadow.querySelector('[data-field="liveLoad"]'),
-      liveFile: shadow.querySelector('[data-field="liveFile"]'),
-      liveList: shadow.querySelector('[data-field="liveList"]'),
-      liveClear: shadow.querySelector('[data-field="liveClear"]'),
-      liveDriftRow: shadow.querySelector('[data-field="liveDriftRow"]'),
-      liveDrift: shadow.querySelector('[data-field="liveDrift"]'),
-      liveCompareRow: shadow.querySelector('[data-field="liveCompareRow"]'),
-      liveCompare: shadow.querySelector('[data-field="liveCompare"]'),
-      livePickRow: shadow.querySelector('[data-field="livePickRow"]'),
-      livePickA: shadow.querySelector('[data-field="livePickA"]'),
-      livePickB: shadow.querySelector('[data-field="livePickB"]'),
-      livePickResult: shadow.querySelector('[data-field="livePickResult"]'),
-      livePickExport: shadow.querySelector('[data-field="livePickExport"]'),
-      liveStreakRow: shadow.querySelector('[data-field="liveStreakRow"]'),
-      liveStreak: shadow.querySelector('[data-field="liveStreak"]'),
-      liveSpreadRow: shadow.querySelector('[data-field="liveSpreadRow"]'),
-      liveSpread: shadow.querySelector('[data-field="liveSpread"]'),
-      chCount: shadow.querySelector('[data-field="chCount"]'),
-      chList: shadow.querySelector('[data-field="chList"]'),
-      calLogWhen: shadow.querySelector('[data-field="calLogWhen"]'),
-      calLogWpm: shadow.querySelector('[data-field="calLogWpm"]'),
-      calLogAcc: shadow.querySelector('[data-field="calLogAcc"]'),
-      chRow: shadow.querySelector('[data-field="chRow"]'),
-      ch: shadow.querySelector('[data-field="ch"]'),
-      weekList: shadow.querySelector('[data-field="weekList"]'),
-      weekTotal: shadow.querySelector('[data-field="weekTotal"]'),
-      closedList: shadow.querySelector('[data-field="closedList"]'),
-      logCount: shadow.querySelector('[data-field="logCount"]'),
-      noticeList: shadow.querySelector('[data-field="noticeList"]'),
-      aboutVer: shadow.querySelector('[data-field="aboutVer"]'),
-      infoCap: shadow.querySelector('[data-field="infoCap"]'),
-      gear: shadow.querySelector('.gear'),
-      cfg: shadow.querySelector('.cfg'),
-      cfgText: shadow.querySelector('[data-field="cfgText"]'),
-      cfgNote: shadow.querySelector('[data-field="cfgNote"]'),
-      up: shadow.querySelector('[data-field="up"]'),
-      nitroStrategy: shadow.querySelector('[data-field="nitroStrategy"]'),
-      nitroPreview: shadow.querySelector('[data-field="nitroPreview"]'),
-      foot: shadow.querySelector('[data-field="foot"]'),
-      avg: shadow.querySelector('[data-field="avg"]'),
-      best: shadow.querySelector('[data-field="best"]'),
-      toggle: shadow.querySelector('.toggle'),
-      stop: shadow.querySelector('.stop'),
-      collapse: shadow.querySelector('.collapse'),
-      seasonCard: shadow.querySelector('[data-field="seasonCard"]'),
-      seasonTag: shadow.querySelector('[data-field="seasonTag"]'),
-      seasonName: shadow.querySelector('[data-field="seasonName"]'),
-      seasonFill: shadow.querySelector('[data-field="seasonFill"]'),
-      seasonTier: shadow.querySelector('[data-field="seasonTier"]'),
-      seasonXp: shadow.querySelector('[data-field="seasonXp"]'),
-      seasonNext: shadow.querySelector('[data-field="seasonNext"]'),
-      seasonRaces: shadow.querySelector('[data-field="seasonRaces"]'),
-      seasonPace: shadow.querySelector('[data-field="seasonPace"]'),
-      seasonEnds: shadow.querySelector('[data-field="seasonEnds"]'),
-      seasonAlert: shadow.querySelector('[data-field="seasonAlert"]'),
-      seasonNote: shadow.querySelector('[data-field="seasonNote"]'),
-      seasonOpen: shadow.querySelector('[data-field="seasonOpen"]'),
+      title: pick('[data-field="title"]'),
+      ver: pick('[data-field="ver"]'),
+      update: pick('[data-field="update"]'),
+      rail: pick('.rail'),
+      views: pick('.views'),
+      liveTag: pick('[data-field="liveTag"]'),
+      footState: pick('[data-field="footState"]'),
+      footMode: pick('[data-field="footMode"]'),
+      footWpm: pick('[data-field="footWpm"]'),
+      footAcc: pick('[data-field="footAcc"]'),
+      footClock: pick('[data-field="footClock"]'),
+      footCap: pick('[data-field="footCap"]'),
+      footHint: pick('[data-field="footHint"]'),
+      seg: pick('.seg'),
+      themes: pick('[data-field="themes"]'),
+      themeName: pick('[data-field="themeName"]'),
+      tuneCap: pick('[data-field="tuneCap"]'),
+      tuneRange: pick('[data-field="tuneRange"]'),
+      limitSlider: pick('[data-field="limitSlider"]'),
+      etaLeft: pick('[data-field="etaLeft"]'),
+      timeLimitRow: pick('[data-field="timeLimitRow"]'),
+      timeLimit: pick('[data-field="timeLimit"]'),
+      timeSlider: pick('[data-field="timeSlider"]'),
+      timeLeftRow: pick('[data-field="timeLeftRow"]'),
+      timeLeft: pick('[data-field="timeLeft"]'),
+      xpLimitRow: pick('[data-field="xpLimitRow"]'),
+      xpLimit: pick('[data-field="xpLimit"]'),
+      xpSlider: pick('[data-field="xpSlider"]'),
+      xpRow: pick('[data-field="xpRow"]'),
+      xpTotal: pick('[data-field="xpTotal"]'),
+      dailyRaceRow: pick('[data-field="dailyRaceRow"]'),
+      dailyRaces: pick('[data-field="dailyRaces"]'),
+      dailyRaceSlider: pick('[data-field="dailyRaceSlider"]'),
+      dailyXpRow: pick('[data-field="dailyXpRow"]'),
+      dailyXp: pick('[data-field="dailyXp"]'),
+      dailyXpSlider: pick('[data-field="dailyXpSlider"]'),
+      dailyLeft: pick('[data-field="dailyLeft"]'),
+      activeRow: pick('[data-field="activeRow"]'),
+      activeState: pick('[data-field="activeState"]'),
+      activeStartRow: pick('[data-field="activeStartRow"]'),
+      activeStart: pick('[data-field="activeStart"]'),
+      activeStartSlider: pick('[data-field="activeStartSlider"]'),
+      activeEndRow: pick('[data-field="activeEndRow"]'),
+      activeEnd: pick('[data-field="activeEnd"]'),
+      activeEndSlider: pick('[data-field="activeEndSlider"]'),
+      activeNow: pick('[data-field="activeNow"]'),
+      calRow: pick('[data-field="calRow"]'),
+      cal: pick('[data-field="cal"]'),
+      calWpm: pick('[data-field="calWpm"]'),
+      calAcc: pick('[data-field="calAcc"]'),
+      calAccount: pick('[data-field="calAccount"]'),
+      calDelta: pick('[data-field="calDelta"]'),
+      accSpark: pick('[data-field="accSpark"]'),
+      accSparkLine: pick('[data-field="accSparkLine"]'),
+      accSparkArea: pick('[data-field="accSparkArea"]'),
+      liveCount: pick('[data-field="liveCount"]'),
+      liveLoad: pick('[data-field="liveLoad"]'),
+      liveFile: pick('[data-field="liveFile"]'),
+      liveList: pick('[data-field="liveList"]'),
+      liveClear: pick('[data-field="liveClear"]'),
+      liveDriftRow: pick('[data-field="liveDriftRow"]'),
+      liveDrift: pick('[data-field="liveDrift"]'),
+      liveCompareRow: pick('[data-field="liveCompareRow"]'),
+      liveCompare: pick('[data-field="liveCompare"]'),
+      livePickRow: pick('[data-field="livePickRow"]'),
+      livePickA: pick('[data-field="livePickA"]'),
+      livePickB: pick('[data-field="livePickB"]'),
+      livePickResult: pick('[data-field="livePickResult"]'),
+      livePickExport: pick('[data-field="livePickExport"]'),
+      liveStreakRow: pick('[data-field="liveStreakRow"]'),
+      liveStreak: pick('[data-field="liveStreak"]'),
+      liveSpreadRow: pick('[data-field="liveSpreadRow"]'),
+      liveSpread: pick('[data-field="liveSpread"]'),
+      chCount: pick('[data-field="chCount"]'),
+      chList: pick('[data-field="chList"]'),
+      calLogWhen: pick('[data-field="calLogWhen"]'),
+      calLogWpm: pick('[data-field="calLogWpm"]'),
+      calLogAcc: pick('[data-field="calLogAcc"]'),
+      chRow: pick('[data-field="chRow"]'),
+      ch: pick('[data-field="ch"]'),
+      weekList: pick('[data-field="weekList"]'),
+      weekTotal: pick('[data-field="weekTotal"]'),
+      closedList: pick('[data-field="closedList"]'),
+      logCount: pick('[data-field="logCount"]'),
+      noticeList: pick('[data-field="noticeList"]'),
+      aboutVer: pick('[data-field="aboutVer"]'),
+      infoCap: pick('[data-field="infoCap"]'),
+      gear: pick('.gear'),
+      cfg: pick('.cfg'),
+      cfgText: pick('[data-field="cfgText"]'),
+      cfgNote: pick('[data-field="cfgNote"]'),
+      up: pick('[data-field="up"]'),
+      nitroStrategy: pick('[data-field="nitroStrategy"]'),
+      nitroPreview: pick('[data-field="nitroPreview"]'),
+      foot: pick('[data-field="foot"]'),
+      avg: pick('[data-field="avg"]'),
+      best: pick('[data-field="best"]'),
+      toggle: pick('.toggle'),
+      stop: pick('.stop'),
+      collapse: pick('.collapse'),
+      seasonCard: pick('[data-field="seasonCard"]'),
+      seasonTag: pick('[data-field="seasonTag"]'),
+      seasonName: pick('[data-field="seasonName"]'),
+      seasonFill: pick('[data-field="seasonFill"]'),
+      seasonTier: pick('[data-field="seasonTier"]'),
+      seasonXp: pick('[data-field="seasonXp"]'),
+      seasonNext: pick('[data-field="seasonNext"]'),
+      seasonRaces: pick('[data-field="seasonRaces"]'),
+      seasonPace: pick('[data-field="seasonPace"]'),
+      seasonEnds: pick('[data-field="seasonEnds"]'),
+      seasonAlert: pick('[data-field="seasonAlert"]'),
+      seasonNote: pick('[data-field="seasonNote"]'),
+      seasonOpen: pick('[data-field="seasonOpen"]'),
     };
 
     // El ultimo aviso importante se pinta aqui desde ya: si el panel se crea
@@ -9728,8 +9867,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     // Cabecera: version. No cambia en caliente, se pinta una vez.
     setText(panel.refs.ver, `v${VERSION}`);
     setText(panel.refs.aboutVer, `v${VERSION}`);
-    paintLogLists();
-    paintChallengeList();
+    if (!panel.mountedViews || panel.mountedViews.has('log')) {
+      paintLogLists();
+      paintChallengeList();
+    } else {
+      readChallengeProgress();
+    }
     if (panel.refs.cap) {
       const cap = CONFIG.wpm.hardCap;
       setText(panel.refs.cap, Number.isFinite(cap) ? `≤ ${cap} wpm` : 'no cap');
@@ -11494,8 +11637,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     // se alcanzaba: el descanso se pintaba como "waiting" y no como "break".
     setText(panel.refs.liveTag, off ? 'waiting · resumes itself' : session.typing ? 'racing' : breaking ? 'break' : 'waiting');
 
-    paintLogLists();
-    paintChallengeList();
+    // El registro ocupa una vista entera y solo se ve al abrir LOG. Mientras
+    // tanto basta con leer los retos para contarlos; las listas se pintan al
+    // montar la vista, no en cada tick del arranque.
+    if (!panel.mountedViews || panel.mountedViews.has('log')) {
+      paintLogLists();
+      paintChallengeList();
+    } else {
+      readChallengeProgress();
+    }
 
     // Solo se repinta cuando entra una carrera nueva, no en cada tick.
     const last = raceHistory[raceHistory.length - 1];

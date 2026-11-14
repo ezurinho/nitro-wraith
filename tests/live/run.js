@@ -297,6 +297,7 @@ async function capturePanelThemes(cdp, appUrl) {
     const frame = document.querySelector('iframe');
     const w = frame && frame.contentWindow;
     const d = w && w.__ntaDebug;
+    if (d && d.hydrateAllViews) d.hydrateAllViews();
     const host = w && w.document.getElementById('nt-autotyper-panel');
     const root = host && host.shadowRoot;
     const panel = root && root.querySelector('.panel');
@@ -468,6 +469,8 @@ function killTree(child) {
 
 const READ = `(() => {
   const w = document.querySelector('iframe').contentWindow;
+  const d = w.__ntaDebug;
+  if (d && d.hydrateAllViews) d.hydrateAllViews();
   const host = w.document.getElementById('nt-autotyper-panel');
   if (!host) return { panel: false };
   const s = host.shadowRoot;
@@ -522,8 +525,31 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${suffix}`);
   };
 
+  const panelReadyRaw = async () => (await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const host = w.document.getElementById('nt-autotyper-panel');
+    return Boolean(host && host.shadowRoot && host.shadowRoot.querySelector('.panel'));
+  })()`)) === true;
   const panelReady = async () => (await cdp.evaluate(READ)).panel === true;
-  await waitFor(panelReady, 15000, 'the panel');
+  await waitFor(panelReadyRaw, 15000, 'the panel');
+
+  const startup = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const host = w.document.getElementById('nt-autotyper-panel');
+    const root = host && host.shadowRoot;
+    const d = w.__ntaDebug;
+    return root && d && d.startup ? d.startup() : { nodes: 0, views: 0, storageReads: 0 };
+  })()`);
+  check('panel startup mounts only the live view',
+    startup.nodes > 0 && startup.nodes < 400 && startup.views === 1
+      && startup.storageReads < 50, startup);
+
+  const hydrated = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    return w.__ntaDebug && w.__ntaDebug.hydrateAllViews ? w.__ntaDebug.hydrateAllViews() : null;
+  })()`);
+  check('opening the other views mounts the remaining templates',
+    hydrated && hydrated.views === 4 && hydrated.nodes > startup.nodes, hydrated);
 
   const state = await cdp.evaluate(READ);
   check('panel mounted inside the race frame', state.panel === true, state);
@@ -3744,6 +3770,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const p = host.shadowRoot.querySelector('.p');
       const before = { theme: p.dataset.theme, acc: getComputedStyle(p).getPropertyValue('--acc').trim() };
       const w = document.querySelector('iframe').contentWindow;
+      if (w.__ntaDebug && w.__ntaDebug.hydrateAllViews) w.__ntaDebug.hydrateAllViews();
       const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
       s.querySelector('[data-theme-btn="violet"]').click();
       await new Promise((r) => setTimeout(r, 450));
@@ -4293,6 +4320,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   const nitroPreview = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     const d = w.__ntaDebug;
+    if (d.hydrateAllViews) d.hydrateAllViews();
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const row = shadow.querySelector('[data-field="nitroPreview"]');
     const tune = shadow.querySelector('[data-tab-btn="tune"]');

@@ -150,7 +150,7 @@ manual by design.
   - The panel reads the game's own persisted state where possible; it does not invent XP or race results.
   - The social panel is GET-only and never posts, accepts, denies, invites, applies, or sends.
   - The guard stops the race on impossible WPM readings and warns when two copies are publishing at the same time.
-  - The periodic panel paint runs at 1 Hz during a race and drops to one paint every two seconds while the bot is waiting; hidden tabs skip all DOM work. Unchanged calibration/update text is cached, and read-only social GETs are kept for two minutes.
+  - The periodic panel paint runs at 1 Hz during a race and drops to one paint every two seconds while the bot is waiting; hidden tabs skip all DOM work. At boot only the Live view is mounted; Tune, Log and Info are templates mounted the first time they are opened. Repeated reads of `persist:nt`, session counters and the calibration stamp are cached until a write. Unchanged calibration/update text is cached, and read-only social GETs are kept for two minutes.
 
 </details>
 
