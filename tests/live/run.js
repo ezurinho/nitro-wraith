@@ -3933,6 +3933,39 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && /cleared manually at/.test(garageStop.cleared.title)
         && garageStop.afterHidden === true, garageStop);
 
+    // Resumen de las ultimas paradas: cuenta motivos, no la ultima marca. Una
+    // entrada de hace ocho dias no debe contaminar la ventana de siete dias.
+    const stopMix = await cdp.evaluate(`(() => {
+      const root = document.getElementById('nt-queue-panel').shadowRoot;
+      const row = root.querySelector('[data-f="stopHistoryRow"]');
+      const text = root.querySelector('[data-f="stopHistory"]');
+      const paint = () => window.__ntaDebug.garagePaint();
+      const now = Date.now();
+      localStorage.setItem('ntQueue:stopHistory', JSON.stringify([
+        { at: now - 5 * 60000, reason: 'DQ streak: stopped before the site block (5 in a row)', holdMs: 6 * 3600000 },
+        { at: now - 10 * 60000, reason: 'daily limit 80 races', holdMs: 3600000 },
+        { at: now - 15 * 60000, reason: 'turned off from the panel', holdMs: 600000 },
+        { at: now - 20 * 60000, reason: 'the results page will not open another race', holdMs: 120000 },
+        { at: now - 8 * 86400000, reason: 'DQ streak: stopped before the site block (5 in a row)', holdMs: 6 * 3600000 },
+      ]));
+      paint();
+      const shown = {
+        hidden: row.hidden,
+        display: getComputedStyle(row).display,
+        text: text.textContent.trim(),
+        title: row.title,
+      };
+      localStorage.removeItem('ntQueue:stopHistory');
+      paint();
+      return { shown, afterHidden: row.hidden };
+    })()`);
+    check('the garage summarizes the last stops by reason',
+      stopMix.shown.hidden === false && stopMix.shown.display !== 'none'
+        && stopMix.shown.text === 'DQ 1 · limit 1 · manual 1 · results 1'
+        && /Last 4 stops in 7 days/.test(stopMix.shown.title)
+        && /DQ 1, limit 1, manual 1, results 1/.test(stopMix.shown.title)
+        && stopMix.afterHidden === true, stopMix);
+
     // El aviso de version vive una sola vez, en la cabecera del panel de carrera.
     // El garaje ya no crea un segundo boton que abria la misma descarga.
     const garageUpdate = await cdp.evaluate(`(() => {

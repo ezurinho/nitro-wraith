@@ -5130,6 +5130,9 @@ All of this only aims at believable statistics. It is your call and your risk.
   // sola, y volver a encenderlo (Alt+A / MODE) la borra.
   const STOP_MARK = 'ntQueue:stoppedAt';
   const LAST_STOP = 'ntQueue:lastStop';
+  const STOP_HISTORY = 'ntQueue:stopHistory';
+  const STOP_HISTORY_MAX = 20;
+  const STOP_HISTORY_DAYS = 7;
   const STOP_HOLD_MAX = 24 * 60 * 60 * 1000;
 
   // La retencion se calcula igual en la marca activa y en la tarjeta de la
@@ -5153,6 +5156,35 @@ All of this only aims at believable statistics. It is your call and your risk.
     try {
       localStorage.setItem(STOP_MARK, JSON.stringify(entry));
       localStorage.setItem(LAST_STOP, JSON.stringify({ ...entry, clearedAt: 0, clearedBy: '' }));
+    } catch {
+      /* almacenamiento bloqueado */
+    }
+    noteStopHistory(entry);
+  }
+
+  // Una parada puede marcarse dos veces en el mismo latido (por ejemplo al
+  // volver de resultados). Se descarta el duplicado inmediato para que el
+  // resumen cuente paradas, no llamadas.
+  function noteStopHistory(entry) {
+    let list = [];
+    try {
+      const saved = JSON.parse(localStorage.getItem(STOP_HISTORY) || '[]');
+      if (Array.isArray(saved)) list = saved;
+    } catch {
+      /* almacenamiento bloqueado o JSON viejo */
+    }
+
+    const last = list[list.length - 1];
+    if (last && Number.isFinite(Number(last.at))
+      && entry.at - Number(last.at) < 5000
+      && String(last.reason || '') === entry.reason) {
+      return;
+    }
+
+    list.push({ at: entry.at, reason: entry.reason, holdMs: entry.holdMs });
+    if (list.length > STOP_HISTORY_MAX) list = list.slice(-STOP_HISTORY_MAX);
+    try {
+      localStorage.setItem(STOP_HISTORY, JSON.stringify(list));
     } catch {
       /* almacenamiento bloqueado */
     }
@@ -5212,6 +5244,29 @@ All of this only aims at believable statistics. It is your call and your risk.
     const h = Math.floor(min / 60);
     const m = min % 60;
     return m ? `${h}h ${m}m` : `${h}h`;
+  }
+
+  function stopHistoryRead(now = Date.now()) {
+    const cutoff = now - STOP_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+    try {
+      const saved = JSON.parse(localStorage.getItem(STOP_HISTORY) || '[]');
+      if (!Array.isArray(saved)) return [];
+      return saved
+        .filter((item) => item && Number.isFinite(Number(item.at)) && Number(item.at) >= cutoff)
+        .slice(-STOP_HISTORY_MAX);
+    } catch {
+      return [];
+    }
+  }
+
+  function stopHistorySummary(now = Date.now()) {
+    const counts = { DQ: 0, limit: 0, manual: 0, results: 0 };
+    const list = stopHistoryRead(now);
+    for (const item of list) {
+      const kind = stopReasonKind(item.reason);
+      if (Object.prototype.hasOwnProperty.call(counts, kind.label)) counts[kind.label] += 1;
+    }
+    return { total: list.length, counts };
   }
 
   // Aviso para el panel del tipador (la cola no tiene panel): se deja en
@@ -14298,6 +14353,7 @@ All of this only aims at believable statistics. It is your call and your risk.
             <div class="r" data-f="renewedRow" hidden><span>renewed</span><b data-f="renewed">—</b></div>
             <div class="r" data-f="waitRow" hidden><span>waiting on</span><b data-f="wait">—</b></div>
             <div class="r" data-f="stopRow" hidden><span data-f="stopLabel">last stop</span><b data-f="lastStop">—</b></div>
+            <div class="r" data-f="stopHistoryRow" hidden><span>recent stops</span><b data-f="stopHistory">—</b></div>
             <div class="r" data-f="raceRow"><span>next race</span><b class="race" data-f="race" title="Automatic start: click the value to cancel it (the bot stays armed and offers it again a little later)">—</b></div>
             <div class="r" data-f="dayRow" hidden><span>races</span><b data-f="dayRaces">—</b></div>
             <div class="r" data-f="budgetRow" hidden><span>day left</span><b data-f="dayBudget">—</b></div>
@@ -14354,6 +14410,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         stopRow: root.querySelector('[data-f="stopRow"]'),
         stopLabel: root.querySelector('[data-f="stopLabel"]'),
         lastStop: root.querySelector('[data-f="lastStop"]'),
+        stopHistoryRow: root.querySelector('[data-f="stopHistoryRow"]'),
+        stopHistory: root.querySelector('[data-f="stopHistory"]'),
         raceRow: root.querySelector('[data-f="raceRow"]'),
         race: root.querySelector('[data-f="race"]'),
         dayRow: root.querySelector('[data-f="dayRow"]'),
@@ -15050,6 +15108,21 @@ All of this only aims at believable statistics. It is your call and your risk.
         qpanel.lastStop.dataset.warn = '';
         qpanel.stopRow.title = `Last stop: ${new Date(lastStop.at).toLocaleString()} · ${lastStop.reason || 'manual stop'} · hold ${shortWait(lastStop.holdMs)}`
           + (lastStop.clearedAt ? ` · cleared manually at ${new Date(lastStop.clearedAt).toLocaleTimeString()}` : ' · hold elapsed');
+      }
+
+      // Reparto de las ultimas paradas, no solo la ultima: DQ, limite y manual
+      // son las tres causas que se mezclan al decidir si se puede volver a
+      // correr. La ventana corta evita que un dia viejo pinte la noche de hoy.
+      const stopMix = stopHistorySummary();
+      const stopMixParts = ['DQ', 'limit', 'manual', 'results']
+        .filter((kind) => stopMix.counts[kind] > 0)
+        .map((kind) => `${kind} ${stopMix.counts[kind]}`);
+      qpanel.stopHistoryRow.hidden = stopMix.total === 0;
+      if (stopMix.total) {
+        qpanel.stopHistory.textContent = stopMixParts.join(' · ');
+        qpanel.stopHistoryRow.title = `Last ${stopMix.total} stop${stopMix.total === 1 ? '' : 's'} in ${STOP_HISTORY_DAYS} days: `
+          + stopMixParts.join(', ')
+          + '. Local history, kept only in this browser.';
       }
 
       // Ultima decision de la cola: el salto al garaje solo se explicaba en la
