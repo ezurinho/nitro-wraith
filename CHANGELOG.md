@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.14.9 — 2026-11-14
+
+- test: force only the screenshot paint, not every debug patch
+- test: force the panel repaint when seeding screenshot state
+- test: log the seeded panel state for screenshot debugging
+
 ## 8.14.8 — 2026-11-14
 
 - test: stop the boot loop before seeding panel screenshots
