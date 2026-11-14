@@ -7802,6 +7802,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       chKnown = new Set();
       chDone = new Set();
     }
+    let completed = false;
     for (const item of list) {
       const done = item.goal > 0 && item.progress >= item.goal;
       if (!chKnown.has(item.key)) {
@@ -7819,8 +7820,10 @@ All of this only aims at believable statistics. It is your call and your risk.
           todayBump({ chKey: item.key, at: Date.now() });
         }
         log(`Daily Challenge complete: ${item.title} (${item.goal}/${item.goal}).`);
+        completed = true;
       }
     }
+    return completed;
   }
 
   function challengeEntries(active, progress, types) {
@@ -7886,7 +7889,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       }, 0);
       chAllCache = challengeEntries(active, progress, types);
       chCache = chAllCache.slice(0, 3);
-      noteChallengeState(chCache);
+      if (noteChallengeState(chCache)) schedulePanelRefresh();
       return chCache;
     }
 
@@ -7903,7 +7906,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       };
     });
     chCache = chAllCache.slice(0, 3);
-    noteChallengeState(chCache);
+    if (noteChallengeState(chCache)) schedulePanelRefresh();
     return chCache;
   }
 
@@ -10837,6 +10840,18 @@ All of this only aims at believable statistics. It is your call and your risk.
   // ningun cambio visible de la carrera.
   function panelPaintEveryMs() {
     return session.typing ? 1000 : 2000;
+  }
+
+  // Un reto completado es un aviso, no un detalle de fondo: no espera al
+  // siguiente latido de 2 s. Se agrupa en un solo repintado para que dos retos
+  // que caen juntos no encolen dos actualizaciones.
+  let panelRefreshTimer = 0;
+  function schedulePanelRefresh() {
+    if (panelRefreshTimer) return;
+    panelRefreshTimer = setTimeout(() => {
+      panelRefreshTimer = 0;
+      updatePanel();
+    }, 0);
   }
 
   function updatePanel(force = false) {
