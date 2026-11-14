@@ -263,8 +263,17 @@ async function capturePanelThemes(cdp, appUrl) {
     }
   }, 15000, 'the panel for screenshots');
   // Deja que boot termine de cargar contadores antes de sembrar la demo; si no,
-  // el panel se queda con los ceros de la carga y la captura no sirve.
+  // el panel se queda con los ceros de la carga y la captura no sirve. El
+  // runAuto de boot se para primero para que no abra una tanda nueva encima de
+  // los contadores sembrados.
   await sleep(900);
+  await cdp.evaluate(`(() => {
+    const frame = document.querySelector('iframe');
+    const d = frame && frame.contentWindow && frame.contentWindow.__ntaDebug;
+    if (d && d.stop) d.stop();
+    return true;
+  })()`);
+  await sleep(300);
 
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 520, height: 1100, deviceScaleFactor: 2, mobile: false,
@@ -293,6 +302,7 @@ async function capturePanelThemes(cdp, appUrl) {
       races: 128, raceLimit: 310, xp: 1240,
       chars: 550, correct: 543, errors: 7,
       startedAt: now - 60000, endedAt: 0, clockDone: true, typing: true,
+      stopped: 0, closed: 0,
       dailyRaceLimit: 0, dailyXpLimit: 0, activeOn: 0,
     });
     d.seedHistory([

@@ -7479,6 +7479,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     // El harness tambien puede fotografiar el panel en estado de carrera sin
     // teclear de verdad; no toca ninguna otra parte del flujo.
     if (patch.typing !== undefined) session.typing = Boolean(patch.typing);
+    if (patch.stopped !== undefined) session.stopped = Boolean(patch.stopped);
+    if (patch.closed !== undefined) session.closed = Boolean(patch.closed);
     if (Array.isArray(patch.clockSamples)) {
       session.clockSamples = patch.clockSamples.map(Number).filter(Number.isFinite);
     }
