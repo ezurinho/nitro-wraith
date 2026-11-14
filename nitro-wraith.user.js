@@ -5195,6 +5195,16 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
+  // La fila del garaje no repite el texto tecnico entero: lo reduce a la
+  // categoria que se busca de un vistazo. El detalle sigue en el tooltip.
+  function stopReasonKind(reason) {
+    const text = String(reason || '').toLowerCase();
+    if (/\bdq\b|disqualif/.test(text)) return { label: 'DQ', warn: '2' };
+    if (/limit|tope|cap\b|budget|daily/.test(text)) return { label: 'limit', warn: '1' };
+    if (/results page/.test(text)) return { label: 'results', warn: '1' };
+    return { label: 'manual', warn: '' };
+  }
+
   // Aviso para el panel del tipador (la cola no tiene panel): se deja en
   // localStorage y el tipador lo pinta al arrancar. Vive arriba porque tambien
   // lo usa el tipador al pararse por una racha de DQ.
@@ -14266,7 +14276,7 @@ All of this only aims at believable statistics. It is your call and your risk.
             <div class="r"><span>theme</span><button class="theme" type="button" data-f="theme" aria-live="polite" aria-label="Panel theme: ${THEME_LABELS[panelTheme] || panelTheme}. Activate to cycle." title="Click to cycle the panel theme: carbon, aurora, sunset, ice, violet, rgb. The race panel follows it.">${THEME_LABELS[panelTheme] || panelTheme}</button></div>
             <div class="r" data-f="renewedRow" hidden><span>renewed</span><b data-f="renewed">—</b></div>
             <div class="r" data-f="waitRow" hidden><span>waiting on</span><b data-f="wait">—</b></div>
-            <div class="r" data-f="stopRow" hidden><span>last stop</span><b data-f="lastStop">—</b></div>
+            <div class="r" data-f="stopRow" hidden><span data-f="stopLabel">last stop</span><b data-f="lastStop">—</b></div>
             <div class="r" data-f="raceRow"><span>next race</span><b class="race" data-f="race" title="Automatic start: click the value to cancel it (the bot stays armed and offers it again a little later)">—</b></div>
             <div class="r" data-f="dayRow" hidden><span>races</span><b data-f="dayRaces">—</b></div>
             <div class="r" data-f="budgetRow" hidden><span>day left</span><b data-f="dayBudget">—</b></div>
@@ -14321,6 +14331,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         waitRow: root.querySelector('[data-f="waitRow"]'),
         wait: root.querySelector('[data-f="wait"]'),
         stopRow: root.querySelector('[data-f="stopRow"]'),
+        stopLabel: root.querySelector('[data-f="stopLabel"]'),
         lastStop: root.querySelector('[data-f="lastStop"]'),
         raceRow: root.querySelector('[data-f="raceRow"]'),
         race: root.querySelector('[data-f="race"]'),
@@ -14993,19 +15004,31 @@ All of this only aims at believable statistics. It is your call and your risk.
           .join(' · ')}. Each one clears by itself.`;
       }
 
-      // Ultima parada, con el motivo y si la levantaste a mano. La marca activa
-      // caduca; esta tarjeta se queda 24 h para poder reconstruir que paso.
+      // Parada actual: el reloj que de verdad frena la cola. La marca activa
+      // caduca; despues la misma fila pasa a "last stop" durante 24 h para
+      // reconstruir que paso sin confundirlo con una parada en curso.
       const lastStop = lastStopInfo();
-      const recentStop = lastStop && Date.now() - lastStop.at < 24 * 3600000;
-      qpanel.stopRow.hidden = !recentStop;
-      if (recentStop) {
-        const reason = String(lastStop.reason || 'manual stop').split(' · ')[0].slice(0, 34);
+      const stopLeft = lastStop ? Math.max(0, lastStop.endAt - Date.now()) : 0;
+      const activeStop = Boolean(lastStop && !lastStop.clearedAt && stopLeft > 0);
+      const recentStop = Boolean(lastStop && Date.now() - lastStop.at < 24 * 3600000);
+      qpanel.stopRow.hidden = !(activeStop || recentStop);
+      if (activeStop) {
+        const kind = stopReasonKind(lastStop.reason);
+        qpanel.stopLabel.textContent = 'stopped';
+        qpanel.lastStop.textContent = `${kind.label} · ${shortWait(stopLeft)} left`;
+        qpanel.lastStop.dataset.warn = kind.warn;
+        qpanel.stopRow.title = `Stopped ${new Date(lastStop.at).toLocaleTimeString()} · ${lastStop.reason || 'manual stop'}`
+          + ` · ${shortWait(stopLeft)} left of ${shortWait(lastStop.holdMs)}. Resume or Alt+A starts again.`;
+      } else if (recentStop) {
+        const kind = stopReasonKind(lastStop.reason);
         const state = lastStop.clearedAt
           ? `cleared manually ${shortWait(Date.now() - lastStop.clearedAt)} ago`
-          : (Date.now() < lastStop.endAt ? `${shortWait(lastStop.endAt - Date.now())} left` : 'expired');
-        qpanel.lastStop.textContent = `${reason} · ${state}`;
+          : 'expired';
+        qpanel.stopLabel.textContent = 'last stop';
+        qpanel.lastStop.textContent = `${kind.label} · ${state}`;
+        qpanel.lastStop.dataset.warn = '';
         qpanel.stopRow.title = `Last stop: ${new Date(lastStop.at).toLocaleString()} · ${lastStop.reason || 'manual stop'} · hold ${shortWait(lastStop.holdMs)}`
-          + (lastStop.clearedAt ? ` · cleared manually at ${new Date(lastStop.clearedAt).toLocaleTimeString()}` : ' · not cleared manually');
+          + (lastStop.clearedAt ? ` · cleared manually at ${new Date(lastStop.clearedAt).toLocaleTimeString()}` : ' · hold elapsed');
       }
 
       // Ultima decision de la cola: el salto al garaje solo se explicaba en la

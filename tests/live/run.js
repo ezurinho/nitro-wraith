@@ -3873,35 +3873,62 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageFold.opened.fold === '0' && garageFold.opened.rows !== 'none',
       garageFold);
 
-    // Tarjeta de ultima parada: motivo, retencion y si se levanto a mano.
+    // Fila de parada: mientras la marca esta viva dice "stopped", la categoria
+    // (DQ / limit / manual) y lo que le queda; despues pasa a "last stop".
     const garageStop = await cdp.evaluate(`(() => {
       const host = document.getElementById('nt-queue-panel');
       const root = host.shadowRoot;
       const row = root.querySelector('[data-f="stopRow"]');
+      const label = root.querySelector('[data-f="stopLabel"]');
       const text = root.querySelector('[data-f="lastStop"]');
       const paint = () => window.__ntaDebug.garagePaint();
+      const read = () => ({
+        hidden: row.hidden,
+        display: getComputedStyle(row).display,
+        label: label.textContent.trim(),
+        text: text.textContent.trim(),
+        title: row.title,
+        warn: text.dataset.warn || '',
+      });
+
       localStorage.setItem('ntQueue:lastStop', JSON.stringify({
-        at: Date.now() - 30 * 60000, reason: 'tanda limit', holdMs: 6 * 3600000,
+        at: Date.now() - 30 * 60000, reason: 'daily limit 80 races', holdMs: 3600000,
         clearedAt: 0, clearedBy: '',
       }));
       paint();
-      const active = { hidden: row.hidden, display: getComputedStyle(row).display, text: text.textContent, title: row.title };
+      const active = read();
+
       localStorage.setItem('ntQueue:lastStop', JSON.stringify({
-        at: Date.now() - 5 * 60000, reason: 'tanda limit', holdMs: 3600000,
+        at: Date.now() - 10 * 60000,
+        reason: 'DQ streak: stopped before the site block (5 in a row)',
+        holdMs: 6 * 3600000, clearedAt: 0, clearedBy: '',
+      }));
+      paint();
+      const dq = read();
+
+      localStorage.setItem('ntQueue:lastStop', JSON.stringify({
+        at: Date.now() - 5 * 60000, reason: 'daily limit 80 races', holdMs: 3600000,
         clearedAt: Date.now() - 2 * 60000, clearedBy: 'manual',
       }));
       paint();
-      const cleared = { hidden: row.hidden, text: text.textContent, title: row.title };
+      const cleared = read();
+
       localStorage.removeItem('ntQueue:lastStop');
       paint();
-      return { active, cleared, afterHidden: row.hidden };
+      return { active, dq, cleared, afterHidden: row.hidden };
     })()`);
-    check('the garage panel shows the last stop, its hold and a manual clear',
+    check('the garage panel shows a stopped bot with its reason category and remaining hold',
       garageStop.active.hidden === false && garageStop.active.display !== 'none'
-        && /tanda limit/.test(garageStop.active.text) && /left/.test(garageStop.active.text)
-        && /Last stop:/.test(garageStop.active.title) && /not cleared manually/.test(garageStop.active.title)
-        && garageStop.cleared.hidden === false
-        && /cleared manually/.test(garageStop.cleared.text)
+        && garageStop.active.label === 'stopped'
+        && garageStop.active.text.startsWith('limit · ') && garageStop.active.text.endsWith(' left')
+        && garageStop.active.warn === '1'
+        && /daily limit 80 races/.test(garageStop.active.title)
+        && /Resume or Alt\+A starts again/.test(garageStop.active.title), garageStop.active);
+    check('the garage row distinguishes DQ, limit and manual stops',
+      garageStop.dq.label === 'stopped' && garageStop.dq.text.startsWith('DQ · ')
+        && garageStop.dq.warn === '2' && /DQ streak/.test(garageStop.dq.title)
+        && garageStop.cleared.label === 'last stop'
+        && garageStop.cleared.text.startsWith('limit · cleared manually')
         && /cleared manually at/.test(garageStop.cleared.title)
         && garageStop.afterHidden === true, garageStop);
 
