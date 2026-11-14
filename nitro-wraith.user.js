@@ -7490,7 +7490,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (patch.trim !== undefined) session.trim = clamp(Number(patch.trim) || 1, 0.9, 1.1);
     if (patch.nitroDone !== undefined) session.nitroDone = Boolean(patch.nitroDone);
     if (patch.nitroTries !== undefined) session.nitroTries = Math.max(0, Number(patch.nitroTries) || 0);
-    updatePanel();
+    // El harness corre con la pestana en segundo plano: el latido normal se
+    // salta el DOM por `document.hidden`, asi que una siembra de debug tiene que
+    // pedir el repintado forzado o la captura ensena los ceros del arranque.
+    updatePanel(true);
   };
 
   // Una carrera registrada por el camino normal (recordRace) y el estado de la
