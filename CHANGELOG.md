@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.22 — 2026-11-14
+
+- fix: carry the stop reason into the race panel
+
 ## 8.14.21 — 2026-11-14
 
 - test: allow background storage reads during panel startup
