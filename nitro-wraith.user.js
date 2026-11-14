@@ -7490,10 +7490,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (patch.trim !== undefined) session.trim = clamp(Number(patch.trim) || 1, 0.9, 1.1);
     if (patch.nitroDone !== undefined) session.nitroDone = Boolean(patch.nitroDone);
     if (patch.nitroTries !== undefined) session.nitroTries = Math.max(0, Number(patch.nitroTries) || 0);
-    // El harness corre con la pestana en segundo plano: el latido normal se
-    // salta el DOM por `document.hidden`, asi que una siembra de debug tiene que
-    // pedir el repintado forzado o la captura ensena los ceros del arranque.
-    updatePanel(true);
+    updatePanel();
   };
 
   // Una carrera registrada por el camino normal (recordRace) y el estado de la
@@ -7556,8 +7553,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     for (const key of Object.keys(perfCounters)) perfCounters[key] = 0;
     return { ...perfCounters };
   };
-  window.__ntaDebug.paint = () => {
-    updatePanel();
+  window.__ntaDebug.paint = (force = false) => {
+    updatePanel(Boolean(force));
     return { ...perfCounters };
   };
   window.__ntaDebug.calibrateClock = () => calibrateRaceClock(

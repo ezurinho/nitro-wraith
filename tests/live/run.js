@@ -317,7 +317,9 @@ async function capturePanelThemes(cdp, appUrl) {
       const collapse = root.querySelector('.collapse');
       if (collapse) collapse.click();
     }
-    d.paint();
+    // La pagina del harness queda en segundo plano durante la captura: se pide
+    // el repintado forzado para que el panel no dependa de document.hidden.
+    d.paint(true);
     return { ready: true, theme: panel.dataset.theme, races: d.session().races };
   })()`);
   if (!seeded.ready) throw new Error('the panel is not ready for screenshots');
