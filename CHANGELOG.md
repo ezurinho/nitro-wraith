@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.14 — 2026-11-14
+
+- perf: lazy-mount panel views and trim startup reads
+
 ## 8.14.13 — 2026-11-14
 
 - fix: paint a completed challenge without waiting for idle cadence

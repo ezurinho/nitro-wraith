@@ -15,7 +15,7 @@
   <a href="https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js">
     <img src="https://img.shields.io/badge/INSTALL_USERSCRIPT-70FFAB?style=for-the-badge&logo=tampermonkey&logoColor=07100C&labelColor=0B1711" alt="Install NITRO WRAITH">
   </a>
-  <a href="https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.13">
+  <a href="https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.14">
     <img src="https://img.shields.io/github/v/release/ezurinho/nitro-wraith?style=for-the-badge&label=release&labelColor=0B1711&color=62E2D0" alt="Latest release">
   </a>
   <a href="CHANGELOG.md">
@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-8.14.13-5CF2A0?style=flat-square&labelColor=0B1711" alt="version"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-8.14.14-5CF2A0?style=flat-square&labelColor=0B1711" alt="version"></a>
   <a href="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml"><img src="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml/badge.svg?branch=main" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-62E2D0?style=flat-square&labelColor=0B1711" alt="license"></a>
   <a href="https://www.tampermonkey.net/"><img src="https://img.shields.io/badge/Tampermonkey-userscript-FFC66D?style=flat-square&labelColor=0B1711" alt="Tampermonkey"></a>
