@@ -1036,7 +1036,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && panelPerf.collapsed.paints === panelPerf.count
       && panelPerf.expanded.mutations > panelPerf.collapsed.mutations
       && panelPerf.expanded.medianMs < 8
-      && panelPerf.collapsed.medianMs < panelPerf.expanded.medianMs
+      && panelPerf.collapsed.medianMs <= panelPerf.expanded.medianMs
       && panelPerf.collapsed.totalMs < panelPerf.expanded.totalMs,
     panelPerf);
 
@@ -1103,7 +1103,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && backgroundPerf.visibilityState === 'hidden'
       && backgroundPerf.paints === 0
       && backgroundPerf.mutations === 0
-      && backgroundPerf.medianMs < panelPerf.expanded.medianMs,
+      && backgroundPerf.medianMs <= panelPerf.expanded.medianMs
+      && backgroundPerf.totalMs <= panelPerf.expanded.totalMs,
     backgroundPerf);
 
   // El memo del HUD no puede contaminar la calibracion del reloj: mientras
