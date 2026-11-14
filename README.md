@@ -53,9 +53,11 @@
 
 ## The panel
 
-<img src="assets/panel-preview.png" width="100%" alt="NITRO WRAITH live panel and garage queue preview">
+<p align="center">
+  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: 110.0 WPM, 98.7% accuracy, season progress and session controls">
+</p>
 
-<p align="center"><sub>Layout preview with demo values. The real panel lives in the bottom-right corner of the game.</sub></p>
+<p align="center"><sub>A real capture from the browser harness, with seeded demo values. The panel lives in the bottom-right corner of the game.</sub></p>
 
 The panel is the control surface, not a black box:
 
@@ -63,6 +65,14 @@ The panel is the control surface, not a black box:
 - **Garage queue:** what it is waiting for, the next race, Mystery Box timing, and a one-line reason for every hold.
 - **TUNE:** pace profile, limits, breaks, stickers, sound, and the safety guard.
 - **LOG / INFO:** history, season snapshot, diagnostics, and the keyboard map.
+
+### Six themes
+
+<p align="center">
+  <img src="assets/themes.png" width="100%" alt="The six NITRO WRAITH themes: Carbon, Aurora, Sunset, Ice, Violet and RGB">
+</p>
+
+<p align="center"><sub><strong>Carbon</strong>, <strong>Aurora</strong>, <strong>Sunset</strong>, <strong>Ice</strong>, <strong>Violet</strong> and <strong>RGB</strong>. All six keep the same layout; switch with <kbd>Alt</kbd> + <kbd>T</kbd> or the theme button.</sub></p>
 
 ## What it does
 

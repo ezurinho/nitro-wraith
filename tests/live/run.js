@@ -335,7 +335,6 @@ async function capturePanelThemes(cdp, appUrl) {
     return { ready: true, theme: panel.dataset.theme, races: d.session().races };
   })()`);
   if (!seeded.ready) throw new Error('the panel is not ready for screenshots');
-  console.log(`screenshot seed: ${JSON.stringify(seeded)}`);
 
   const themes = ['carbon', 'aurora', 'sunset', 'ice', 'violet', 'rgb'];
   try {
@@ -360,7 +359,6 @@ async function capturePanelThemes(cdp, appUrl) {
         if (!panel) return null;
         const status = root.querySelector('[data-field="status"]');
         if (status) status.textContent = 'Live · target 111 WPM';
-        const d = frame.contentWindow.__ntaDebug;
         const f = frame.getBoundingClientRect();
         const r = panel.getBoundingClientRect();
         return {
@@ -368,13 +366,10 @@ async function capturePanelThemes(cdp, appUrl) {
           y: Math.max(0, Math.round(f.top + r.top - 18)),
           width: Math.ceil(r.width + 36),
           height: Math.ceil(r.height + 36),
-          state: d ? d.session() : null,
         };
       })()`);
       if (!clip) throw new Error(`panel clip not found: ${theme}`);
-      const { state, ...shotClip } = clip;
-      console.log(`screenshot ${theme} state: ${JSON.stringify(state)}`);
-      await captureShot(cdp, path.join(SHOT_DIR, `theme-${theme}.png`), shotClip);
+      await captureShot(cdp, path.join(SHOT_DIR, `theme-${theme}.png`), clip);
     }
   } finally {
     try { await cdp.send('Emulation.clearDeviceMetricsOverride'); } catch { /* ya cerro */ }
