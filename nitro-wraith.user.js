@@ -5205,6 +5205,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     return { label: 'manual', warn: '' };
   }
 
+  function stopWaitText(ms) {
+    const min = Math.max(0, Math.round(ms / 60000));
+    if (min < 1) return 'less than a minute';
+    if (min < 60) return `${min} min`;
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return m ? `${h}h ${m}m` : `${h}h`;
+  }
+
   // Aviso para el panel del tipador (la cola no tiene panel): se deja en
   // localStorage y el tipador lo pinta al arrancar. Vive arriba porque tambien
   // lo usa el tipador al pararse por una racha de DQ.
@@ -11838,6 +11847,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     // La barra de abajo es la linea que se lee de un vistazo: LED, estado, modo,
     // WPM vivo, techo y la pista de teclas.
     const off = session.stopped;
+    // La barra del panel de carrera tambien tiene que decir por que esta parado:
+    // antes decia "resumes itself" incluso despues de un Stop manual. La marca
+    // compartida trae el motivo y la retencion, asi que las dos ventanas cuentan
+    // la misma historia.
+    const activeStop = off ? lastStopInfo() : null;
+    const stopLeft = activeStop ? Math.max(0, activeStop.endAt - Date.now()) : 0;
+    const stoppedNow = Boolean(activeStop && !activeStop.clearedAt && stopLeft > 0);
+    const stopKind = stoppedNow ? stopReasonKind(activeStop.reason) : null;
     const stateText = off ? 'waiting' : breaking ? 'break' : session.paused ? 'paused' : (session.typing ? 'racing' : 'idle');
     setText(panel.refs.footState, stateText);
     setText(panel.refs.footMode, MODE);
@@ -11853,10 +11870,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       ? `${Math.floor(raceSeconds / 60)}:${String(raceSeconds % 60).padStart(2, '0')}`
       : '0:00';
     setText(panel.refs.footClock, raceClock);
-    setText(panel.refs.footHint, off ? 'resumes itself' : session.paused ? 'resume' : 'Alt+S stop');
+    setText(panel.refs.footHint, off
+      ? (stoppedNow ? `${stopKind.label} · ${stopWaitText(stopLeft)} left` : 'Alt+A resume')
+      : session.paused ? 'resume' : 'Alt+S stop');
     // `off` ya ES session.stopped, asi que la rama que volvia a mirarlo nunca
     // se alcanzaba: el descanso se pintaba como "waiting" y no como "break".
-    setText(panel.refs.liveTag, off ? 'waiting · resumes itself' : session.typing ? 'racing' : breaking ? 'break' : 'waiting');
+    setText(panel.refs.liveTag, off
+      ? (stoppedNow ? `stopped · ${stopKind.label}` : 'stopped · Alt+A resume')
+      : session.typing ? 'racing' : breaking ? 'break' : 'waiting');
 
     // El registro ocupa una vista entera y solo se ve al abrir LOG. Mientras
     // tanto basta con leer los retos para contarlos; las listas se pintan al

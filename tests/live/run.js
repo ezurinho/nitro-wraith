@@ -5080,11 +5080,15 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const stop = s.querySelector('.stop');
     const toggle = s.querySelector('.toggle');
+    const hint = s.querySelector('[data-field="footHint"]');
+    const tag = s.querySelector('[data-field="liveTag"]');
     const before = {
       text: (stop.textContent || '').trim(),
       disabled: stop.disabled,
       toggleDisabled: toggle.disabled,
       title: stop.title,
+      hint: (hint.textContent || '').trim(),
+      tag: (tag.textContent || '').trim(),
     };
     stop.click();
     const after = {
@@ -5096,7 +5100,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('the race panel Stop button becomes Resume when the bot is stopped',
     panelResume.before.text === 'Resume' && panelResume.before.disabled === false
       && panelResume.before.toggleDisabled === true
-      && /Alt\+A/.test(panelResume.before.title), panelResume);
+      && /Alt\+A/.test(panelResume.before.title)
+      && /manual/.test(panelResume.before.hint) && /left/.test(panelResume.before.hint)
+      && /stopped · manual/.test(panelResume.before.tag), panelResume);
   check('the race panel Resume button clears the stop like Alt+A',
     panelResume.after.text === 'Stop' && panelResume.after.marker === null, panelResume);
 
