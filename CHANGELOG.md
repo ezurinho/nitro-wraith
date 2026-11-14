@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.13 — 2026-11-14
+
+- fix: paint a completed challenge without waiting for idle cadence
+- perf: halve panel paints while the bot is waiting
+
 ## 8.14.12 — 2026-11-14
 
 - perf: cut redundant panel work and social refreshes
