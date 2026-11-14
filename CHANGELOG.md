@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.25 — 2026-11-14
+
+- test: measure the folded panel by DOM work
+- feat: separate permanent bans from manual stops
+
 ## 8.14.24 — 2026-11-14
 
 - feat: stop on a permanent account ban
