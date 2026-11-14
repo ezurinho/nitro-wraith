@@ -253,12 +253,18 @@ async function capturePanelThemes(cdp, appUrl) {
   await cdp.send('Page.navigate', { url: appUrl });
   await waitFor(async () => {
     try {
-      return await cdp.evaluate(`Boolean(document.querySelector('iframe')
-        && document.querySelector('iframe').contentWindow.__ntaDebug)`);
+      return await cdp.evaluate(`(() => {
+        const frame = document.querySelector('iframe');
+        return Boolean(frame && frame.contentWindow.__ntaDebug
+          && frame.contentWindow.document.getElementById('nt-autotyper-panel'));
+      })()`);
     } catch {
       return false;
     }
   }, 15000, 'the panel for screenshots');
+  // Deja que boot termine de cargar contadores antes de sembrar la demo; si no,
+  // el panel se queda con los ceros de la carga y la captura no sirve.
+  await sleep(900);
 
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 520, height: 1100, deviceScaleFactor: 2, mobile: false,
@@ -286,7 +292,7 @@ async function capturePanelThemes(cdp, appUrl) {
     d.patchSession({
       races: 128, raceLimit: 310, xp: 1240,
       chars: 550, correct: 543, errors: 7,
-      startedAt: now - 60000, endedAt: 0, clockDone: true,
+      startedAt: now - 60000, endedAt: 0, clockDone: true, typing: true,
       dailyRaceLimit: 0, dailyXpLimit: 0, activeOn: 0,
     });
     d.seedHistory([
@@ -302,7 +308,7 @@ async function capturePanelThemes(cdp, appUrl) {
       if (collapse) collapse.click();
     }
     d.paint();
-    return { ready: true, theme: panel.dataset.theme };
+    return { ready: true, theme: panel.dataset.theme, races: d.session().races };
   })()`);
   if (!seeded.ready) throw new Error('the panel is not ready for screenshots');
 
@@ -322,9 +328,13 @@ async function capturePanelThemes(cdp, appUrl) {
 
       const clip = await cdp.evaluate(`(() => {
         const frame = document.querySelector('iframe');
-        const panel = frame.contentWindow.document
-          .getElementById('nt-autotyper-panel').shadowRoot.querySelector('.panel');
-        if (!frame || !panel) return null;
+        if (!frame) return null;
+        const root = frame.contentWindow.document
+          .getElementById('nt-autotyper-panel').shadowRoot;
+        const panel = root.querySelector('.panel');
+        if (!panel) return null;
+        const status = root.querySelector('[data-field="status"]');
+        if (status) status.textContent = 'Live · target 111 WPM';
         const f = frame.getBoundingClientRect();
         const r = panel.getBoundingClientRect();
         return {
