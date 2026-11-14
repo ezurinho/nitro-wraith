@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.19 — 2026-11-14
+
+- fix: add a real stop control to the garage
+
 ## 8.14.18 — 2026-11-14
 
 - fix: keep a single update control in the header
