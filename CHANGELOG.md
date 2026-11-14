@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.18 — 2026-11-14
+
+- fix: keep a single update control in the header
+
 ## 8.14.17 — 2026-11-14
 
 - fix: wait out the site block before opening another race
