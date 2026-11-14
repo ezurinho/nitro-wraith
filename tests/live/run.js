@@ -3818,6 +3818,23 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageControl.tag === 'BUTTON' && garageControl.tab >= 0
         && new RegExp(garageControl.expected, 'i').test(garageControl.aria || ''), garageControl);
 
+    // El Stop del garaje es la salida cuando el panel de carrera no esta a la
+    // vista (resultados, DQ o garaje): debe ser un boton real, no una etiqueta.
+    const garageStopAction = await cdp.evaluate(`(() => {
+      const root = document.getElementById('nt-queue-panel').shadowRoot;
+      const btn = root.querySelector('[data-act="stop"]');
+      return {
+        present: Boolean(btn),
+        text: btn ? (btn.textContent || '').trim() : '',
+        type: btn ? btn.type : '',
+        danger: btn ? btn.classList.contains('danger') : false,
+        title: btn ? btn.title : '',
+      };
+    })()`);
+    check('the garage panel offers a real Stop action',
+      garageStopAction.present && garageStopAction.text === 'Stop' && garageStopAction.type === 'button'
+        && garageStopAction.danger && /stop/i.test(garageStopAction.title), garageStopAction);
+
     // Plegar el garaje: el boton de la cabecera deja solo la cabecera, guarda
     // el estado y Alt+G lo vuelve a abrir sin tocar el raton.
     const garageFold = await cdp.evaluate(`(async () => {
@@ -4698,6 +4715,38 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     dqBlock.expiredResult === true
       && dqBlock.expiredClicks.includes('garage')
       && !dqBlock.expiredClicks.includes('retry'), dqBlock);
+
+  // Con el bot parado, el modal de DQ no debe seguir pulsando Race Again: es
+  // justo el bucle que el Stop del garaje tiene que cortar.
+  const dqStopped = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d.recoverDq || !d.patchSession) return { hasHook: false };
+
+    d.patchSession({ stopped: true });
+    const modal = w.document.createElement('div');
+    modal.className = 'modal';
+    modal.style.cssText = 'position:fixed;left:20px;top:20px;width:420px;height:180px;background:#300;color:#fff;z-index:999999';
+    modal.innerHTML = '<h2>Disqualified</h2>'
+      + '<p>You have been disqualified from this race.</p>'
+      + '<button id="dq-stop-again">Race Again</button>'
+      + '<button id="dq-stop-garage">Go To Your Garage</button>';
+    w.__dqStopClicks = [];
+    modal.querySelector('#dq-stop-again').addEventListener('click', () => { w.__dqStopClicks.push('again'); });
+    modal.querySelector('#dq-stop-garage').addEventListener('click', () => { w.__dqStopClicks.push('garage'); });
+    w.document.body.appendChild(modal);
+
+    let result = false;
+    try {
+      result = d.recoverDq();
+    } finally {
+      modal.remove();
+      d.patchSession({ stopped: false });
+    }
+    return { hasHook: true, result, clicks: w.__dqStopClicks.slice() };
+  })()`);
+  check('a stopped bot leaves the DQ modal alone instead of pressing Race Again',
+    dqStopped.hasHook && dqStopped.result === true && dqStopped.clicks.length === 0, dqStopped);
 
   // La firma de la serie tiene que llevar el perfil: antes setPaceProfile la
   // llamaba sin el y la firma quedaba en ':count:min:max', asi que la serie de

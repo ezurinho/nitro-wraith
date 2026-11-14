@@ -5535,6 +5535,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     const text = modalText();
     if (!looksDisqualified(text)) return false;
 
+    // Si el usuario paro el bot, no se pulsa Race Again por el: era justo lo
+    // que seguia abriendo carreras despues de una descalificacion. El aviso se
+    // queda quieto hasta que se reanude a mano (Alt+A / Resume).
+    if (session.stopped) return true;
+
     // El castigo por racha no se cierra ni se reintenta: cada intento gasta
     // otra vuelta de las que el sitio cuenta. Se deja el aviso quieto y se
     // guarda la espera donde la leen la cola y el bucle de carreras.
@@ -14212,6 +14217,16 @@ All of this only aims at believable statistics. It is your call and your risk.
                  border-color: var(--line); box-shadow: none; }
           .act.ghost:hover:not(:disabled) { color: var(--acc); background: var(--acc-dim);
                  border-color: var(--line-strong); }
+          /* Stop comparte sitio con las acciones normales, pero su color no
+             invita a pulsarlo: parar es una salida, no el siguiente paso. */
+          .act.danger { color: #ffd0d0;
+                 background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 18%, transparent), color-mix(in srgb, var(--bad) 8%, transparent));
+                 border-color: color-mix(in srgb, var(--bad) 32%, transparent);
+                 box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
+          .act.danger:hover:not(:disabled) { color: #fff;
+                 background: color-mix(in srgb, var(--bad) 22%, transparent);
+                 border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+                 box-shadow: 0 0 20px -9px var(--bad), inset 0 1px 0 rgba(255, 255, 255, .12); }
           /* «Copy» es una herramienta, no una accion de carrera: se queda
              compacto para no apretar los dos botones que se usan de verdad. */
           .act.tool { flex: 0 0 auto; padding: 9px 12px; color: var(--dim); }
@@ -14263,6 +14278,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           <div class="acts">
             <button class="act" type="button" data-act="box">Claim box</button>
             <button class="act ghost" type="button" data-act="race">Race now</button>
+            <button class="act danger" type="button" data-act="stop" title="Stop the bot; mid-race it waits for the current race to end (same as Alt+S)">Stop</button>
             <button class="act ghost" type="button" data-act="resume" title="Clear a stop and start now; with a live race this sends the same Alt+A">Resume</button>
             <button class="act ghost" type="button" data-act="retry" hidden title="Advance the next sign-in retry without waiting for the countdown">Retry login</button>
             <button class="act ghost tool" type="button" data-act="diag" title="Copy a diagnostic of the queue: mode, state, active waits, last decision, last failure, today and budgets">Copy</button>
@@ -14322,6 +14338,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         why: root.querySelector('[data-f="why"]'),
         boxBtn: root.querySelector('[data-act="box"]'),
         raceBtn: root.querySelector('[data-act="race"]'),
+        stopBtn: root.querySelector('[data-act="stop"]'),
         resumeBtn: root.querySelector('[data-act="resume"]'),
         retryBtn: root.querySelector('[data-act="retry"]'),
         diagBtn: root.querySelector('[data-act="diag"]'),
@@ -14419,6 +14436,31 @@ All of this only aims at believable statistics. It is your call and your risk.
         clearRaceNow();
         raceNowHoldUntil = 0;
         queuePress('raceNow', button);
+        paintGaragePanel();
+      });
+
+      // Parar desde el garaje: con un tipador vivo se reenvia Alt+S, que deja
+      // terminar la carrera en curso antes de apagar (cortarla seria una DQ).
+      // Sin marco vivo no hay a quien mandar la tecla: se desarma la cola y se
+      // deja la marca de parada, que es la que impide abrir otra carrera sola.
+      refs.stopBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+
+        const live = typerState();
+        if (live && !live.stopped) {
+          const sent = forwardHotkeyToFrames('KeyS', 's');
+          queueWhy(sent
+            ? 'Stop: Alt+S sent to the race; no new race will be opened.'
+            : 'Stop: no race frame answered; click inside the race and press Alt+S.');
+          paintGaragePanel();
+          return;
+        }
+
+        clearRaceNow();
+        setArmed(false);
+        garageAutoDone = true;
+        markStopped('stopped from the garage', CONFIG.queue.stopHoldMs);
+        queueWhy('Stop: queue stopped from the garage; use Resume or Alt+A to start again.');
         paintGaragePanel();
       });
 
@@ -14814,6 +14856,16 @@ All of this only aims at believable statistics. It is your call and your risk.
       qpanel.resumeBtn.title = stoppedRecently()
         ? 'Clear the stop and start now; with a live race this sends the same Alt+A'
         : 'Send Alt+A to a live race, or re-arm the queue from the garage';
+
+      // El Stop no es un interruptor: una vez parado, Resume es la salida. Se
+      // desactiva para que dos clics seguidos no confundan la parada con un
+      // arranque ni dejen la marca a medias.
+      const liveTyper = typerState();
+      const alreadyStopped = stoppedRecently() || Boolean(liveTyper && liveTyper.stopped);
+      qpanel.stopBtn.disabled = alreadyStopped;
+      qpanel.stopBtn.title = alreadyStopped
+        ? 'Already stopped; use Resume or Alt+A to start again'
+        : 'Stop the bot; mid-race it waits for the current race to end (same as Alt+S)';
 
       // Resumen de la noche: lo que el dia lleva sumado (carreras, media, cajas
       // y DQ). Vive en localStorage y lo escriben las dos mitades, asi que
