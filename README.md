@@ -5,10 +5,9 @@
 <h1 align="center"><img src="assets/logo.svg" width="44" alt="" valign="middle"> NITRO WRAITH</h1>
 
 <p align="center">
-  <strong>Human pace. Zero fast mode.</strong><br>
-  A Tampermonkey userscript for one Nitro Type account: an automatic race queue,
-  typing calibrated to your own WPM average, and a live panel that shows exactly
-  what is happening.
+  <strong>Human pace. No fast mode.</strong><br>
+  A Tampermonkey userscript for one Nitro Type account. It runs the race queue,
+  types at a pace based on your own stats, and shows you what it is doing.
 </p>
 
 <p align="center">
@@ -31,23 +30,27 @@
   <img src="https://img.shields.io/badge/fast_mode-never-FF766F?style=flat-square&labelColor=0B1711" alt="No fast mode">
 </p>
 
-> **A userscript for one account, not a farm.** It chains races with human delays,
-> keeps typing inside a calibrated range, and never pretends to be faster than the
+> **One account, not a farm.** NITRO WRAITH races with human delays, keeps the
+> typing inside a calibrated range, and never pretends to be faster than the
 > game allows.
+
+I built it around a simple rule: if the bot cannot explain why it is waiting,
+it should not be racing. That is why the panel gives a reason for every hold,
+and why the queue would rather pause than guess.
 
 <table>
   <tr>
     <td width="33%" valign="top">
-      <h3>Human by design</h3>
-      <p>Breaks, session limits, daily caps, and a hard ceiling of 120 WPM. No fast mode, no shortcut around the pace.</p>
+      <h3>It takes its time</h3>
+      <p>Races start after a short, varied delay. Breaks, session limits and active hours are part of the loop, not an afterthought.</p>
     </td>
     <td width="33%" valign="top">
-      <h3>Everything visible</h3>
-      <p>Four views, six themes, a folded garage bar, and a live panel that stays readable while the race is running.</p>
+      <h3>It shows its work</h3>
+      <p>Four views, six themes, and a reason for every wait. You can see the current pace, the next race and whatever is holding it up.</p>
     </td>
     <td width="33%" valign="top">
-      <h3>Read-only social</h3>
-      <p>Friends, online count, requests, and team are fetched with GET only. The script never accepts, denies, invites, or sends.</p>
+      <h3>It only reads</h3>
+      <p>Friends and team counters use GET requests. The script never accepts, denies, invites, applies or sends anything.</p>
     </td>
   </tr>
 </table>
@@ -62,21 +65,22 @@
 
 The panel is the control surface, not a black box:
 
-- **Live view:** WPM, accuracy, the account-backed AUTO pace badge, target range, race count, session average, result, and the game HUD.
-- **Garage queue:** what it is waiting for, the next race, Mystery Box timing, and a one-line reason for every hold.
-- **TUNE:** pace profile, limits, breaks, stickers, sound, and the safety guard.
-- **LOG / INFO:** history, season snapshot, diagnostics, and the keyboard map.
-- **Header:** a small `UPDATE` button that only appears when the Gist has a newer version; it opens the fresh userscript. No button means the copy is current.
+- **Live:** WPM, accuracy, the account-backed AUTO pace badge, target range, race count, session average, result and the game HUD.
+- **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing and a one-line reason for every hold.
+- **TUNE:** pace profile, limits, breaks, stickers, sound and the safety guard.
+- **LOG / INFO:** history, season snapshot, diagnostics and the keyboard map.
+- **Header:** a small `UPDATE` button that appears only when the Gist has a newer version. If there is no button, the copy is current.
 
-### Pace that looks like you
+### Pace that looks like yours
 
-The first start reads the average and top WPM that the site already stores for
-the account, then the stats API refreshes it every 30 minutes. Auto-calibration
-is always on; there is no toggle that can freeze the pace at an old range. A 30
-WPM account gets a 26–34 WPM range; a 43 WPM account gets 37–49. The target is
-the average, not the top: the best WPM is shown as a reference, while every race
-is drawn around the player's normal pace. Nothing starts at a generic 100+ WPM.
-Clicking the `auto` row in TUNE only forces a fresh read; it never turns the
+The first start reads the average and top WPM already stored on the account,
+then the stats API refreshes them every 30 minutes. Auto-calibration is always
+on; there is no toggle that freezes the pace at an old range. A 30 WPM account
+gets a 26–34 WPM range. A 43 WPM account gets 37–49. The target is the average,
+not the top, so every race is drawn around the player's normal pace instead of
+starting at a generic 100+ WPM.
+
+Clicking the `auto` row in TUNE only forces a fresh read. It never turns
 calibration off.
 
 ### Six themes
@@ -96,11 +100,11 @@ script.
 
 | Feature | What it does |
 | --- | --- |
-| **Race loop** | Chains races from the garage and results screen with human delays. Re-arms after a stop. |
+| **Race loop** | Opens the next race from the garage or the results screen, with a human delay. Rearms after a stop. |
 | **Typing** | Reads your account average and top WPM, then races around that average (30 WPM stays near 30, 43 near 43) under a hard 120 WPM ceiling. Accuracy stays at the 96% reward floor or above. |
-| **Rewards** | Claims the Mystery Box, closes daily challenges, and uses stickers when the settings allow it. |
-| **Session care** | Renews the session when needed. Never types a username or password, and never solves a CAPTCHA. |
-| **Limits** | Session races, time, XP, active hours, and daily race/XP budgets. |
+| **Rewards** | Claims the Mystery Box, closes daily challenges and uses stickers when the settings allow it. |
+| **Session care** | Renews the session when needed. It never types a username or password, and never solves a CAPTCHA. |
+| **Limits** | Session races, time, XP, active hours and daily race/XP budgets. |
 | **Social** | Read-only Friends/Team counters. No write actions, ever. |
 
 ## Install
@@ -126,7 +130,7 @@ Manual install: create a new Tampermonkey script and paste
 | <kbd>Esc</kbd> / <kbd>Alt</kbd> + <kbd>S</kbd> | Stop after the current race |
 | <kbd>Alt</kbd> + <kbd>T</kbd> | Cycle the panel theme |
 | <kbd>Alt</kbd> + <kbd>G</kbd> | Fold the garage panel |
-| <kbd>Alt</kbd> + <kbd>M</kbd> | Mini-HUD: full, compact, or hidden |
+| <kbd>Alt</kbd> + <kbd>M</kbd> | Mini-HUD: full, compact or hidden |
 | <kbd>Alt</kbd> + <kbd>R</kbd> | Clear the panel history |
 | <kbd>Alt</kbd> + <kbd>H</kbd> | Print closed sessions to the console |
 
@@ -136,16 +140,17 @@ live race it forwards the key; otherwise it clears the hold and re-arms the queu
 ## Safety
 
 > [!WARNING]
-> Nitro Type prohibits bots and its anti-cheat can ban an account. NITRO WRAITH
-> tries to keep the stats believable, but it cannot make automation invisible.
-> This is your account and your risk. Never share cookies, tokens, or credentials.
+> Nitro Type does not allow bots, and its anti-cheat can ban an account. NITRO
+> WRAITH tries to keep the stats believable, but it cannot make automation
+> invisible. This is your account and your risk. Never share cookies, tokens or
+> credentials.
 
-The script never types credentials and never attempts a CAPTCHA. Those two remain
+The script never types credentials and never attempts a CAPTCHA. Both stay
 manual by design.
 
-**Privacy:** there is no telemetry, analytics, or third-party logging. The
+**Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` from the page is read only to call Nitro Type's own same-origin
-API; it is never printed, included in an exported config or diagnostic, or sent
+API. It is never printed, included in an exported config or diagnostic, or sent
 to another host. The only off-site request is the public Gist version check, and
 it is made with credentials omitted.
 
@@ -156,25 +161,25 @@ it is made with credentials omitted.
 
   <br>
 
-  - The queue, the race loop, the typing plan, the Mystery Box, stickers, daily challenges, and session renewal are automated.
-  - Username, password, CAPTCHA, and account changes are manual.
+  - The queue, the race loop, the typing plan, the Mystery Box, stickers, daily challenges and session renewal are automated.
+  - Username, password, CAPTCHA and account changes are manual.
   - The panel reads the game's own persisted state where possible; it does not invent XP or race results.
-  - The social panel is GET-only and never posts, accepts, denies, invites, applies, or sends.
+  - The social panel is GET-only and never posts, accepts, denies, invites, applies or sends.
   - The guard stops the race on impossible WPM readings and warns when two copies are publishing at the same time.
   - The periodic panel paint runs at 1 Hz during a race and drops to one paint every two seconds while the bot is waiting; hidden tabs skip all DOM work. At boot only the Live view is mounted; Tune, Log and Info are templates mounted the first time they are opened. Repeated reads of `persist:nt`, session counters and the calibration stamp are cached until a write. Unchanged calibration/update text is cached, and read-only social GETs are kept for two minutes.
 
 </details>
 
 <details>
-  <summary><strong>Why the queue is deliberately boring</strong></summary>
+  <summary><strong>Why it pauses so much</strong></summary>
 
   <br>
 
-  A fast queue is easy to detect and easy to get wrong. NITRO WRAITH keeps a
-  visible reason for every wait: a break, a session limit, an active-hours gate, a
-  DQ block, or a missing race frame. The goal is a race loop that can run for a
-  long time without leaving the account stuck on a results screen or typing into a
-  dead race.
+  A fast queue is easy to detect and easy to get wrong. NITRO WRAITH leaves a
+  visible reason for every wait: a break, a session limit, an active-hours gate,
+  a DQ block or a missing race screen. The goal is not to race nonstop. It is to
+  keep going without leaving the account stuck on a results screen or typing
+  into a dead race.
 
 </details>
 
@@ -182,7 +187,7 @@ it is made with credentials omitted.
 
 Releases are automatic. When the `check` workflow passes on `main` and
 `nitro-wraith.user.js` changed, the release workflow bumps the patch version,
-updates the Gist, tags the commit, and creates the GitHub release. It needs a
+updates the Gist, tags the commit and creates the GitHub release. It needs a
 repository secret named `GIST_TOKEN` with Gist write access; releases use the
 built-in `GITHUB_TOKEN`.
 
@@ -205,12 +210,12 @@ settings live in `TUNE` and are stored in `localStorage`.
 
 ## Docs
 
-- [`docs/NITROTYPE.md`](docs/NITROTYPE.md): game research, limits, and design notes.
-- [`tests/live/`](tests/live/): browser harness, live mode, and fixtures.
+- [`docs/NITROTYPE.md`](docs/NITROTYPE.md): game research, limits and design notes.
+- [`tests/live/`](tests/live/): browser harness, live mode and fixtures.
 - [`CHANGELOG.md`](CHANGELOG.md): what changed in each version.
 
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
 
-<p align="center"><sub>NITRO WRAITH · human pace, zero fast mode · one account</sub></p>
+<p align="center"><sub>NITRO WRAITH · human pace, no fast mode · one account</sub></p>
