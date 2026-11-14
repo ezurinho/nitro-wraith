@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.20 — 2026-11-14
+
+- fix: keep the garage stop available while a race is live
+
 ## 8.14.19 — 2026-11-14
 
 - fix: add a real stop control to the garage
