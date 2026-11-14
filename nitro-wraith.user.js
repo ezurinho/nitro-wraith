@@ -774,11 +774,18 @@ All of this only aims at believable statistics. It is your call and your risk.
     try { localStorage.setItem(UPDATE_KEY, JSON.stringify(next)); } catch { /* modo privado */ }
   }
 
+  // El panel pregunta por la version nueva en cada tick. El valor solo cambia
+  // cuando termina una comprobacion o se edita `nta:update`, asi que se evita
+  // volver a parsear el mismo JSON (y el mismo almacenamiento) cada segundo.
+  let updateInfoCache = { raw: null, info: null };
   function updateInfo() {
     try {
-      const saved = JSON.parse(localStorage.getItem(UPDATE_KEY) || 'null');
-      if (!saved || !saved.latest) return null;
-      return versionNewer(saved.latest, VERSION) ? saved : null;
+      const raw = localStorage.getItem(UPDATE_KEY) || 'null';
+      if (raw === updateInfoCache.raw) return updateInfoCache.info;
+      const saved = JSON.parse(raw);
+      const info = saved && saved.latest && versionNewer(saved.latest, VERSION) ? saved : null;
+      updateInfoCache = { raw, info };
+      return info;
     } catch {
       return null;
     }
@@ -826,9 +833,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     };
   }
 
-  function paintUpdateHealth() {
+  function paintUpdateHealth(force = false) {
     const node = panel.refs && panel.refs.up;
     if (!node) return;
+    const now = Date.now();
+    // La edad del chequeo cambia como mucho cada minuto: no hay razon para
+    // leer `nta:update` ni tocar el DOM dos veces por segundo. Una comprobacion
+    // real pasa `force` para que el cambio se vea al instante.
+    if (!force && panel.updateHealthAt && now - panel.updateHealthAt < 30000) return;
+    panel.updateHealthAt = now;
     const health = updateHealth();
     setText(node, health.text);
     setGood(node, health.good);
@@ -860,7 +873,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     const fail = (status, error) => {
       const keep = previous && previous.latest ? previous.latest : '';
       saveUpdateState({ at: Date.now(), latest: keep, status, error });
-      paintUpdateHealth();
+      paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       if (!previous || previous.error !== error) {
         log(`Update check failed: ${error} (retrying in 30 min).`);
@@ -893,7 +906,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         ? previous.latest
         : fetched;
       saveUpdateState({ at: Date.now(), latest: keep, status: response.status || 200, error: null });
-      paintUpdateHealth();
+      paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       if (previous && previous.error) log(`Update check recovered: latest meta v${fetched}.`);
       return true;
@@ -2210,14 +2223,22 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   let calibrating = false;
+  let calibrationProbeAt = 0;
 
   async function maybeCalibrate(force = false) {
     if (calibrating) return;
     // No competir con una carrera viva: el fetch espera a que el tipador pare.
     if (session && session.typing) return;
 
+    // El latido llama aqui cada 500 ms; leer `calibrationAt` dos veces por
+    // segundo para descubrir que aun faltan 30 min es trabajo inutil. Esta
+    // sonda en memoria deja pasar una comprobacion por minuto como maximo.
+    const now = Date.now();
+    if (!force && now - calibrationProbeAt < 60000) return;
+    calibrationProbeAt = now;
+
     const last = Number(disk.get(KEYS.calibrationAt, 0)) || 0;
-    if (!force && Date.now() - last < CONFIG.calibration.refreshMs) return;
+    if (!force && now - last < CONFIG.calibration.refreshMs) return;
 
     calibrating = true;
     try {
@@ -2256,6 +2277,16 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const wpmText = calibratedRange ? `${calibratedRange.min}-${calibratedRange.max}` : '—';
     const accText = calibratedAccuracy ? `${calibratedAccuracy.min}-${calibratedAccuracy.max}%` : '—';
+    const at = Number(disk.get(KEYS.calibrationAt, 0)) || 0;
+    const calSig = [wpmText, accText, accountText, at,
+      Number(accountStats && accountStats.bestWpm) || 0,
+      Number(accountStats && accountStats.races) || 0].join('|');
+    if (panel.calSig === calSig) {
+      paintAccuracyDelta();
+      return;
+    }
+    panel.calSig = calSig;
+
     setText(panel.refs.cal, 'on');
     setText(panel.refs.calWpm, wpmText);
     setText(panel.refs.calAcc, accText);
@@ -2280,7 +2311,6 @@ All of this only aims at believable statistics. It is your call and your risk.
     // La tarjeta de la vista LOG: cuando se leyo y que rango dejo. Se pinta
     // aqui porque este es el unico sitio que corre al calibrar y al crear el
     // panel; no depende de que la pestana este abierta.
-    const at = Number(disk.get(KEYS.calibrationAt, 0)) || 0;
     setText(panel.refs.calLogWhen, at ? new Date(at).toLocaleString() : 'never');
     setText(panel.refs.calLogWpm, calibratedRange ? `${wpmText} WPM` : '—');
     setText(panel.refs.calLogAcc, calibratedAccuracy ? accText : '—');
@@ -2401,9 +2431,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.ch, on ? (CONFIG.challenges.selector ? 'on · sel' : 'on') : 'off');
 
     if (panel.refs.chRow) {
-      panel.refs.chRow.title = on
+      const title = on
         ? `Daily Challenge popups are claimed/closed automatically${CONFIG.challenges.selector ? ` (selector: ${CONFIG.challenges.selector})` : ' (detected by text)'}. Click: turn off. Shift+click: set a CSS selector`
         : 'Daily Challenge popups are left alone. Click: claim and close them automatically. Shift+click: set a CSS selector';
+      if (panel.refs.chRow.title !== title) panel.refs.chRow.title = title;
     }
   }
 
@@ -2414,7 +2445,8 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const tier = paceRange();
     setText(panel.refs.pace, `LEGIT · ${paceProfile}`);
-    panel.refs.pace.title = `Pace profile: ${paceProfile} (target ${tier.min}-${tier.max} WPM, hard ceiling ${CONFIG.wpm.hardCap}). Click to change; all three keep the human cadence.`;
+    const paceTitle = `Pace profile: ${paceProfile} (target ${tier.min}-${tier.max} WPM, hard ceiling ${CONFIG.wpm.hardCap}). Click to change; all three keep the human cadence.`;
+    if (panel.refs.pace.title !== paceTitle) panel.refs.pace.title = paceTitle;
     if (panel.root) panel.root.dataset.paceProfile = paceProfile;
 
     paintCalibration();
@@ -6878,6 +6910,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   const panel = {
     root: null, refs: null, host: null, historySig: '', logSig: '', noticeSig: '',
     weekSig: '', chSig: '', seasonSig: '', seasonBaseSig: '',
+    calSig: '', accSig: null, updateHealthAt: 0,
   };
 
   function setText(el, value) {
@@ -7370,6 +7403,9 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   function paintAccuracyDelta() {
+    const sig = accDeltas.join(',');
+    if (panel.accSig === sig) return;
+    panel.accSig = sig;
     paintAccuracySpark();
     if (!panel.refs || !panel.refs.calDelta) return;
 
@@ -8476,6 +8512,11 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   function createPanel() {
     if (document.getElementById(PANEL_ID) || !document.body) return;
+
+    // Un panel nuevo trae nodos nuevos: las firmas del anterior ya no valen.
+    panel.calSig = '';
+    panel.accSig = null;
+    panel.updateHealthAt = 0;
 
     registerThemeProperties();
 
@@ -14655,8 +14696,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     let socialCache = { at: 0, data: null, pending: null, failedAt: 0, owner: '' };
     let socialRouteSeen = '';
     let socialWakeAt = 0;
-    const SOCIAL_TTL_MS = 30000;
-    const SOCIAL_RETRY_MS = 60000;
+    // Lectura social: no es informacion que cambie al segundo y son tres GET
+    // por refresco. Dos minutos de cache bajan el trafico sin dejar la vista
+    // congelada; al abrir la pestana social se fuerza una lectura fresca.
+    const SOCIAL_TTL_MS = 120000;
+    const SOCIAL_RETRY_MS = 120000;
     const SOCIAL_TIMEOUT_MS = 12000;
 
     function socialStatusText(cache = socialCache) {
