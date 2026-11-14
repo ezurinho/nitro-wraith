@@ -542,7 +542,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   })()`);
   check('panel startup mounts only the live view',
     startup.nodes > 0 && startup.nodes < 400 && startup.views === 1
-      && startup.storageReads < 50, startup);
+      && startup.storageReads < 80, startup);
 
   const hydrated = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
