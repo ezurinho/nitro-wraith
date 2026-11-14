@@ -1611,6 +1611,17 @@ All of this only aims at believable statistics. It is your call and your risk.
     return String(text || '').toLowerCase().includes('too many disqualifications');
   }
 
+  // Un baneo permanente no es una DQ: no hay carrera que reintentar. El bot
+  // tiene que dejar de pulsar botones y guardar una parada larga, no seguir
+  // abriendo carreras contra una cuenta que el sitio ya cerro.
+  function looksTerminalBan(text) {
+    const t = normalize(text);
+    return /\bpermanently banned\b/.test(t)
+      || /\bpermanent ban\b/.test(t)
+      || /\baccount (?:has been|was|is) banned\b/.test(t)
+      || /\bbanned for cheating\b/.test(t);
+  }
+
   // El aviso del sitio ("wait a few minutes") no dice cuanto dura. Con una
   // espera fija el bot volvia justo cuando el castigo seguia: otra carrera, otro
   // bloqueo, y asi toda la tarde. Cada bloqueo seguido dobla la espera, con
@@ -5028,6 +5039,15 @@ All of this only aims at believable statistics. It is your call and your risk.
   function resumeAuto() {
     if (!session.stopped) return false;
 
+    // Un baneo permanente no se salta con A. La marca dura 24 h y el proximo
+    // intento vuelve a leer el mismo aviso, asi que no se entra en un bucle de
+    // «Race Again» contra una cuenta cerrada.
+    if (terminalBanActive()) {
+      log('Account permanently banned: the bot stays stopped. Review the account before racing again.');
+      updatePanel();
+      return false;
+    }
+
     // Un castigo por racha sigue vigente aunque pulses A: reanudar aqui solo
     // volveria a abrir la carrera que el sitio acaba de rechazar.
     if (siteBlockedUntil() > Date.now()) {
@@ -5227,6 +5247,28 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
+  function terminalBanActive() {
+    const saved = lastStopInfo();
+    if (!saved || saved.clearedAt) return false;
+    if (!looksTerminalBan(saved.reason)) return false;
+    return Date.now() < saved.endAt;
+  }
+
+  let terminalBanNoted = false;
+
+  // El tipador es quien tiene el teclado: al ver el aviso se para y deja la
+  // marca que el garaje y Alt+A respetan. Se llama desde el latido y desde el
+  // vigilante de 1 s; `terminalBanNoted` evita repetir la parada en cada tick.
+  function handleTerminalBan(text) {
+    if (!looksTerminalBan(text)) return false;
+    if (terminalBanNoted) return true;
+    terminalBanNoted = true;
+    panic('account permanently banned; automation stopped', STOP_HOLD_MAX);
+    storeNotice('Account permanently banned: the bot stopped and will not retry.');
+    beep('block');
+    return true;
+  }
+
   // La fila del garaje no repite el texto tecnico entero: lo reduce a la
   // categoria que se busca de un vistazo. El detalle sigue en el tooltip.
   function stopReasonKind(reason) {
@@ -5251,9 +5293,20 @@ All of this only aims at believable statistics. It is your call and your risk.
     try {
       const saved = JSON.parse(localStorage.getItem(STOP_HISTORY) || '[]');
       if (!Array.isArray(saved)) return [];
-      return saved
+      const list = saved
         .filter((item) => item && Number.isFinite(Number(item.at)) && Number(item.at) >= cutoff)
         .slice(-STOP_HISTORY_MAX);
+      // La ventana se aplica al leer, pero tambien se escribe: sin esto las
+      // entradas viejas seguian ocupando el limite de 20 hasta que una parada
+      // nueva las empujaba fuera. La limpieza es automatica y silenciosa.
+      if (list.length !== saved.length) {
+        try {
+          localStorage.setItem(STOP_HISTORY, JSON.stringify(list));
+        } catch {
+          /* almacenamiento bloqueado */
+        }
+      }
+      return list;
     } catch {
       return [];
     }
@@ -7939,6 +7992,12 @@ All of this only aims at believable statistics. It is your call and your risk.
   // El castigo por racha se prueba sin tocar la red: el banco inyecta el aviso
   // y comprueba que no se pulsa ningun boton y que la espera queda guardada.
   window.__ntaDebug.recoverDq = () => recoverFromDqModal();
+  window.__ntaDebug.terminalBanText = (text) => looksTerminalBan(String(text || ''));
+  window.__ntaDebug.terminalBan = (text) => handleTerminalBan(String(text || ''));
+  window.__ntaDebug.resetTerminalBan = () => {
+    terminalBanNoted = false;
+    return true;
+  };
   window.__ntaDebug.siteBlock = () => siteBlockedUntil();
   window.__ntaDebug.clearSiteBlock = () => {
     disk.remove(DQ_BLOCK_UNTIL);
@@ -13023,7 +13082,26 @@ All of this only aims at believable statistics. It is your call and your risk.
     });
 
 
+    let terminalBanQueueNoted = false;
+
+    function noteTerminalBan(modalBody) {
+      if (!looksTerminalBan(modalBody)) return false;
+      if (!terminalBanQueueNoted) {
+        terminalBanQueueNoted = true;
+        markStopped('account permanently banned; queue stopped', STOP_HOLD_MAX);
+        queueLog('Account permanently banned: the queue stopped and will not retry.');
+        storeNotice('Account permanently banned: the bot stopped and will not retry.');
+        beep('block');
+        paintGaragePanel();
+      }
+      return true;
+    }
+
     function handleModal(modalBody) {
+      // Cuenta cerrada: ni siquiera se busca un boton en el modal. Cualquier
+      // clic aqui solo puede empeorar el estado de la pagina.
+      if (noteTerminalBan(modalBody)) return true;
+
       // El castigo por racha se atiende antes que cualquier boton del modal:
       // no se pulsa «Try Again» ni se navega por detras del aviso.
       if (looksDqBlocked(modalBody)) {
@@ -13059,6 +13137,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     function handleCaptcha(bodyText) {
+      // Un baneo permanente puede venir en el texto de la pagina y no dentro
+      // de `.modal`; este barrido ya existe para la CAPTCHA, asi que se reutiliza
+      // sin anadir otro `innerText` al latido.
+      if (noteTerminalBan(bodyText)) return true;
       if (!bodyText.includes('captcha is not resolved')) return false;
 
       // Ya estamos donde hay que resolverlo: es cosa del humano.
@@ -16566,6 +16648,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       // Eleccion de copia en esta ventana: la que no manda no pulsa nada.
       if (!refreshQueueRole()) return;
 
+      // Una cuenta cerrada no tiene nada que automatizar: no se pulsa ningun
+      // boton del modal, ni se abre una carrera para volver a chocar.
+      if (terminalBanNoted) return;
+
       // Farmeo AFK: la cola sigue trabajando con la pestana oculta (el reloj
       // Worker evita el clamp de 1 s). Solo con el modo apagado se limita a la
       // sesion: el aviso de caducidad y la renovacion del token no pueden
@@ -16585,6 +16671,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       // clavada cuando el tipador estaba parado o de descanso. El texto se lee
       // una sola vez por tick y se reutiliza al final.
       const modal = modalText();
+      if (handleTerminalBan(modal)) return;
       if (clearDqModal(modal)) return;
 
       // El popup de Daily Challenge tambien cae en esta ventana: es el garaje
@@ -17721,9 +17808,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     // unico latido que sigue vivo en todos los modos.
     setInterval(() => {
       if (!document.body) return;
+      if (terminalBanNoted) return;
       guardCheck();
 
       const text = modalText();
+      if (handleTerminalBan(text)) return;
 
       // Castigo por racha del propio sitio: ni una carrera mas hasta que pase.
       // No se para el bot (una parada pegajosa era la que dejaba al script mudo

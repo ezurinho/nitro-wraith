@@ -3955,16 +3955,18 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         text: text.textContent.trim(),
         title: row.title,
       };
+      const stored = JSON.parse(localStorage.getItem('ntQueue:stopHistory') || '[]');
       localStorage.removeItem('ntQueue:stopHistory');
       paint();
-      return { shown, afterHidden: row.hidden };
+      return { shown, afterHidden: row.hidden, stored };
     })()`);
     check('the garage summarizes the last stops by reason',
       stopMix.shown.hidden === false && stopMix.shown.display !== 'none'
         && stopMix.shown.text === 'DQ 1 · limit 1 · manual 1 · results 1'
         && /Last 4 stops in 7 days/.test(stopMix.shown.title)
         && /DQ 1, limit 1, manual 1, results 1/.test(stopMix.shown.title)
-        && stopMix.afterHidden === true, stopMix);
+        && stopMix.afterHidden === true
+        && Array.isArray(stopMix.stored) && stopMix.stored.length === 4, stopMix);
 
     // El aviso de version vive una sola vez, en la cabecera del panel de carrera.
     // El garaje ya no crea un segundo boton que abria la misma descarga.
@@ -4808,6 +4810,45 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   })()`);
   check('a stopped bot leaves the DQ modal alone instead of pressing Race Again',
     dqStopped.hasHook && dqStopped.result === true && dqStopped.clicks.length === 0, dqStopped);
+
+  // Un baneo permanente tampoco es una DQ: no hay «Race Again» que valga. El
+  // bot tiene que pararse, dejar una retencion larga y no reanudar con Alt+A.
+  const terminalBan = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d.terminalBan || !d.terminalBanText || !d.resetTerminalBan) return { hasHook: false };
+
+    d.resetTerminalBan();
+    const modal = w.document.createElement('div');
+    modal.className = 'modal';
+    modal.style.cssText = 'position:fixed;left:20px;top:20px;width:420px;height:180px;background:#300;color:#fff;z-index:999999';
+    modal.innerHTML = '<h2>Account Banned</h2>'
+      + '<p>Your account has been permanently banned. Reason: Cheating.</p>'
+      + '<button id="ban-again">Race Again</button>';
+    w.__banClicks = [];
+    modal.querySelector('#ban-again').addEventListener('click', () => { w.__banClicks.push('again'); });
+    w.document.body.appendChild(modal);
+
+    const detected = d.terminalBanText(modal.textContent);
+    const stopped = d.terminalBan(modal.textContent);
+    const saved = JSON.parse(w.localStorage.getItem('ntQueue:stoppedAt') || 'null');
+    const clicks = w.__banClicks.slice();
+    const resumed = d.resume();
+    const stillStopped = JSON.parse(w.localStorage.getItem('ntQueue:stoppedAt') || 'null');
+
+    modal.remove();
+    d.resetTerminalBan();
+    w.localStorage.removeItem('ntQueue:stoppedAt');
+    w.localStorage.removeItem('ntQueue:lastStop');
+    d.patchSession({ stopped: false });
+    return { hasHook: true, detected, stopped, saved, clicks, resumed, stillStopped };
+  })()`);
+  check('a permanent account ban stops the bot and never presses Race Again',
+    terminalBan.hasHook && terminalBan.detected === true && terminalBan.stopped === true
+      && terminalBan.clicks.length === 0
+      && terminalBan.saved && /permanently banned/.test(terminalBan.saved.reason)
+      && terminalBan.saved.holdMs >= 23 * 3600000
+      && terminalBan.resumed === false && terminalBan.stillStopped, terminalBan);
 
   // La firma de la serie tiene que llevar el perfil: antes setPaceProfile la
   // llamaba sin el y la firma quedaba en ':count:min:max', asi que la serie de

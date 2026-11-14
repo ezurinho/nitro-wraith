@@ -146,7 +146,8 @@ live race it forwards the key; otherwise it clears the hold and re-arms the queu
 > credentials.
 
 The script never types credentials and never attempts a CAPTCHA. Both stay
-manual by design.
+manual by design. If the site reports a permanent account ban, the bot stops
+and does not press `Race Again` or retry the account.
 
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` from the page is read only to call Nitro Type's own same-origin
