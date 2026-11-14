@@ -7888,9 +7888,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     // Historico de la semana: una fila por dia, de mas nuevo a mas viejo. La
-    // firma incluye los contadores de hoy, que cambian con cada carrera.
+    // firma incluye todo lo que pinta la fila: si cambian los retos completados
+    // sin cambiar las carreras, la tarjeta tiene que repintarse igual.
     const week = dayHistoryRead();
-    const weekSig = week.map((day) => `${day.date}:${day.races}:${day.dq}:${day.boxes}:${day.xp}:${Math.round(day.sumWpm)}`).join('|');
+    const weekSig = week.map((day) => `${day.date}:${day.races}:${day.dq}:${day.boxes}`
+      + `:${day.chKeys ? day.chKeys.length : 0}:${day.xp}:${Math.round(day.sumWpm)}`).join('|');
     if (panel.refs.weekList && panel.weekSig !== weekSig) {
       panel.weekSig = weekSig;
       panel.refs.weekList.textContent = '';

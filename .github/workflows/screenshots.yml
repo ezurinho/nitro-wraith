@@ -30,6 +30,7 @@ jobs:
           SHOT_DIR: screenshots/current
         run: npm test
       - name: Upload screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nitro-wraith-screenshots
