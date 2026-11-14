@@ -66,14 +66,18 @@ The panel is the control surface, not a black box:
 - **Garage queue:** what it is waiting for, the next race, Mystery Box timing, and a one-line reason for every hold.
 - **TUNE:** pace profile, limits, breaks, stickers, sound, and the safety guard.
 - **LOG / INFO:** history, season snapshot, diagnostics, and the keyboard map.
+- **Header:** a small `UPDATE` button that only appears when the Gist has a newer version; it opens the fresh userscript. No button means the copy is current.
 
 ### Pace that looks like you
 
 The first start reads the average and top WPM that the site already stores for
-the account, then the stats API refreshes it. A 30 WPM account gets a 26–34 WPM
-range; a 43 WPM account gets 37–49. The target is the average, not the top: the
-best WPM is shown as a reference, while every race is drawn around the player's
-normal pace. Nothing starts at a generic 100+ WPM.
+the account, then the stats API refreshes it every 30 minutes. Auto-calibration
+is always on; there is no toggle that can freeze the pace at an old range. A 30
+WPM account gets a 26–34 WPM range; a 43 WPM account gets 37–49. The target is
+the average, not the top: the best WPM is shown as a reference, while every race
+is drawn around the player's normal pace. Nothing starts at a generic 100+ WPM.
+Clicking the `auto` row in TUNE only forces a fresh read; it never turns the
+calibration off.
 
 ### Six themes
 

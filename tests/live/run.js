@@ -2351,7 +2351,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     kickReset);
 
   // La calibracion lee el API: se sustituye fetch por una respuesta con las
-  // medias de la cuenta y se fuerza la lectura apagando y encendiendo la fila.
+  // medias de la cuenta y se fuerza una lectura con la fila auto. La fila ya no
+  // apaga nada: solo adelanta el refresco.
   const calibration = await cdp.evaluate(`(async () => {
     const w = document.querySelector('iframe').contentWindow;
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
@@ -2377,6 +2378,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         acc: shadow.querySelector('[data-field="calAcc"]').textContent,
         account: shadow.querySelector('[data-field="calAccount"]').textContent,
         paceSource: shadow.querySelector('[data-field="paceSource"]').textContent,
+        auto: w.__ntaDebug.calibrationAuto(),
+        autoText: shadow.querySelector('[data-field="cal"]').textContent,
         stored: JSON.parse(w.localStorage.getItem('autoTyperCalibratedRange') || 'null'),
         storedAcc: JSON.parse(w.localStorage.getItem('autoTyperCalibratedAccuracy') || 'null'),
         logWpm: shadow.querySelector('[data-field="calLogWpm"]').textContent,
@@ -2396,6 +2399,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     calibration.logWpm === '106-118 WPM' && calibration.logWhen !== 'never', calibration);
   check('panel shows the account average',
     calibration.account === '112.4 WPM · 98.7%', calibration);
+  check('auto pace cannot be switched off from the panel',
+    calibration.auto === true && calibration.autoText === 'on', calibration);
   check('Live shows the auto pace and the account top WPM',
     calibration.paceSource === 'auto · 112 avg · 230 top', calibration.paceSource);
 
@@ -2413,7 +2418,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     paceMath.high && paceMath.high.min === 106 && paceMath.high.max === 118, paceMath.high);
 
   // Respaldo: si el API responde 200 sin medias (solo contadores), la media
-  // sale de `persist:nt`, que es lo que el garaje pinta en el perfil.
+  // sale de `persist:nt`, que es lo que el garaje pinta en el perfil. La fila
+  // auto solo adelanta la lectura; no cambia el modo.
   const persisted = await cdp.evaluate(`(async () => {
     const w = document.querySelector('iframe').contentWindow;
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;

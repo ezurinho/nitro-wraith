@@ -457,7 +457,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     // como referencia, pero no se usa como objetivo: el objetivo es su media.
     calibration: {
       auto: true,
-      refreshMs: 21600000,   // 6 h entre lecturas
+      refreshMs: 1800000,    // 30 min: el ritmo sigue la media mas reciente
       halfWidth: 6,          // ancho maximo del rango; con 43 WPM da 37-49
       minWpm: 15,            // cuentas principiantes tambien son validas
       timeoutMs: 8000,
@@ -734,7 +734,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   const UPDATE_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
   const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
   const UPDATE_KEY = 'nta:update';
-  const UPDATE_RECHECK_MS = 6 * 3600000;
+  const UPDATE_RECHECK_MS = 3600000;
   const UPDATE_RETRY_MS = 30 * 60000;
   const UPDATE_FETCH_TIMEOUT_MS = 8000;
   let updateChecking = false;
@@ -793,7 +793,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       return {
         text: 'not checked',
         good: null,
-        title: 'Update check: not run yet. It runs when the panel opens and every six hours.',
+        title: 'Update check: not run yet. It runs when the panel opens and every hour.',
       };
     }
 
@@ -822,7 +822,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       text: `ok · ${age}`,
       good: true,
       title: `Update check ok ${age}; the latest meta says ${summary}`
-        + ' It runs again in six hours.',
+        + ' It runs again in one hour.',
     };
   }
 
@@ -1905,7 +1905,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       useNitro: flag('useNitro'),
       nitroStrategy: normalizeNitroStrategy(saved.nitroStrategy),
       challenges: flag('challenges'),
-      calibration: flag('calibration'),
+      calibration: true,
     };
   }
 
@@ -1933,7 +1933,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.useNitro = prefs.useNitro;
     CONFIG.nitroStrategy = prefs.nitroStrategy;
     CONFIG.challenges.enabled = prefs.challenges;
-    CONFIG.calibration.auto = prefs.calibration;
+    // La calibracion no es un modo que se pueda apagar: el ritmo SIEMPRE sale
+    // de las estadisticas de la cuenta. Se ignora cualquier `false` viejo y se
+    // conserva el interruptor guardado solo por compatibilidad.
+    CONFIG.calibration.auto = true;
     CONFIG.challenges.selector = disk.get(KEYS.challengeSelector, '') || '';
 
     // Primera foto SIN esperar al fetch: el garaje ya dejo avgSpeed y
@@ -1946,8 +1949,10 @@ All of this only aims at believable statistics. It is your call and your risk.
         const savedCenter = calibratedRange
           ? (calibratedRange.min + calibratedRange.max) / 2 : null;
         // Si la media guardada se alejo de la cuenta (otra cuenta, o el
-        // jugador mejoro), se corrige ya; no se espera a las 6 h del API.
-        if (!calibratedRange || Math.abs(savedCenter - persisted.wpm) > 8) {
+        // jugador mejoro), se corrige ya; no se espera al refresco del API.
+        // Medio WPM basta: el rango se redondea a enteros y no queremos que una
+        // mejora real se quede congelada por una diferencia pequena.
+        if (!calibratedRange || Math.abs(savedCenter - persisted.wpm) >= 0.5) {
           calibratedRange = range;
           disk.set(KEYS.calibratedRange, JSON.stringify(range));
         }
@@ -2208,7 +2213,6 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   async function maybeCalibrate(force = false) {
     if (calibrating) return;
-    if (!CONFIG.calibration.auto && !force) return;
     // No competir con una carrera viva: el fetch espera a que el tipador pare.
     if (session && session.typing) return;
 
@@ -2231,21 +2235,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
-  function setCalibrationAuto(enabled) {
-    CONFIG.calibration.auto = Boolean(enabled);
-    savePrefs();
-
-    if (CONFIG.calibration.auto) {
-      log('Pace auto-calibration on: reading the account average.');
-      maybeCalibrate(true);
-    } else {
-      // Al apagarla se conserva lo ultimo leido, no se vuelve al rango viejo.
-      if (calibratedRange) {
-        PACE_PROFILES.balanced = { min: calibratedRange.min, max: calibratedRange.max };
-      }
-      log('Pace auto-calibration off: keeping the saved range.');
-      setPaceProfile(paceProfile, { force: true });
-    }
+  // La calibracion es siempre automatica; este pequeño gesto solo adelanta la
+  // lectura. No existe un estado "off" que pueda dejar el ritmo congelado.
+  function refreshCalibration() {
+    log('Pace auto-calibration: refreshing from the account stats.');
+    maybeCalibrate(true);
     paintCalibration();
   }
 
@@ -2260,10 +2254,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       ].filter(Boolean).join(' · ')
       : '—';
 
-    const auto = CONFIG.calibration.auto !== false;
     const wpmText = calibratedRange ? `${calibratedRange.min}-${calibratedRange.max}` : '—';
     const accText = calibratedAccuracy ? `${calibratedAccuracy.min}-${calibratedAccuracy.max}%` : '—';
-    setText(panel.refs.cal, auto ? 'on' : 'off');
+    setText(panel.refs.cal, 'on');
     setText(panel.refs.calWpm, wpmText);
     setText(panel.refs.calAcc, accText);
     setText(panel.refs.calAccount, accountText);
@@ -2275,17 +2268,13 @@ All of this only aims at believable statistics. It is your call and your risk.
         ? Math.round(Number(accountStats.wpm)) : null;
       const top = accountStats && Number(accountStats.bestWpm) > 0
         ? Math.round(Number(accountStats.bestWpm)) : null;
-      const label = !auto
-        ? 'manual pace'
-        : average
-          ? `auto · ${average} avg${top ? ` · ${top} top` : ''}`
-          : calibratedRange
-            ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm`
-            : 'auto · reading account';
+      const label = average
+        ? `auto · ${average} avg${top ? ` · ${top} top` : ''}`
+        : calibratedRange
+          ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm`
+          : 'auto · reading account';
       setText(panel.refs.paceSource, label);
-      panel.refs.paceSource.title = auto
-        ? `Pace target ${wpmText} WPM, centred on this account's average${top ? `; account top ${top} WPM` : ''}. Read automatically from the site profile and the stats API.`
-        : `Manual pace: target ${wpmText} WPM. Auto-calibration is off.`;
+      panel.refs.paceSource.title = `Pace target ${wpmText} WPM, always centred on this account's average${top ? `; account top ${top} WPM` : ''}. Read automatically from the site profile and the stats API.`;
     }
 
     // La tarjeta de la vista LOG: cuando se leyo y que rango dejo. Se pinta
@@ -2297,9 +2286,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.calLogAcc, calibratedAccuracy ? accText : '—');
 
     if (panel.refs.calRow) {
-      panel.refs.calRow.title = auto
-        ? `Auto-calibrated from the account average${at ? ` (read ${new Date(at).toLocaleString()})` : ' (not read yet)'}: ${wpmText} WPM / ${accText} accuracy. Click: turn off and keep the saved range`
-        : 'Auto-calibration off: the saved ranges are used. Click: turn on and read the account average now';
+      panel.refs.calRow.title = `Always automatic from the account average${at ? ` (read ${new Date(at).toLocaleString()})` : ' (not read yet)'}: ${wpmText} WPM / ${accText} accuracy. Click: refresh the stats now.`;
     }
 
     paintAccuracyDelta();
@@ -7490,6 +7477,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.updateState = () => updateState();
   window.__ntaDebug.updateBusy = () => updateChecking;
   window.__ntaDebug.checkForUpdate = (force) => checkForUpdate(Boolean(force));
+  window.__ntaDebug.calibrationAuto = () => CONFIG.calibration.auto === true;
+  window.__ntaDebug.refreshCalibration = () => refreshCalibration();
 
   // El banco detiene esta copia sin tocar el teclado: el guardia debe soltar el
   // registro en el siguiente latido para que la otra copia tome el relevo.
@@ -9247,7 +9236,7 @@ All of this only aims at believable statistics. It is your call and your risk.
                   <div class="rows">
                     <div class="row"><span>ceiling</span><b data-field="tuneCap">≤ 120 wpm</b></div>
                     <div class="row"><span>range</span><b data-field="tuneRange">—</b></div>
-                    <div class="row cal-row" data-field="calRow" title="Reads the account average from the stats API and centres the balanced range on it"><span>auto</span><b data-field="cal">on</b></div>
+                    <div class="row cal-row" data-field="calRow" title="Always automatic: reads the account average from the site profile and the stats API, and centres the balanced range on it. Click to refresh now."><span>auto</span><b data-field="cal">on</b></div>
                     <div class="row"><span>calibrated</span><b data-field="calWpm">—</b></div>
                     <div class="row"><span>accuracy</span><b data-field="calAcc">—</b></div>
                     <div class="row"><span>account</span><b data-field="calAccount">—</b></div>
@@ -9889,11 +9878,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       paintActiveSlider('end');
     }
 
-    // Fila de auto-calibracion: enciende/apaga y, al encender, lee la media ya.
+    // Fila de auto-calibracion: no hay apagado; el clic solo fuerza una lectura
+    // nueva para que el rango se mueva ya con la media mas reciente.
     if (panel.refs.calRow) {
       panel.refs.calRow.addEventListener('click', (event) => {
         event.stopPropagation();
-        setCalibrationAuto(!CONFIG.calibration.auto);
+        refreshCalibration();
       });
     }
 
@@ -10822,7 +10812,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         });
         checkForUpdate();
         // Tick corto: checkForUpdate no repite una comprobacion buena hasta
-        // las 6 h, pero si la anterior fallo vuelve a probar a los 30 min.
+        // la hora, pero si la anterior fallo vuelve a probar a los 30 min.
         setInterval(checkForUpdate, UPDATE_RETRY_MS);
       }
     }
