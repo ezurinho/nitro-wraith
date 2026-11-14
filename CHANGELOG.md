@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.23 — 2026-11-14
+
+- feat: summarize recent stops by reason in the garage
+
 ## 8.14.22 — 2026-11-14
 
 - fix: carry the stop reason into the race panel
