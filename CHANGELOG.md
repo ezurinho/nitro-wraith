@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.24 — 2026-11-14
+
+- feat: stop on a permanent account ban
+
 ## 8.14.23 — 2026-11-14
 
 - feat: summarize recent stops by reason in the garage
