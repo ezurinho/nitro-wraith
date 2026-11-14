@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.14.21 — 2026-11-14
+
+- test: allow background storage reads during panel startup
+- test: make panel performance checks robust at sub-ms resolution
+- fix: show why the garage is stopped and for how long
+
 ## 8.14.20 — 2026-11-14
 
 - fix: keep the garage stop available while a race is live
