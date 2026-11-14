@@ -882,13 +882,15 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       xp: 0, best: 0, bestAcc: 0, clean: 0, firstAt: 0, lastAt: 0, dqAt: 0,
       cash: 0, chKeys: ['11', '12'], updatedAt: Date.now(),
     }));
-    // En espera el panel pinta cada 2 s y el historico tiene 1.5 s de cache:
-    // hay que dejar pasar dos latidos completos para no competir con el borde.
-    await new Promise((resolve) => setTimeout(resolve, 3600));
+    // El panel normal pinta cada 2 s y el historico tiene 1.5 s de cache. El
+    // hook de prueba invalida esa cache y fuerza un pintado real: la prueba no
+    // depende de que la pestana este visible ni del borde de un temporizador.
+    w.__ntaDebug.panelRefresh();
+    await new Promise((resolve) => setTimeout(resolve, 80));
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const text = shadow.querySelector('[data-field="weekList"]').textContent;
     store.removeItem(key);
-    await new Promise((resolve) => setTimeout(resolve, 3600));
+    w.__ntaDebug.panelRefresh();
     return { text };
   })()`, true);
   check('the 7-day card counts completed challenges per day',
@@ -3908,6 +3910,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const dq = read();
 
       localStorage.setItem('ntQueue:lastStop', JSON.stringify({
+        at: Date.now() - 7 * 60000,
+        reason: 'account permanently banned; automation stopped',
+        holdMs: 24 * 3600000, clearedAt: 0, clearedBy: '',
+      }));
+      paint();
+      const ban = read();
+
+      localStorage.setItem('ntQueue:lastStop', JSON.stringify({
         at: Date.now() - 5 * 60000, reason: 'daily limit 80 races', holdMs: 3600000,
         clearedAt: Date.now() - 2 * 60000, clearedBy: 'manual',
       }));
@@ -3916,7 +3926,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
 
       localStorage.removeItem('ntQueue:lastStop');
       paint();
-      return { active, dq, cleared, afterHidden: row.hidden };
+      return { active, dq, ban, cleared, afterHidden: row.hidden };
     })()`);
     check('the garage panel shows a stopped bot with its reason category and remaining hold',
       garageStop.active.hidden === false && garageStop.active.display !== 'none'
@@ -3932,6 +3942,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageStop.cleared.text.startsWith('limit · cleared manually')
         && /cleared manually at/.test(garageStop.cleared.title)
         && garageStop.afterHidden === true, garageStop);
+    check('the garage does not label a permanent account ban as manual',
+      garageStop.ban.label === 'stopped' && garageStop.ban.text.startsWith('ban · ')
+        && garageStop.ban.warn === '2' && /will not retry/.test(garageStop.ban.title),
+      garageStop.ban);
 
     // Resumen de las ultimas paradas: cuenta motivos, no la ultima marca. Una
     // entrada de hace ocho dias no debe contaminar la ventana de siete dias.
@@ -3946,6 +3960,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         { at: now - 10 * 60000, reason: 'daily limit 80 races', holdMs: 3600000 },
         { at: now - 15 * 60000, reason: 'turned off from the panel', holdMs: 600000 },
         { at: now - 20 * 60000, reason: 'the results page will not open another race', holdMs: 120000 },
+        { at: now - 25 * 60000, reason: 'account permanently banned; automation stopped', holdMs: 86400000 },
         { at: now - 8 * 86400000, reason: 'DQ streak: stopped before the site block (5 in a row)', holdMs: 6 * 3600000 },
       ]));
       paint();
@@ -3962,11 +3977,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     })()`);
     check('the garage summarizes the last stops by reason',
       stopMix.shown.hidden === false && stopMix.shown.display !== 'none'
-        && stopMix.shown.text === 'DQ 1 · limit 1 · manual 1 · results 1'
-        && /Last 4 stops in 7 days/.test(stopMix.shown.title)
-        && /DQ 1, limit 1, manual 1, results 1/.test(stopMix.shown.title)
+        && stopMix.shown.text === 'DQ 1 · limit 1 · manual 1 · ban 1 · results 1'
+        && /Last 5 stops in 7 days/.test(stopMix.shown.title)
+        && /DQ 1, limit 1, manual 1, ban 1, results 1/.test(stopMix.shown.title)
         && stopMix.afterHidden === true
-        && Array.isArray(stopMix.stored) && stopMix.stored.length === 4, stopMix);
+        && Array.isArray(stopMix.stored) && stopMix.stored.length === 5, stopMix);
 
     // El aviso de version vive una sola vez, en la cabecera del panel de carrera.
     // El garaje ya no crea un segundo boton que abria la misma descarga.
@@ -4829,6 +4844,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     modal.querySelector('#ban-again').addEventListener('click', () => { w.__banClicks.push('again'); });
     w.document.body.appendChild(modal);
 
+    const falsePositive = d.terminalBanText('A support article explains how accounts can be permanently banned.');
     const detected = d.terminalBanText(modal.textContent);
     const stopped = d.terminalBan(modal.textContent);
     const saved = JSON.parse(w.localStorage.getItem('ntQueue:stoppedAt') || 'null');
@@ -4841,10 +4857,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     w.localStorage.removeItem('ntQueue:stoppedAt');
     w.localStorage.removeItem('ntQueue:lastStop');
     d.patchSession({ stopped: false });
-    return { hasHook: true, detected, stopped, saved, clicks, resumed, stillStopped };
+    return { hasHook: true, falsePositive, detected, stopped, saved, clicks, resumed, stillStopped };
   })()`);
   check('a permanent account ban stops the bot and never presses Race Again',
-    terminalBan.hasHook && terminalBan.detected === true && terminalBan.stopped === true
+    terminalBan.hasHook && terminalBan.falsePositive === false
+      && terminalBan.detected === true && terminalBan.stopped === true
       && terminalBan.clicks.length === 0
       && terminalBan.saved && /permanently banned/.test(terminalBan.saved.reason)
       && terminalBan.saved.holdMs >= 23 * 3600000

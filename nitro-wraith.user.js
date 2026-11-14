@@ -1616,9 +1616,13 @@ All of this only aims at believable statistics. It is your call and your risk.
   // abriendo carreras contra una cuenta que el sitio ya cerro.
   function looksTerminalBan(text) {
     const t = normalize(text);
-    return /\bpermanently banned\b/.test(t)
-      || /\bpermanent ban\b/.test(t)
-      || /\baccount (?:has been|was|is) banned\b/.test(t)
+    // La palabra suelta no basta: una pagina de ayuda puede explicar que las
+    // cuentas "pueden ser" baneadas sin que esta cuenta lo este. Se exige el
+    // sujeto de la cuenta o el motivo del baneo.
+    return /\b(?:your|this|the) account (?:has been|was|is) (?:permanently )?banned\b/.test(t)
+      || /\baccount (?:has been|was|is) permanently banned\b/.test(t)
+      || /\baccount permanently banned\b/.test(t)
+      || /\b(?:permanently banned|permanent ban)\b.{0,60}\b(?:cheating|appeal|support)\b/.test(t)
       || /\bbanned for cheating\b/.test(t);
   }
 
@@ -5273,6 +5277,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // categoria que se busca de un vistazo. El detalle sigue en el tooltip.
   function stopReasonKind(reason) {
     const text = String(reason || '').toLowerCase();
+    if (looksTerminalBan(text)) return { label: 'ban', warn: '2' };
     if (/\bdq\b|disqualif/.test(text)) return { label: 'DQ', warn: '2' };
     if (/limit|tope|cap\b|budget|daily/.test(text)) return { label: 'limit', warn: '1' };
     if (/results page/.test(text)) return { label: 'results', warn: '1' };
@@ -5313,7 +5318,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   function stopHistorySummary(now = Date.now()) {
-    const counts = { DQ: 0, limit: 0, manual: 0, results: 0 };
+    const counts = { DQ: 0, limit: 0, manual: 0, ban: 0, results: 0 };
     const list = stopHistoryRead(now);
     for (const item of list) {
       const kind = stopReasonKind(item.reason);
@@ -7849,6 +7854,15 @@ All of this only aims at believable statistics. It is your call and your risk.
   // registro en el siguiente latido para que la otra copia tome el relevo.
   window.__ntaDebug.stop = () => panic('debug stop');
   window.__ntaDebug.resume = () => resumeAuto();
+  // Las pruebas que siembran el historico necesitan un pintado real sin
+  // depender de que la pestana este visible o de la cache de 1.5 s.
+  window.__ntaDebug.panelRefresh = () => {
+    dayHistCache = null;
+    dayHistCacheRaw = '';
+    dayHistCacheAt = 0;
+    updatePanel(true);
+    return true;
+  };
 
   // Mapa de refs del panel con una identidad por nodo. El banco comprueba que
   // dos refs no comparten elemento y que una ref con data-field apunta al suyo;
@@ -15179,7 +15193,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         qpanel.lastStop.textContent = `${kind.label} · ${shortWait(stopLeft)} left`;
         qpanel.lastStop.dataset.warn = kind.warn;
         qpanel.stopRow.title = `Stopped ${new Date(lastStop.at).toLocaleTimeString()} · ${lastStop.reason || 'manual stop'}`
-          + ` · ${shortWait(stopLeft)} left of ${shortWait(lastStop.holdMs)}. Resume or Alt+A starts again.`;
+          + ` · ${shortWait(stopLeft)} left of ${shortWait(lastStop.holdMs)}.`
+          + (kind.label === 'ban' ? ' The account is blocked; the bot will not retry.' : ' Resume or Alt+A starts again.');
       } else if (recentStop) {
         const kind = stopReasonKind(lastStop.reason);
         const state = lastStop.clearedAt
@@ -15189,14 +15204,15 @@ All of this only aims at believable statistics. It is your call and your risk.
         qpanel.lastStop.textContent = `${kind.label} · ${state}`;
         qpanel.lastStop.dataset.warn = '';
         qpanel.stopRow.title = `Last stop: ${new Date(lastStop.at).toLocaleString()} · ${lastStop.reason || 'manual stop'} · hold ${shortWait(lastStop.holdMs)}`
-          + (lastStop.clearedAt ? ` · cleared manually at ${new Date(lastStop.clearedAt).toLocaleTimeString()}` : ' · hold elapsed');
+          + (lastStop.clearedAt ? ` · cleared manually at ${new Date(lastStop.clearedAt).toLocaleTimeString()}` : ' · hold elapsed')
+          + (kind.label === 'ban' ? ' · the account is blocked; it will not retry.' : '');
       }
 
       // Reparto de las ultimas paradas, no solo la ultima: DQ, limite y manual
       // son las tres causas que se mezclan al decidir si se puede volver a
       // correr. La ventana corta evita que un dia viejo pinte la noche de hoy.
       const stopMix = stopHistorySummary();
-      const stopMixParts = ['DQ', 'limit', 'manual', 'results']
+      const stopMixParts = ['DQ', 'limit', 'manual', 'ban', 'results']
         .filter((kind) => stopMix.counts[kind] > 0)
         .map((kind) => `${kind} ${stopMix.counts[kind]}`);
       qpanel.stopHistoryRow.hidden = stopMix.total === 0;

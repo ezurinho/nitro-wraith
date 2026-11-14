@@ -66,7 +66,7 @@ and why the queue would rather pause than guess.
 The panel is the control surface, not a black box:
 
 - **Live:** WPM, accuracy, the account-backed AUTO pace badge, target range, race count, session average, result and the game HUD.
-- **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing and a one-line reason for every hold.
+- **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops.
 - **TUNE:** pace profile, limits, breaks, stickers, sound and the safety guard.
 - **LOG / INFO:** history, season snapshot, diagnostics and the keyboard map.
 - **Header:** a small `UPDATE` button that appears only when the Gist has a newer version. If there is no button, the copy is current.
