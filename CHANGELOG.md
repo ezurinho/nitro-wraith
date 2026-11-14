@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.14.10 — 2026-11-14
+
+- feat: calibrate pace to the account's own WPM
+- test: seed today's summary for the panel screenshot
+- test: size the screenshot viewport for the full live panel
+
 ## 8.14.9 — 2026-11-14
 
 - test: force only the screenshot paint, not every debug patch
