@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.7 — 2026-11-14
+
+- test: seed a live panel for the theme captures
+- test: capture the panel themes from the browser harness
+
 ## 8.14.6 — 2026-11-13
 
 - feat: refresh the project page and trim background scans
