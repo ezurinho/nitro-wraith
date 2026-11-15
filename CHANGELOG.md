@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.31 — 2026-11-15
+
+- feat: show the update control in the garage panel
+
 ## 8.14.30 — 2026-11-15
 
 - fix: anchor pace calibration to the lifetime average
