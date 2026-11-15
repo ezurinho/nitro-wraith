@@ -75,7 +75,8 @@ multiple accounts. Those are boundaries, not missing features.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
 The race header and the garage panel show a small `UPDATE` button only when the
-Gist has a newer version. If the button is absent, the installed copy is current.
+Gist has a newer version; the garage button also names that version. If the
+button is absent, the installed copy is current.
 
 ### Pace that looks like yours
 

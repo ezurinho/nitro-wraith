@@ -860,13 +860,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
-  function paintUpdateBadge(node) {
+  function paintUpdateBadge(node, withVersion = false) {
     if (!node) return;
     const info = updateInfo();
     if (node.hidden !== !info) node.hidden = !info;
     if (!info) return;
     const textNode = node.querySelector('span') || node;
-    if (textNode.textContent !== 'update') textNode.textContent = 'update';
+    const badgeText = withVersion ? `update v${info.latest}` : 'update';
+    if (textNode.textContent !== badgeText) textNode.textContent = badgeText;
     const title = `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
     if (node.title !== title) node.title = title;
     const label = `Update available: v${info.latest}. Download the new userscript.`;
@@ -888,7 +889,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       saveUpdateState({ at: Date.now(), latest: keep, status, error });
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
-      paintUpdateBadge(garageUpdateNode);
+      paintUpdateBadge(garageUpdateNode, true);
       if (!previous || previous.error !== error) {
         log(`Update check failed: ${error} (retrying in 30 min).`);
       }
@@ -923,7 +924,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       saveUpdateState({ at: Date.now(), latest: keep, status: response.status || 200, error: null });
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
-      paintUpdateBadge(garageUpdateNode);
+      paintUpdateBadge(garageUpdateNode, true);
       if (previous && previous.error) log(`Update check recovered: latest meta v${fetched}.`);
       return true;
     } catch (error) {
@@ -15430,7 +15431,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (!qpanel) return;
 
       paintUpdateHealth();
-      paintUpdateBadge(qpanel.update);
+      paintUpdateBadge(qpanel.update, true);
 
       const signed = signedIn();
       const armed = signed && isArmed();

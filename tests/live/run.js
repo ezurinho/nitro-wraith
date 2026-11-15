@@ -4117,7 +4117,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       garageUpdate.has && garageUpdate.hidden.hidden === true
         && garageUpdate.hidden.display === 'none'
         && garageUpdate.shown.hidden === false && garageUpdate.shown.display !== 'none'
-        && /^update$/i.test(garageUpdate.shown.text) && garageUpdate.shown.width > 0
+        && /^update v99\.0\.0$/i.test(garageUpdate.shown.text) && garageUpdate.shown.width > 0
         && /99\.0\.0/.test(garageUpdate.shown.title) && /download/i.test(garageUpdate.shown.aria)
         && garageUpdate.afterHidden === true, garageUpdate);
 
