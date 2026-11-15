@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.34 — 2026-11-15
+
+- feat: audit lifetime calibration and keep the last complete snapshot
+- test: bring the lease owner forward before checking the typing lock
+
 ## 8.14.33 — 2026-11-15
 
 - feat: give the garage update button a download icon
