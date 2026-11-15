@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NITRO WRAITH
 // @namespace    nitro.wraith
-// @version      8.14.26
+// @version      8.14.27
 // @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
 // @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
 // @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
@@ -623,6 +623,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       // rest stay silent (they type nothing and click nothing) until the elected
       // one is gone. A stand-down order expires by itself after standbyHoldMs.
       standbyHoldMs: 4000,
+    // Si una carrera viva lleva este tiempo sin avanzar y esta copia esta en
+    // standby, se recupera el turno: quedarse esperando a una copia que no
+    // escribe es una DQ por inactividad.
+    standbyRescueMs: 4000,
       // Impossible reading: finish the race in progress (abandoning it would be a
       // DQ) and then step away for a long, human break. The bot always comes back
       // on its own - it never parks itself waiting for a key.
@@ -726,7 +730,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   };
 
-  const VERSION = '8.14.26';
+  const VERSION = '8.14.27';
 
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se guarda el ultimo resultado y se
@@ -5999,6 +6003,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   async function waitForRaceStart(app) {
     const deadline = Date.now() + CONFIG.maxWaitStartMs;
     let previousAttemptAt = 0;
+    let lastIndex = -1;
+    let lastProgressAt = Date.now();
 
     while (!session.stopped && Date.now() < deadline) {
       await waitWhilePaused();
@@ -6028,8 +6034,20 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
       if (index >= content.length) return true;
 
+      if (index > lastIndex) {
+        lastIndex = index;
+        lastProgressAt = Date.now();
+      }
+
       // Otra copia esta escribiendo: aqui no se manda ni la tecla de sondeo.
+      // Si la carrera lleva demasiado sin avanzar, esa copia no esta haciendo
+      // su trabajo: se recupera el turno antes de que el servidor DQ por
+      // inactividad.
       if (standbyActive()) {
+        if (Date.now() - lastProgressAt >= CONFIG.guard.standbyRescueMs) {
+          takeTypingTurn('the other copy is not starting the race');
+          lastProgressAt = Date.now();
+        }
         await preciseSleep(400);
         continue;
       }
@@ -6892,6 +6910,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     let blockedSince = 0;
     let stallNoted = false;
     let expectedAfter = -1;
+    let lastProgressAt = Date.now();
 
     while (!session.stopped) {
       await waitWhilePaused();
@@ -6929,6 +6948,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         blockedSince = 0;
         stallNoted = false;
         expectedAfter = -1;
+        lastProgressAt = Date.now();
         continue;
       }
 
@@ -6966,8 +6986,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
 
       // Otra copia lleva el teclado: esta no manda teclas. El turno caduca solo,
-      // asi que aqui se vuelve a escribir en cuanto el aviso desaparece.
+      // asi que aqui se vuelve a escribir en cuanto el aviso desaparece. Si la
+      // carrera lleva varios segundos sin avanzar, la otra copia no esta
+      // escribiendo y se recupera el turno antes de la DQ por inactividad.
       if (standbyActive()) {
+        if (Date.now() - lastProgressAt >= CONFIG.guard.standbyRescueMs) {
+          takeTypingTurn('the other copy is not typing this race');
+          lastProgressAt = Date.now();
+        }
         await sleep(600);
         continue;
       }
@@ -7039,6 +7065,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       } else {
         idle = 0;
         lastIndex = index;
+        lastProgressAt = Date.now();
         blockedSince = 0;
         stallNoted = false;
       }
@@ -8761,6 +8788,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         stopAfterRace: session.stopAfterRace,
         primary: primaryRole,
         copies: peerCount,
+        tab: tabLeaseInfo(),
+        typingRescue: typingRescueUntil > Date.now() ? 'active' : 'off',
       },
       switches: {
         breaks: CONFIG.breaks.enabled !== false,
@@ -17262,6 +17291,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   const TAB_LEASE = 'nta:tabLease';
   let tabId = null;            // identidad estable de la pestaña (sobrevive recargas)
   let tabPrimary = true;       // false = otra pestaña tiene el lease
+  let typingRescueUntil = 0;   // ventana en la que una carrera viva recupera el teclado
+  let typingRescueAt = 0;      // ultimo rescate, para no repetir el aviso cada tick
   let tabRoleNoted = false;
   let guardId = null;          // id de esta copia en el registro del documento
   let guardSince = 0;          // cuando se registro (desempate de la eleccion)
@@ -17574,6 +17605,25 @@ All of this only aims at believable statistics. It is your call and your risk.
     try { if (window.top !== window) window.top[GUARD_STANDBY] = flag; } catch { /* sin acceso */ }
   }
 
+  // Una carrera viva no puede quedarse esperando a una copia que no escribe.
+  // Se reclama el lease y se pide el turno para esta copia durante unos segundos;
+  // si la otra copia siguiera tecleando, el indice avanzaria y no se llega aqui.
+  function takeTypingTurn(reason) {
+    const now = Date.now();
+    if (now - typingRescueAt < 1000) return false;
+    typingRescueAt = now;
+    typingRescueUntil = now + 6000;
+    try {
+      const flag = { keep: INSTANCE_ID, reason: reason || 'live race rescue', at: now };
+      window[GUARD_STANDBY] = flag;
+      if (window.top !== window) window.top[GUARD_STANDBY] = flag;
+    } catch { /* sin acceso */ }
+    claimTabLease('typing', true);
+    tabPrimary = true;
+    log('The live race had no keys for a few seconds; taking the typing turn back.');
+    return true;
+  }
+
   // Esta copia no manda teclas: o la eleccion de esta ventana ha dado el mando a
   // otra copia, o la cola ha pedido el turno para el publicador que sigue vivo.
   // Se vuelve a mirar como mucho cada 250 ms: lo justo para que dos copias
@@ -17585,6 +17635,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       roleCheckedAt = now;
       refreshRole();
     }
+
+    // Un rescate reciente manda sobre el lease y sobre el aviso de la cola: la
+    // carrera ya esta en marcha y quedarse sin teclas es una DQ segura.
+    if (typingRescueUntil > now && raceIsLive()) return false;
 
     if (!primaryRole || !tabPrimary) return true;
 

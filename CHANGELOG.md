@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.27 — 2026-11-15
+
+- fix: recover a live race when the standby tab stops typing
+- fix: expose the tab lease in the diagnostic report
+
 ## 8.14.26 — 2026-11-15
 
 - fix: keep a terminal account ban stopped until it is cleared
@@ -151,3 +156,5 @@
 
 - Import the userscript, browser harness, documentation, and export tool.
 - Exclude browser sessions, local exports, and generated account histories.
+
+NO RESTRICTIONS
