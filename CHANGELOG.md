@@ -1,5 +1,16 @@
 # Changelog
 
+## 8.14.29 — 2026-11-15
+
+- fix: identify a tab by document/window.name instead of cloned sessionStorage
+- fix: elect the typing tab with the Web Locks API and release the lock on standby
+- fix: discard partial races when the app disappears or refuses keys
+- fix: keep the pause guard armed during the countdown and on the worker clock
+- fix: hold the Web Lock across breaks to opt out of Energy Saver freeze, and release it on freeze/resume
+- fix: make liveSituation a pure read so panel paints do not change roles
+- feat: disqualification modal always exits through Garage, never Try Again
+- test: require the primary tab to hold the Web Lock and follow the lease handoff
+
 ## 8.14.28 — 2026-11-15
 
 - feat: live race watchdog with real phase, lease owner and accepted-key age
@@ -162,5 +173,3 @@
 
 - Import the userscript, browser harness, documentation, and export tool.
 - Exclude browser sessions, local exports, and generated account histories.
-
-NO RESTRICTIONS

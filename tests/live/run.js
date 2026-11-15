@@ -3591,6 +3591,26 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     await cdp.evaluate(fs.readFileSync(SCRIPT, 'utf8'));
     await waitFor(async () => (await cdp.evaluate(`Boolean(document.getElementById('nt-queue-panel'))`)), 8000, 'the garage panel');
 
+    // El modal real de DQ ofrece «Try Again» y «Garage». El bot tiene que
+    // pulsar Garage; se inyecta Try Again primero para que el orden del DOM no
+    // decida por nosotros.
+    const dqPriority = await cdp.evaluate(`(() => {
+      const style = 'position:fixed;left:0;top:0;padding:4px;z-index:1';
+      const again = document.createElement('button');
+      again.textContent = 'Try Again';
+      again.style.cssText = style;
+      const garage = document.createElement('button');
+      garage.textContent = 'Garage';
+      garage.style.cssText = style;
+      document.body.append(again, garage);
+      const target = window.__ntaDebug.dqTarget();
+      again.remove();
+      garage.remove();
+      return { target };
+    })()`);
+    check('DQ modal prefers Garage over Try Again regardless of DOM order',
+      dqPriority.target === 'garage', dqPriority);
+
     // La fila `login` dice que camino usara el re-login y cuanto le queda al
     // recuerdo. Se pintan los dos casos que no dependen de una sesion real.
     const garageLogin = await cdp.evaluate(`(() => {
@@ -5074,6 +5094,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         role: w.__ntaDebug && w.__ntaDebug.role ? w.__ntaDebug.role() : null,
         registry: Array.isArray(w.__ntaInstances) ? w.__ntaInstances.length : -1,
         lease: w.__ntaDebug && w.__ntaDebug.tabLease ? w.__ntaDebug.tabLease() : null,
+        typingLock: w.__ntaDebug && w.__ntaDebug.typingLock ? w.__ntaDebug.typingLock() : null,
       };
     })()`;
 
@@ -5117,6 +5138,37 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && a0.lease.mine !== b0.lease.mine,
       { a: a0.lease, b: b0.lease });
 
+    // El lease de localStorage puede perder una carrera read-check-write; el
+    // Web Lock es la exclusion atomica. La pestaña que manda tiene que ser la
+    // unica que lo sostiene.
+    await waitFor(async () => {
+      const one = await tabA.evaluate(roleRead);
+      const two = await tabB.evaluate(roleRead);
+      const held = [one, two].filter((item) => item.typingLock && item.typingLock.held);
+      return held.length === 1;
+    }, 5000, 'exactly one Web Lock holder');
+    const lockA = await tabA.evaluate(roleRead);
+    const lockB = await tabB.evaluate(roleRead);
+    check('two tabs: exactly one tab holds the Web Lock used for typing',
+      Boolean(lockA.typingLock && lockB.typingLock)
+        && lockA.typingLock.supported === true && lockB.typingLock.supported === true
+        && Number(lockA.typingLock.held) + Number(lockB.typingLock.held) === 1,
+      { a: lockA.typingLock, b: lockB.typingLock });
+
+    await waitFor(async () => {
+      const one = await tabA.evaluate(roleRead);
+      const two = await tabB.evaluate(roleRead);
+      const owner = one.role && one.role.primary ? one : (two.role && two.role.primary ? two : null);
+      return Boolean(owner && owner.typingLock && owner.typingLock.held);
+    }, 5000, 'the primary tab to hold the Web Lock');
+    const ownerLock = await tabA.evaluate(roleRead);
+    const otherLock = await tabB.evaluate(roleRead);
+    check('two tabs: the primary tab is the one holding the Web Lock',
+      Boolean(ownerLock.role && otherLock.role)
+        && (ownerLock.role.primary ? ownerLock.typingLock.held === true : otherLock.typingLock.held === true)
+        && (ownerLock.role.primary ? otherLock.typingLock.held === false : ownerLock.typingLock.held === false),
+      { a: { role: ownerLock.role, lock: ownerLock.typingLock }, b: { role: otherLock.role, lock: otherLock.typingLock } });
+
     const leader = a0.role.primary
       ? { tab: tabA, name: 'A' }
       : { tab: tabB, name: 'B' };
@@ -5148,6 +5200,19 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && afterStop.lease && afterStop.lease.mine === true
         && stopped.role.primary === false && stopped.role.standby === true,
       { after: afterStop, stopped });
+
+    await waitFor(async () => {
+      const one = await follower.evaluate(roleRead);
+      const two = await leader.tab.evaluate(roleRead);
+      return Boolean(one.typingLock && one.typingLock.held)
+        && Boolean(two.typingLock && !two.typingLock.held);
+    }, 5000, 'the Web Lock to move with the lease');
+    const lockAfter = await follower.evaluate(roleRead);
+    const lockStopped = await leader.tab.evaluate(roleRead);
+    check('two tabs: the Web Lock follows the lease handoff',
+      lockAfter.typingLock && lockAfter.typingLock.held === true
+        && lockStopped.typingLock && lockStopped.typingLock.held === false,
+      { after: lockAfter.typingLock, stopped: lockStopped.typingLock });
 
     // Cerrar la pestaña que ya solto el turno no puede dejar a la otra en
     // espera: el lease sigue siendo de la superviviente.

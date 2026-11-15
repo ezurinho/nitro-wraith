@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NITRO WRAITH
 // @namespace    nitro.wraith
-// @version      8.14.28
+// @version      8.14.29
 // @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
 // @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
 // @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
@@ -730,7 +730,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   };
 
-  const VERSION = '8.14.28';
+  const VERSION = '8.14.29';
 
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se guarda el ultimo resultado y se
@@ -5179,8 +5179,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       phase: livePhase(now),
       acceptedAgeMs: acceptedAt ? Math.max(0, now - acceptedAt) : 0,
       sentAgeMs: sentAt ? Math.max(0, now - sentAt) : 0,
-      standby: Boolean(standbyActive()),
+      standby: Boolean(standbySnapshot()),
       rescue: typingRescueUntil > now,
+      typingLock: typingLockHeld,
       lease,
     };
   }
@@ -5467,6 +5468,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // reason se pinta en la linea de estado: el ultimo aviso debe decir POR QUE
   // se paro, no solo que se paro.
   function panic(reason, holdMs) {
+    releaseTypingLock();
     clearPauseGuard();
     session.paused = false;
     session.stopAfterRace = false;
@@ -5641,7 +5643,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       // no debe seguir tecleando a la app muerta mientras tanto.
       connErrorSeenAt = now;
       log('Lost the connection to the race server: taking the game\'s way out (garage).');
-      clickByText(['go to your garage', 'view garage', 'your garage']);
+      clickByText(['go to your garage', 'go to garage', 'view garage', 'your garage', 'garage']);
       notifyTopNeedGarage();
       return;
     }
@@ -5655,7 +5657,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       const now = Date.now();
       if (now - lastAssetClickAt < CONFIG.queue.actionCooldownMs * 2) return;
       lastAssetClickAt = now;
-      if (clickByText(['go to your garage', 'try again'])) {
+      if (clickByText(['go to your garage', 'go to garage', 'view garage', 'your garage', 'garage', 'try again'])) {
         log('The game could not load its files: taking the way out it offers (garage).');
       }
       // Si esto corre dentro del marco de la carrera, pulsar alli solo navega el
@@ -5831,7 +5833,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       // La espera ya vencio y el aviso sigue pintado: se sale por el garaje.
       // «Race Again» no se toca ni aqui: el siguiente intento lo hace la cola
       // con su retardo, no este modal viejo.
-      if (clickByText(['go to your garage', 'view garage', 'your garage'])) notifyTopNeedGarage();
+      if (clickByText(['go to your garage', 'go to garage', 'view garage', 'your garage', 'garage'])) {
+        notifyTopNeedGarage('disqualification block screen');
+      }
       return true;
     }
 
@@ -5842,16 +5846,22 @@ All of this only aims at believable statistics. It is your call and your risk.
     const now = Date.now();
     if (now - lastDqClickAt < CONFIG.queue.actionCooldownMs) return true;
     lastDqClickAt = now;
-    log('Disqualification modal: looking for the next race.');
+    log('Disqualification modal: going to the garage, not to Try Again.');
 
-    // Tras una DQ "Race Again" a veces sale deshabilitado; el garaje siempre
-    // esta y desde ahi se abre otra carrera con Race Now.
-    if (clickByText(['race again', 'play again', 'next race'])) return true;
+    // El garaje va PRIMERO. «Try Again» a veces esta deshabilitado y, sobre
+    // todo, vuelve a abrir una carrera desde el mismo modal; el garaje siempre
+    // esta y deja que la cola abra la siguiente con Race Now. La etiqueta real
+    // puede ser «Garage», «Go To Garage» o «Go To Your Garage».
+    if (clickByText(['go to your garage', 'go to garage', 'view garage', 'your garage', 'garage'])) {
+      // Ojo: dentro del marco, ese boton navega el MARCO y dejaria un garaje
+      // incrustado en /race. Se avisa a la ventana de arriba para que navegue
+      // la pagina entera, como haria un humano.
+      notifyTopNeedGarage('disqualification screen');
+      return true;
+    }
 
-    // Ojo: si este modal esta DENTRO del marco de la carrera, ese boton navega
-    // el marco y dejaria un garaje incrustado en /race. Se avisa a la ventana de
-    // arriba para que lleve la pagina entera, que es lo que hace un humano.
-    if (clickByText(['go to your garage', 'view garage', 'your garage'])) notifyTopNeedGarage();
+    // Solo si el modal no ofrece garaje se usa la salida de reintento.
+    if (clickByText(['try again', 'race again', 'play again', 'next race'])) return true;
     return true;
   }
 
@@ -5869,7 +5879,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     lastConnExitAt = now;
 
     log('Lost the connection to the race server: this race is not counted; going back to the garage.');
-    clickByText(['go to your garage', 'view garage', 'your garage']);
+    clickByText(['go to your garage', 'go to garage', 'view garage', 'your garage', 'garage']);
     notifyTopNeedGarage();
     return false;
   }
@@ -5991,12 +6001,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     const now = Date.now();
     if (now - lastDqClickAt < CONFIG.queue.actionCooldownMs * 2) return true;
     lastDqClickAt = now;
-    log('Disqualification modal around the race: closing it to get the next race.');
+    log('Disqualification modal around the race: closing it through the garage.');
 
     const view = topDoc.defaultView;
-    const target = [...topDoc.querySelectorAll('button, a, [role="button"]')].find((el) => {
+    const buttons = [...topDoc.querySelectorAll('button, a, [role="button"]')].filter((el) => {
       const label = normalize(el.textContent);
-      if (!label || !/your garage|race again|play again|next race/.test(label)) return false;
+      if (!label || !/garage|race again|play again|next race/.test(label)) return false;
       if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
       const rect = el.getBoundingClientRect();
       if (rect.width < 1 || rect.height < 1) return false;
@@ -6004,6 +6014,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       return !style || (style.display !== 'none' && style.visibility !== 'hidden');
     });
 
+    // Garage antes que Race Again: el modal de DQ debe salir por el garaje.
+    const target = buttons.find((el) => /garage/.test(normalize(el.textContent))) || buttons[0];
     if (!target) return false;
     target.click();
     return true;
@@ -6016,9 +6028,22 @@ All of this only aims at believable statistics. It is your call and your risk.
     let lastNudge = Date.now();
 
     while (!session.stopped) {
+      // El Web Lock solo se tiene mientras esta copia puede escribir. Si el
+      // lease cambia a otra pestaña, se suelta aqui; si no se tiene y el turno
+      // es de esta, se pide antes de seguir esperando la pantalla.
+      if (standbyActive()) {
+        if (typingLockHeld) releaseTypingLock();
+      } else if (!typingLockHeld && !(await acquireTypingLock())) {
+        await preciseSleep(CONFIG.pollMs);
+        continue;
+      }
+
       const app = findTypingApp();
       if (app) return app;
-      if (deadline && Date.now() >= deadline) return null;
+      if (deadline && Date.now() >= deadline) {
+        releaseTypingLock();
+        return null;
+      }
 
       if (!announced) {
         log('Waiting for the race screen...');
@@ -6108,11 +6133,23 @@ All of this only aims at believable statistics. It is your call and your risk.
       // su trabajo: se recupera el turno antes de que el servidor DQ por
       // inactividad.
       if (standbyActive()) {
+        if (typingLockHeld) releaseTypingLock();
         if (Date.now() - lastProgressAt >= CONFIG.guard.standbyRescueMs) {
           takeTypingTurn('the other copy is not starting the race');
           lastProgressAt = Date.now();
         }
         await preciseSleep(400);
+        continue;
+      }
+
+      // La tecla de sondeo tambien es una tecla: no sale sin el Web Lock. Si
+      // otra pestaña lo tiene, esta espera en vez de escribir a la vez.
+      if (!typingLockHeld && !(await acquireTypingLock())) {
+        if (Date.now() - lastTypingLockNoteAt > 10000) {
+          lastTypingLockNoteAt = Date.now();
+          log('Waiting for the typing lock; no keys are sent from this tab.');
+        }
+        await preciseSleep(300);
         continue;
       }
 
@@ -6712,12 +6749,18 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
-  async function finishRace(app, disqualified = false) {
+  async function finishRace(app, disqualified = false, abandoned = false) {
     session.typing = false;
+    // El lock NO se suelta aqui: se mantiene durante resultados, descansos y
+    // esperas mientras el bucle siga vivo. Chrome no congela por Energy Saver
+    // una pagina que sostiene un Web Lock, y soltarlo en cada carrera dejaba
+    // la pestaña AFK expuesta al freeze justo en el hueco mas largo. Si el
+    // turno cambia, refreshRole() o el freeze lo sueltan.
 
     // Otra copia lleva esta carrera: no se apunta nada ni se pulsa nada, o las
     // estadisticas de la cuenta salen dobles.
     if (standbyActive()) {
+      if (typingLockHeld) releaseTypingLock();
       log('Another copy is driving this race; this one records nothing.');
       return false;
     }
@@ -6736,6 +6779,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (disqualified) {
       dqSeenAt = 0;
       noteDisqualification();
+    } else if (abandoned) {
+      // La app desaparecio o dejo de aceptar teclas antes del final. NO es una
+      // carrera medida: contarla metia una muestra parcial en el historial, en
+      // la media de la tanda y en la calibracion del ritmo.
+      log('Race lost before the finish line; it is not counted.');
     } else {
       counted = countRace();
       log(`Race finished · WPM ${wpmNow().toFixed(1)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}%`);
@@ -6927,12 +6975,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     return false;
   }
 
+  let lastTypingLockNoteAt = 0;
+
   async function raceOnce() {
     // Otra copia manda: esta no entra en la carrera ni la mide. Antes entraba, y
     // al ver avanzar la leccion (por las teclas de la otra copia) creia que
     // habia arrancado su propio reloj: media el WPM de otro y el guardia saltaba
     // con un numero que no era suyo.
     if (standbyActive()) {
+      if (typingLockHeld) releaseTypingLock();
       await sleep(1000);
       return false;
     }
@@ -6959,11 +7010,17 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (session.stopped) return false;
 
     let app = await waitForApp();
-    if (!app) return false;
+    if (!app) {
+      releaseTypingLock();
+      return false;
+    }
 
     logStart();
 
-    if (!(await waitForRaceStart(app))) return false;
+    if (!(await waitForRaceStart(app))) {
+      releaseTypingLock();
+      return false;
+    }
 
     // El modal de la carrera anterior ("Disqualified") sigue en pantalla
     // mientras se pulsa Race Again. Si no se borra la marca al arrancar de
@@ -7004,8 +7061,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         const next = await waitForApp(CONFIG.remountGraceMs);
 
         if (!next) {
-          log('The race disappeared; calling it finished.');
-          return finishRace(app);
+          log('The race disappeared before it finished; discarding the partial race.');
+          return finishRace(app, false, true);
         }
 
         app = next;
@@ -7070,11 +7127,25 @@ All of this only aims at believable statistics. It is your call and your risk.
       // carrera lleva varios segundos sin avanzar, la otra copia no esta
       // escribiendo y se recupera el turno antes de la DQ por inactividad.
       if (standbyActive()) {
+        // Si esta copia deja de ser la que escribe, suelta el Web Lock para no
+        // bloquear a la pestaña que tome el relevo.
+        if (typingLockHeld) releaseTypingLock();
         if (Date.now() - lastProgressAt >= CONFIG.guard.standbyRescueMs) {
           takeTypingTurn('the other copy is not typing this race');
           lastProgressAt = Date.now();
         }
         await sleep(600);
+        continue;
+      }
+
+      // El lock pudo liberarse al pasar a standby o al congelarse la pestaña.
+      // No se manda una tecla hasta recuperarlo.
+      if (!typingLockHeld && !(await acquireTypingLock())) {
+        if (Date.now() - lastTypingLockNoteAt > 10000) {
+          lastTypingLockNoteAt = Date.now();
+          log('Waiting for the typing lock; no keys are sent from this tab.');
+        }
+        await sleep(300);
         continue;
       }
 
@@ -7248,8 +7319,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       const sent = press(app, fail ? wrongChar(expected) : expected);
       if (!sent) {
         if (++sendFails >= CONFIG.stallLimit) {
-          log('The component is refusing keystrokes; calling it finished.');
-          return finishRace(app);
+          log('The component is refusing keystrokes; discarding the partial race.');
+          return finishRace(app, false, true);
         }
         await sleep(CONFIG.pollMs);
         continue;
@@ -7332,6 +7403,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     } finally {
       session.liveRound = false;
       session.running = false;
+      releaseTypingLock();
     }
   }
 
@@ -8344,6 +8416,10 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.seasonXpPerRace = () => seasonXpPerRace();
 
   window.__ntaDebug.tabLease = () => tabLeaseInfo();
+  window.__ntaDebug.typingLock = () => ({
+    supported: typingLocksAvailable(),
+    held: typingLockHeld,
+  });
   window.__ntaDebug.dropTabLease = () => releaseTabLease(true);
   // Liberacion normal (sin force), para el banco: comprueba que una pestaña
   // suelta el lease aunque lo haya escrito su otra mitad.
@@ -8361,6 +8437,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       peers: peerCount,
       standby,
       tab: tabLeaseInfo(),
+      typingLock: typingLockHeld,
       typing: session.typing,
       frame: frame ? { standby: frame.standby, typing: frame.typing } : null,
     };
@@ -8875,6 +8952,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         primary: primaryRole,
         copies: peerCount,
         tab: tabLeaseInfo(),
+        typingLock: typingLockHeld ? 'held' : (typingLocksAvailable() ? 'free' : 'unsupported'),
         typingRescue: typingRescueUntil > Date.now() ? 'active' : 'off',
         live: liveSituation(),
       },
@@ -10863,7 +10941,10 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   function clearPauseGuard() {
     if (pauseGuard) {
-      clearTimeout(pauseGuard);
+      // later() devuelve un asa negativa cuando usa el reloj Worker; clearTimeout
+      // sobre ella no cancelaba el timer del Worker y la pausa podia reanudarse
+      // sola mas tarde. clearLater entiende las dos formas.
+      clearLater(pauseGuard);
       pauseGuard = null;
     }
   }
@@ -10874,13 +10955,16 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     // Pausar DENTRO de una carrera es una descalificacion segura: si dejas de
     // mandar teclas ~12 s, el servidor te expulsa. La pausa se corta sola.
+    // `session.typing` sigue a false durante la cuenta atras, pero la carrera
+    // ya esta viva: se usa raceIsLive() para no quedarse sin guardia justo en
+    // el tramo en el que el servidor ya cronometra.
     if (paused) {
-      if (session.typing && !session.stopped) {
+      if (!session.stopped && raceIsLive()) {
         clearPauseGuard();
         session.pauseEndsAt = Date.now() + CONFIG.dqGuardMs;
-        pauseGuard = setTimeout(() => {
+        pauseGuard = later(() => {
           pauseGuard = null;
-          if (!session.paused || !session.typing) return;
+          if (!session.paused || !raceIsLive()) return;
           log('Pause inside a race resumed by itself: sitting still for ~12 s disqualifies you.');
           setPaused(false);
         }, CONFIG.dqGuardMs);
@@ -13253,7 +13337,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         return true;
       }
 
-      const target = findButton((label) => label.includes('your garage'))
+      const target = findButton((label) => label.includes('garage'))
         || findButton((label) => label.includes('try again'));
       if (target && queuePress('assets', target)) noteAssetFailure('going to the garage');
       return true;
@@ -13368,7 +13452,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       // El servidor de la carrera cerro la conexion. Si el aviso se pinta en
       // esta ventana, se toma su salida; el marco avisa por `__ntaNeedGarage`.
       if (looksLikeConnectionError(modalBody)) {
-        const target = findButton((label) => label.includes('your garage'))
+        const target = findButton((label) => label.includes('garage'))
           || findButton((label) => label.includes('try again'));
         if (target) queuePress('connection', target);
         queueWhy('Lost the connection to the race server; going back to the garage.');
@@ -15577,6 +15661,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     // El banco y la consola pueden repintar sin esperar al latido de la cola.
     window.__ntaDebug = window.__ntaDebug || {};
     window.__ntaDebug.garagePaint = () => paintGaragePanel();
+    // El banco comprueba la prioridad del modal de DQ sin abrir una carrera:
+    // Garage tiene que ganar aunque "Try Again" aparezca antes en el DOM.
+    window.__ntaDebug.dqTarget = () => {
+      const button = dqButton();
+      return button ? normalize(button.textContent) : '';
+    };
 
     function garagePanelRoute() {
       const path = location.pathname;
@@ -16805,7 +16895,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     // sigue en pantalla, se reintenta con respiro; tras unos intentos se sale
     // por el garaje, que siempre esta.
     function dqButton() {
-      const garage = findButton((label) => label.includes('your garage'));
+      // La etiqueta real puede ser «Garage» a secas; exigir «your garage» hacia
+      // que el modal se quedara abierto y acabara navegando por timeout.
+      const garage = findButton((label) => /garage/.test(label));
       const again = findButton((label) => /race again|play again|next race/.test(label));
       return garage || again;
     }
@@ -17392,9 +17484,14 @@ All of this only aims at believable statistics. It is your call and your risk.
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const GUARD_REGISTRY = '__ntaInstances';
   const GUARD_STANDBY = '__ntaStandby';
-  const TAB_ID_KEY = 'nta:tabId';
   const TAB_LEASE = 'nta:tabLease';
-  let tabId = null;            // identidad estable de la pestaña (sobrevive recargas)
+  const TAB_NAME_PREFIX = 'nta-tab:';
+  const TYPING_LOCK = 'nta:typing';
+  let tabId = null;            // identidad de ESTE documento/pestaña
+  let typingLockHeld = false;  // esta pestaña tiene el Web Lock de tecleo
+  let typingLockRelease = null;
+  let typingLockPending = null;
+  let typingLockEpoch = 0;
   let tabPrimary = true;       // false = otra pestaña tiene el lease
   let typingRescueUntil = 0;   // ventana en la que una carrera viva recupera el teclado
   let typingRescueAt = 0;      // ultimo rescate, para no repetir el aviso cada tick
@@ -17414,28 +17511,105 @@ All of this only aims at believable statistics. It is your call and your risk.
   let guardPaceAtStart = null; // ritmo con el que empezo la carrera en curso
   const guardSamples = [];     // ultimas lecturas de WPM (techo sostenido)
 
-  // Identidad de la pestaña. sessionStorage sobrevive a recargas y a la
-  // navegacion dentro de la pestaña; window.top.__ntaTabId une la cola y el
-  // iframe cuando los dos cargan el script. Sin eso, cada recarga creaba un id
-  // nuevo y el lease dejaba la pestaña bloqueada hasta caducar.
+  // Identidad de la pestaña. NO se usa sessionStorage como fuente: Chrome
+  // copia su contenido al duplicar una pestaña, asi que dos pestañas podian
+  // compartir el mismo id y creerse las dos dueñas del lease. `window.name`
+  // sobrevive a la navegacion dentro de la pestaña pero no se copia al
+  // duplicarla; el iframe de la carrera comparte el id por window.top.
+  function newTabId() {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+    } catch { /* contexto sin crypto */ }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   function tabIdentity() {
     if (tabId) return tabId;
 
     let id = '';
     try {
-      const top = window.top;
-      if (top && top.__ntaTabId) id = String(top.__ntaTabId);
+      if (window.top && window.top.__ntaTabId) id = String(window.top.__ntaTabId);
     } catch { /* top de otro origen */ }
 
-    if (!id) {
-      try { id = String(sessionStorage.getItem(TAB_ID_KEY) || ''); } catch { /* storage bloqueado */ }
+    if (!id && window.top === window) {
+      try {
+        const name = String(window.name || '');
+        if (name.startsWith(TAB_NAME_PREFIX)) id = name.slice(TAB_NAME_PREFIX.length);
+      } catch { /* window.name bloqueado */ }
     }
-    if (!id) id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    if (!id) id = newTabId();
 
     tabId = id;
-    try { sessionStorage.setItem(TAB_ID_KEY, id); } catch { /* storage bloqueado */ }
-    try { if (window.top && !window.top.__ntaTabId) window.top.__ntaTabId = id; } catch { /* top de otro origen */ }
+    try { if (window.top) window.top.__ntaTabId = id; } catch { /* top de otro origen */ }
+    try {
+      if (window.top === window) window.name = TAB_NAME_PREFIX + id;
+    } catch { /* window.name bloqueado */ }
     return tabId;
+  }
+
+  // Web Locks es la exclusion real entre pestañas: localStorage solo sirve de
+  // estado visible y puede perder una carrera read-check-write. El lock se
+  // mantiene mientras esta promesa siga pendiente y se libera solo si la
+  // pestaña se cierra. Las pestañas que no lo consiguen no mandan teclas.
+  function typingLocksAvailable() {
+    return typeof navigator !== 'undefined' && navigator.locks
+      && typeof navigator.locks.request === 'function';
+  }
+
+  function acquireTypingLock() {
+    if (!typingLocksAvailable()) return Promise.resolve(true);
+    if (typingLockHeld) return Promise.resolve(true);
+    if (typingLockPending) return typingLockPending;
+
+    const epoch = ++typingLockEpoch;
+    typingLockPending = new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        if (!typingLockHeld) typingLockPending = null;
+        resolve(ok);
+      };
+
+      try {
+        navigator.locks.request(TYPING_LOCK, { ifAvailable: true }, async (lock) => {
+          // Un release() durante la peticion invalida esta adquisicion: al
+          // volver del callback el lock se suelta y no se toca el estado. Hay
+          // que resolver la promesa pendiente; si no, raceOnce quedaria
+          // esperando para siempre tras un panic/freeze en mitad del request.
+          if (epoch !== typingLockEpoch) {
+            finish(false);
+            return;
+          }
+          if (!lock) {
+            finish(false);
+            return;
+          }
+
+          typingLockHeld = true;
+          finish(true);
+          await new Promise((release) => { typingLockRelease = release; });
+          if (epoch === typingLockEpoch) {
+            typingLockHeld = false;
+            typingLockRelease = null;
+          }
+        }).catch(() => finish(false));
+      } catch {
+        finish(false);
+      }
+    });
+    return typingLockPending;
+  }
+
+  function releaseTypingLock() {
+    typingLockEpoch++;
+    const release = typingLockRelease;
+    typingLockRelease = null;
+    typingLockHeld = false;
+    typingLockPending = null;
+    try { if (release) release(); } catch { /* ya liberado */ }
   }
 
   // El lease vive en localStorage porque es lo unico que ven todas las
@@ -17615,6 +17789,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       tabTurn = ownLease;
     }
     tabPrimary = tabTurn;
+    // El lock de tecleo pertenece al rol que acaba de decidir esta funcion. Si
+    // el turno se fue a otra copia/pestaña, se suelta aqui mismo: esperar al
+    // siguiente await del bucle dejaba una ventana en la que la pestaña en
+    // standby retenia el lock y la nueva dueña no podia escribir.
+    if ((!primary || !tabTurn) && typingLockHeld) releaseTypingLock();
     if (liveTakeover && tabTurn) {
       log('A live race takes the typing turn from the other tab.');
     }
@@ -17733,13 +17912,10 @@ All of this only aims at believable statistics. It is your call and your risk.
   // otra copia, o la cola ha pedido el turno para el publicador que sigue vivo.
   // Se vuelve a mirar como mucho cada 250 ms: lo justo para que dos copias
   // recien inyectadas no manden teclas a la vez ni un instante de mas.
-  function standbyActive() {
+  // Lectura pura del estado de standby, sin refreshRole/claimTabLease. La usan
+  // el panel y el diagnostico: observar no debe cambiar el rol de la pestaña.
+  function standbySnapshot() {
     const now = Date.now();
-
-    if (now - roleCheckedAt > 250) {
-      roleCheckedAt = now;
-      refreshRole();
-    }
 
     // Un rescate reciente manda sobre el lease y sobre el aviso de la cola: la
     // carrera ya esta en marcha y quedarse sin teclas es una DQ segura.
@@ -17749,6 +17925,17 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const flag = standbyOrder();
     return Boolean(flag && flag.keep && flag.keep !== INSTANCE_ID);
+  }
+
+  function standbyActive() {
+    const now = Date.now();
+
+    if (now - roleCheckedAt > 250) {
+      roleCheckedAt = now;
+      refreshRole();
+    }
+
+    return standbySnapshot();
   }
 
   // WPM que el propio juego pinta en el HUD de la carrera: es el numero que se
@@ -18192,12 +18379,35 @@ All of this only aims at believable statistics. It is your call and your risk.
     // una parada pedida por el usuario (Esc, Alt+N, el tope de tanda) se
     // respeta y no se reanuda sola.
     let stoppedByPageHide = false;
+    let frozenAt = 0;
 
     window.addEventListener('pagehide', () => {
+      releaseTypingLock();
       if (session.stopped) return;
       session.stopped = true;
       releaseTabLease();
       stoppedByPageHide = true;
+    });
+
+    // Chrome puede congelar una pestaña oculta (Energy Saver, memoria, bfcache)
+    // y con ella sus timers y sus workers. El freeze se avisa ANTES de suspender
+    // el documento: se suelta el Web Lock para que otra pestaña pueda relevar y
+    // se deja constancia. Al volver, el bucle vuelve a pedir el lock antes de
+    // mandar una tecla; si la carrera ya murio, el DQ modal la cierra.
+    document.addEventListener('freeze', () => {
+      frozenAt = Date.now();
+      releaseTypingLock();
+      if (session.liveRound && !session.stopped) {
+        log('Browser froze this tab; the typing lock was released.');
+      }
+    });
+
+    document.addEventListener('resume', () => {
+      if (!frozenAt) return;
+      const frozenFor = Math.max(0, Date.now() - frozenAt);
+      frozenAt = 0;
+      log(`Browser resumed after ${(frozenFor / 1000).toFixed(1)} s frozen; rechecking the race.`);
+      updatePanel();
     });
 
     window.addEventListener('pageshow', (event) => {
