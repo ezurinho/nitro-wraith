@@ -979,6 +979,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibratedRange: 'autoTyperCalibratedRange',
     calibratedAccuracy: 'autoTyperCalibratedAccuracy',
     calibrationAt: 'autoTyperCalibrationAt',
+    lifetimeWpm: 'autoTyperLifetimeWpm',
     challengeSelector: 'autoTyperChallengeSelector',
     trim: 'autoTyperTrim',
     sfx: 'autoTyperSfx',
@@ -2227,31 +2228,119 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
+  function accountHeaders() {
+    const headers = { accept: 'application/json, text/plain, */*' };
+    try {
+      const token = readToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+        const claims = jwtClaims(token);
+        if (claims && claims.sub) headers['x-uid'] = String(claims.sub);
+      }
+    } catch { /* token ilegible: la cookie sigue valiendo */ }
+    return headers;
+  }
+
+  function accountRows(body) {
+    const candidates = [
+      body,
+      body && body.data,
+      body && body.results,
+      body && body.data && body.data.rows,
+      body && body.results && body.results.rows,
+    ];
+    return candidates.find(Array.isArray) || [];
+  }
+
+  function readLifetimeCache(races) {
+    try {
+      const raw = JSON.parse(disk.get(KEYS.lifetimeWpm, 'null'));
+      if (!raw || !Number.isFinite(raw.wpm) || !Number.isFinite(raw.at)) return null;
+      // Otra cuenta puede tener un total parecido; un cambio grande de carreras
+      // invalida la foto para no calibrar una cuenta con la media de otra.
+      if (raw.races && races && Math.abs(raw.races - races) > Math.max(500, races * 0.2)) return null;
+      return raw;
+    } catch {
+      return null;
+    }
+  }
+
+  // La media que pinta el perfil es una ventana corta: si el bot corre por
+  // debajo, sus propias carreras la empujan hacia abajo y la calibracion se
+  // retroalimenta. Los totales mensuales del mismo API dan la media de toda la
+  // cuenta; se usa como suelo, nunca como excusa para bajar el ritmo.
+  async function fetchLifetimeWpm(races) {
+    const cached = readLifetimeCache(races);
+    const now = Date.now();
+    if (cached && now - cached.at < 24 * 60 * 60 * 1000) return cached.wpm;
+
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), CONFIG.calibration.timeoutMs) : null;
+    let typed = 0;
+    let secs = 0;
+    let totalRaces = 0;
+    let rowsSeen = 0;
+
+    try {
+      const headers = accountHeaders();
+      for (let page = 0; page < 12; page++) {
+        const response = await fetch(`/api/v2/stats/data/bymonth?page=${page}&limit=30`, {
+          method: 'GET',
+          credentials: 'include',
+          headers,
+          signal: controller ? controller.signal : undefined,
+        });
+        if (!response.ok) break;
+        const body = await response.json();
+        const rows = accountRows(body);
+        if (!rows.length) break;
+
+        for (const row of rows) {
+          const rowTyped = Number(row && (row.typed ?? row.characters ?? row.chars));
+          const rowSecs = Number(row && (row.secs ?? row.seconds ?? row.time));
+          const rowRaces = Number(row && row.races);
+          if (Number.isFinite(rowTyped) && rowTyped > 0
+            && Number.isFinite(rowSecs) && rowSecs > 0) {
+            typed += rowTyped;
+            secs += rowSecs;
+            rowsSeen++;
+          }
+          if (Number.isFinite(rowRaces) && rowRaces > 0) totalRaces += rowRaces;
+        }
+        if (rows.length < 30) break;
+      }
+
+      if (!rowsSeen || typed <= 0 || secs <= 0) return cached ? cached.wpm : null;
+      const wpm = (typed / 5) / (secs / 60);
+      if (!Number.isFinite(wpm) || wpm < 15 || wpm > 300) return cached ? cached.wpm : null;
+      disk.set(KEYS.lifetimeWpm, JSON.stringify({ wpm, at: now, races: totalRaces || races || 0 }));
+      return wpm;
+    } catch {
+      return cached ? cached.wpm : null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async function fetchAccountStats() {
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), CONFIG.calibration.timeoutMs) : null;
     const failed = (reason) => ({ wpm: null, accuracy: null, reason });
 
     try {
-      const token = readToken();
-      const headers = { accept: 'application/json, text/plain, */*' };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-        const claims = jwtClaims(token);
-        if (claims && claims.sub) headers['x-uid'] = String(claims.sub);
-      }
-
+      let data = null;
       const response = await fetch('/api/v2/stats/summary', {
         method: 'GET',
         credentials: 'include',
-        headers,
+        headers: accountHeaders(),
         signal: controller ? controller.signal : undefined,
       });
-      if (!response.ok) return failed(`HTTP ${response.status}`);
+      if (response.ok) {
+        const body = await response.json();
+        data = (body && (body.data || body.results)) || body;
+      }
 
-      const body = await response.json();
-      const data = (body && (body.data || body.results)) || body;
-      const wpm = pickAccountStat(data, ['wpm', 'avgWpm', 'averageWpm', 'avg_wpm', 'average_wpm', 'speed'], 15, 300);
+      const currentWpm = pickAccountStat(data, ['wpm', 'avgWpm', 'averageWpm', 'avg_wpm', 'average_wpm', 'speed'], 15, 300);
       const accuracy = pickAccountStat(data, ['accuracy', 'acc', 'avgAccuracy', 'averageAccuracy', 'avg_accuracy'], 50, 100);
       // El resumen tampoco tiene un contrato publico estable. Se buscan los
       // nombres que usa el perfil; si faltan, persist:nt los completa.
@@ -2260,16 +2349,30 @@ All of this only aims at believable statistics. It is your call and your risk.
         || (persisted && persisted.bestWpm) || null;
       const races = pickAccountStat(data, ['racesPlayed', 'totalRaces', 'races'], 0, 100000000)
         || (persisted && persisted.races) || null;
+      const lifetimeWpm = await fetchLifetimeWpm(races);
+      const wpm = Number(currentWpm) > 0 || Number(lifetimeWpm) > 0
+        ? Math.max(Number(currentWpm) || 0, Number(lifetimeWpm) || 0)
+        : null;
+
       if (wpm || accuracy) {
-        accountStats = { wpm, accuracy, bestWpm, races, source: 'api' };
-        return { wpm, accuracy, bestWpm, races, reason: null };
+        accountStats = { wpm, currentWpm, lifetimeWpm, accuracy, bestWpm, races, source: 'api' };
+        return { wpm, currentWpm, lifetimeWpm, accuracy, bestWpm, races, reason: null };
       }
 
       if (persisted && (persisted.wpm || persisted.accuracy)) {
-        accountStats = persisted;
-        return { ...persisted, reason: null };
+        accountStats = {
+          ...persisted,
+          wpm: Number(lifetimeWpm) > Number(persisted.wpm) ? lifetimeWpm : persisted.wpm,
+          currentWpm: persisted.wpm,
+          lifetimeWpm,
+        };
+        return { ...accountStats, reason: null };
       }
-      return failed('no average in the response');
+      if (lifetimeWpm) {
+        accountStats = { wpm: lifetimeWpm, currentWpm: null, lifetimeWpm, accuracy: null, bestWpm, races, source: 'monthly' };
+        return { ...accountStats, reason: null };
+      }
+      return failed(response.ok ? 'no average in the response' : `HTTP ${response.status}`);
     } catch (error) {
       return failed(error && error.name === 'AbortError' ? 'timeout' : 'network');
     } finally {
@@ -2289,8 +2392,13 @@ All of this only aims at believable statistics. It is your call and your risk.
         calibratedRange = range;
         disk.set(KEYS.calibratedRange, JSON.stringify(calibratedRange));
         const top = Number(stats.bestWpm) > 0 ? ` (top ${Number(stats.bestWpm).toFixed(0)} WPM)` : '';
+        const recent = Number(stats.currentWpm);
+        const lifetime = Number(stats.lifetimeWpm);
+        const source = lifetime > 0 && recent > 0 && lifetime > recent + 0.5
+          ? ` (lifetime ${lifetime.toFixed(1)}; recent profile ${recent.toFixed(1)})`
+          : '';
         const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
-        log(`Pace auto-calibrated: account average ${Number(stats.wpm).toFixed(1)} WPM${top}${count} -> ${range.min}-${range.max}.`);
+        log(`Pace auto-calibrated: account average ${Number(stats.wpm).toFixed(1)} WPM${source}${top}${count} -> ${range.min}-${range.max}.`);
         setPaceProfile(paceProfile, { force: true });
       }
     }
@@ -2410,7 +2518,14 @@ All of this only aims at believable statistics. It is your call and your risk.
           ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm`
           : 'auto · reading account';
       setText(panel.refs.paceSource, label);
-      panel.refs.paceSource.title = `Pace target ${wpmText} WPM, always centred on this account's average${top ? `; account top ${top} WPM` : ''}. Read automatically from the site profile and the stats API.`;
+      const recent = accountStats && Number(accountStats.currentWpm) > 0
+        ? Math.round(Number(accountStats.currentWpm)) : null;
+      const lifetime = accountStats && Number(accountStats.lifetimeWpm) > 0
+        ? Math.round(Number(accountStats.lifetimeWpm)) : null;
+      const source = lifetime && recent && lifetime > recent
+        ? ` The target is anchored to the lifetime monthly average${recent ? ` (${lifetime} WPM); the short profile window is ${recent} WPM` : ''}.`
+        : '';
+      panel.refs.paceSource.title = `Pace target ${wpmText} WPM, centred on this account's average${top ? `; account top ${top} WPM` : ''}. Read automatically from the site profile and the stats API.${source}`;
     }
 
     // La tarjeta de la vista LOG: cuando se leyo y que rango dejo. Se pinta
@@ -2421,7 +2536,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.calLogAcc, calibratedAccuracy ? accText : '—');
 
     if (panel.refs.calRow) {
-      panel.refs.calRow.title = `Always automatic from the account average${at ? ` (read ${new Date(at).toLocaleString()})` : ' (not read yet)'}: ${wpmText} WPM / ${accText} accuracy. Click: refresh the stats now.`;
+      panel.refs.calRow.title = `Always automatic from the account average${at ? ` (read ${new Date(at).toLocaleString()})` : ' (not read yet)'}: ${wpmText} WPM / ${accText} accuracy. The lifetime monthly average is used when it is higher than the short profile window. Click: refresh the stats now.`;
     }
 
     paintAccuracyDelta();

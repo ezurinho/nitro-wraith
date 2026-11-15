@@ -6,7 +6,11 @@ does not try to beat the game's limits; it tries to stay inside them.
 ## Pace
 
 - WPM is `(characters / 5) / minutes`; a "word" is five characters including spaces.
-- The account average is based on the last 10 races.
+- The profile's short WPM average is a rolling recent window, not the average of
+  every race on the account.
+- The stats API's monthly totals cover a much longer history. The script uses the
+  higher lifetime average as an anchor when those totals are available; this
+  keeps its own low races from dragging the target downward.
 - The script keeps its own target below the hard 120 WPM ceiling and never raises
   the target to chase a fast result.
 - Accuracy below 96% loses the accuracy bonus, so the floor is 96%.

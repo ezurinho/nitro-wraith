@@ -59,7 +59,7 @@ The panel exists so you can see which reason that is.
 | Area | Behaviour |
 | --- | --- |
 | **Race loop** | Opens the next race from the garage or results screen with a human delay. After a disqualification it goes to Garage, not Try Again. |
-| **Typing** | Reads the account's average and top WPM, then races around the average under a hard 120 WPM ceiling. A 30 WPM account stays near 30; a 43 WPM account stays near 43. Accuracy stays at the 96% reward floor or above. |
+| **Typing** | Reads the account's average and top WPM, anchors to the lifetime average when available, then races around it under a hard 120 WPM ceiling. A 30 WPM account stays near 30; a 43 WPM account stays near 43. Accuracy stays at the 96% reward floor or above. |
 | **Rewards** | Claims the Mystery Box, closes daily challenges and uses stickers when the settings allow it. |
 | **Session care** | Renews the session when needed. Usernames, passwords and CAPTCHAs stay manual. |
 | **Limits** | Session races, time, XP, active hours and daily race/XP budgets. |
@@ -91,6 +91,12 @@ the stats API refreshes them every 30 minutes. Auto-calibration stays on, and
 clicking the `auto` row only forces a fresh read. The target is the average,
 not the top, so a 30 WPM account gets a 26–34 WPM range and a 43 WPM account
 gets 37–49. No generic 100+ WPM default.
+
+The profile average is a short rolling window, so a slow streak can drag it
+down. When the stats API exposes the monthly totals, the script anchors the
+target to the higher lifetime average and never calibrates below it. The recent
+profile average still appears in the panel; it just cannot pull the bot into a
+self-reinforcing slow loop.
 
 ### Six themes
 

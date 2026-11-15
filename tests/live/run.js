@@ -96,6 +96,12 @@ function serve() {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       res.end(JSON.stringify({ status: 'success', results: { requests: [{}], totalRecords: 1 } }));
       return;
+    } else if (pathname === '/api/v2/stats/data/bymonth') {
+      // La calibracion pide la media de toda la cuenta; por defecto el banco
+      // responde vacio y cada prueba que necesite historia la sustituye.
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ status: 'success', data: [] }));
+      return;
     }
 
     if (!file) {
@@ -2471,6 +2477,57 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     calibration.auto === true && calibration.autoText === 'on', calibration);
   check('Live shows the auto pace and the account top WPM',
     calibration.paceSource === 'auto · 112 avg · 230 top', calibration.paceSource);
+
+  // La media corta del perfil puede caer porque las propias carreras del bot
+  // son lentas. La media mensual de toda la cuenta tiene que mandar cuando es
+  // mas alta, para que la calibracion no se retroalimente hacia abajo.
+  const lifetimeCalibration = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const realFetch = w.fetch;
+    w.localStorage.removeItem('autoTyperLifetimeWpm');
+    w.fetch = (url, options) => {
+      if (String(url).includes('/api/v2/stats/summary')) {
+        return Promise.resolve(new w.Response(
+          JSON.stringify({ success: true, data: { stats: {
+            wpm: 57, accuracy: 98.7, highestSpeed: 230, racesPlayed: 49226,
+          } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ));
+      }
+      if (String(url).includes('/api/v2/stats/data/bymonth')) {
+        return Promise.resolve(new w.Response(
+          JSON.stringify({ success: true, data: [
+            { typed: 120000, secs: 12000, races: 1000 },
+          ] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ));
+      }
+      return realFetch(url, options);
+    };
+    try {
+      const row = shadow.querySelector('[data-field="calRow"]');
+      row.click();
+      row.click();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return {
+        range: shadow.querySelector('[data-field="calWpm"]').textContent,
+        account: shadow.querySelector('[data-field="calAccount"]').textContent,
+        paceSource: shadow.querySelector('[data-field="paceSource"]').textContent,
+        stored: JSON.parse(w.localStorage.getItem('autoTyperCalibratedRange') || 'null'),
+      };
+    } finally {
+      w.fetch = realFetch;
+      w.localStorage.removeItem('autoTyperLifetimeWpm');
+    }
+  })()`, true);
+  check('the lifetime average prevents a low recent profile from dragging the target down',
+    lifetimeCalibration.range === '113-120'
+      && lifetimeCalibration.account === '120.0 WPM · 98.7%'
+      && lifetimeCalibration.paceSource === 'auto · 120 avg · 230 top'
+      && lifetimeCalibration.stored && lifetimeCalibration.stored.min === 113
+      && lifetimeCalibration.stored.max === 120,
+    lifetimeCalibration);
 
   // La media de una cuenta principiante tambien manda: 30 WPM no puede caer
   // en el 40+ del suelo viejo, y 43 WPM tiene que quedar centrado en 43.
