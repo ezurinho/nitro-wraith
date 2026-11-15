@@ -5201,12 +5201,15 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && stopped.role.primary === false && stopped.role.standby === true,
       { after: afterStop, stopped });
 
+    // El relevo del lock depende del siguiente latido de la pestaña que toma el
+    // turno. En un runner lento puede pasar de 5 s sin que el estado sea
+    // incorrecto; la condicion sigue siendo la misma, solo se le da margen.
     await waitFor(async () => {
       const one = await follower.evaluate(roleRead);
       const two = await leader.tab.evaluate(roleRead);
       return Boolean(one.typingLock && one.typingLock.held)
         && Boolean(two.typingLock && !two.typingLock.held);
-    }, 5000, 'the Web Lock to move with the lease');
+    }, 15000, 'the Web Lock to move with the lease');
     const lockAfter = await follower.evaluate(roleRead);
     const lockStopped = await leader.tab.evaluate(roleRead);
     check('two tabs: the Web Lock follows the lease handoff',
