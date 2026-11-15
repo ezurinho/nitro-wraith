@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.14.28 — 2026-11-15
+
+- feat: live race watchdog with real phase, lease owner and accepted-key age
+- fix: standby copies now see the active copy's progress before rescuing the turn
+- fix: the watchdog stays out of results and only rescues inside a live race loop
+
 ## 8.14.27 — 2026-11-15
 
 - fix: recover a live race when the standby tab stops typing

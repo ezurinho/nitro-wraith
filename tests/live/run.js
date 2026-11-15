@@ -558,6 +558,26 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('panel version matches the userscript header',
     Boolean(scriptVersion) && state.ver === `v${scriptVersion}`, { panel: state.ver, header: scriptVersion });
 
+  const live = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    return w.__ntaDebug && w.__ntaDebug.live ? w.__ntaDebug.live() : null;
+  })()`);
+  check('live watchdog exposes the real phase, lease and key ages',
+    Boolean(live) && typeof live.phase === 'string'
+      && Boolean(live.lease) && typeof live.lease.mine === 'boolean'
+      && Number.isFinite(live.acceptedAgeMs) && Number.isFinite(live.sentAgeMs),
+    live);
+
+  const watchText = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const host = w.document.getElementById('nt-autotyper-panel');
+    const node = host && host.shadowRoot && host.shadowRoot.querySelector('[data-field="watch"]');
+    return node ? node.textContent : '';
+  })()`);
+  check('the panel shows the live phase and typing lease',
+    /^(idle|waiting|results|countdown|racing|paused|break|blocked|dq|stopped)\b/.test(watchText)
+      && /(this tab|other tab|no lease)/.test(watchText), { watch: watchText });
+
   // La version no puede vivir en cuatro sitios y separarse: el README ya se
   // quedo atras una vez mientras el script seguia avanzando.
   const pkgVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;

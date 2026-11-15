@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NITRO WRAITH
 // @namespace    nitro.wraith
-// @version      8.14.27
+// @version      8.14.28
 // @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
 // @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
 // @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
@@ -730,7 +730,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   };
 
-  const VERSION = '8.14.27';
+  const VERSION = '8.14.28';
 
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se guarda el ultimo resultado y se
@@ -3801,6 +3801,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     endedAt: 0,          // congelado al cerrar la carrera: el reloj no sigue
     lastErrorAt: 0,
     lastLogAt: 0,
+    lastKeyAt: 0,        // ultima tecla enviada (aunque el juego no la acepte)
+    lastAcceptedAt: 0,   // ultima tecla que el juego conto: la que evita la DQ
+    liveRound: false,    // este bucle esta dentro de una carrera, no en resultados
     // Estado del reloj de carrera; resetRaceState los vuelve a cero, pero
     // updatePanel puede pintar antes y no debe encontrarse undefined.
     clockSamples: [],
@@ -4421,6 +4424,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     session.endedAt = 0;
     session.lastErrorAt = 0;
     session.lastLogAt = 0;
+    session.lastKeyAt = 0;
+    session.lastAcceptedAt = 0;
     session.nitroTries = 0;
     session.nitroDone = false;
     session.nitroChars = 0;
@@ -5148,6 +5153,64 @@ All of this only aims at believable statistics. It is your call and your risk.
   // session.typing sigue a false, pero el servidor ya nos esta cronometrando.
   function raceIsLive() {
     return !session.stopped && (session.typing || Boolean(findTypingApp()));
+  }
+
+  // Foto de lo que esta pasando AHORA, no de lo que paso al abrir la carrera.
+  // La usan el panel, el diagnostico y el vigilante de 500 ms.
+  function livePhase(now = Date.now()) {
+    if (session.stopped) return 'stopped';
+    if (dqSeenAt && now - dqSeenAt < 20000) return 'dq';
+    if (siteBlockedUntil() > now) return 'blocked';
+    if (session.breakUntil > now) return 'break';
+    if (session.paused) return 'paused';
+    if (!session.running) return 'idle';
+    if (session.endedAt && !session.typing) return 'results';
+    const app = findTypingApp();
+    if (!app) return 'waiting';
+    if (!session.liveRound) return 'results';
+    return session.typing ? 'racing' : 'countdown';
+  }
+
+  function liveSituation(now = Date.now()) {
+    const lease = tabLeaseInfo();
+    const acceptedAt = session.lastAcceptedAt || session.startedAt || 0;
+    const sentAt = session.lastKeyAt || 0;
+    return {
+      phase: livePhase(now),
+      acceptedAgeMs: acceptedAt ? Math.max(0, now - acceptedAt) : 0,
+      sentAgeMs: sentAt ? Math.max(0, now - sentAt) : 0,
+      standby: Boolean(standbyActive()),
+      rescue: typingRescueUntil > now,
+      lease,
+    };
+  }
+
+  // Vigilante de carrera viva: no espera a que el bucle llegue a su siguiente
+  // comprobacion. Si el juego lleva varios segundos sin contar una tecla y esta
+  // copia esta en standby, recupera el turno ya; si la copia que escribe sigue
+  // viva, el indice avanza y esto no se dispara.
+  let lastLiveWarnAt = 0;
+  function superviseLive() {
+    if (!session.running || session.stopped || session.paused || !session.liveRound) return;
+    const now = Date.now();
+    const phase = livePhase(now);
+    if (phase !== 'racing' && phase !== 'countdown') return;
+    if (captchaOnScreen()) return;
+
+    const acceptedAt = session.lastAcceptedAt || session.startedAt || 0;
+    if (!acceptedAt) return;
+    const silent = now - acceptedAt;
+    if (silent < CONFIG.guard.standbyRescueMs) return;
+
+    if (standbyActive()) {
+      takeTypingTurn(`live watchdog: ${phase} without an accepted key for ${Math.round(silent / 1000)} s`);
+      return;
+    }
+
+    if (silent >= 8000 && now - lastLiveWarnAt >= 8000) {
+      lastLiveWarnAt = now;
+      log(`Live watchdog: ${phase} has gone ${(silent / 1000).toFixed(1)} s without an accepted key; the race loop is still in control.`);
+    }
   }
 
   function requestStop() {
@@ -6037,6 +6100,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (index > lastIndex) {
         lastIndex = index;
         lastProgressAt = Date.now();
+        session.lastAcceptedAt = Date.now();
       }
 
       // Otra copia esta escribiendo: aqui no se manda ni la tecla de sondeo.
@@ -6076,6 +6140,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         // el indice absoluto de la leccion.
         session.startIndex = index;
         session.lastLogAt = session.startedAt;
+        session.lastKeyAt = Date.now();
+        session.lastAcceptedAt = Date.now();
         session.typing = true;
         log(`Race started. Target: ${profile.targetWPM} WPM / ${profile.accuracyGoal.toFixed(1)}%`);
         return true;
@@ -6871,6 +6937,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       return false;
     }
 
+    session.liveRound = true;
+
     // El aviso de conexion pudo aparecer entre carrera y carrera. Se resuelve
     // antes de resetear el estado: si la app sigue detras del modal,
     // waitForApp la encontraria y waitForRaceStart perderia los 3 min de
@@ -6985,6 +7053,18 @@ All of this only aims at believable statistics. It is your call and your risk.
         return false;
       }
 
+      // El indice se mira antes de decidir si esta copia espera: si la copia
+      // que tiene el turno sigue escribiendo, aqui se ve avanzar y el rescate
+      // de abajo no se dispara. Sin esto la copia en standby no veia el
+      // progreso de la otra y le quitaba el turno cada cuatro segundos.
+      if (index > lastIndex) {
+        lastIndex = index;
+        lastProgressAt = Date.now();
+        session.lastAcceptedAt = Date.now();
+        blockedSince = 0;
+        stallNoted = false;
+      }
+
       // Otra copia lleva el teclado: esta no manda teclas. El turno caduca solo,
       // asi que aqui se vuelve a escribir en cuanto el aviso desaparece. Si la
       // carrera lleva varios segundos sin avanzar, la otra copia no esta
@@ -7066,6 +7146,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         idle = 0;
         lastIndex = index;
         lastProgressAt = Date.now();
+        session.lastAcceptedAt = Date.now();
         blockedSince = 0;
         stallNoted = false;
       }
@@ -7176,6 +7257,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       sendFails = 0;
 
       session.chars++;
+      session.lastKeyAt = Date.now();
 
       if (!fail) {
         session.correct++;
@@ -7239,13 +7321,16 @@ All of this only aims at believable statistics. It is your call and your risk.
 
         try {
           const keepGoing = await raceOnce();
+          session.liveRound = false;
           if (!keepGoing && !session.stopped) await sleep(1500);
         } catch (error) {
+          session.liveRound = false;
           log('Loop error; retrying:', error);
           await sleep(1500);
         }
       }
     } finally {
+      session.liveRound = false;
       session.running = false;
     }
   }
@@ -7968,6 +8053,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.updateState = () => updateState();
   window.__ntaDebug.updateBusy = () => updateChecking;
   window.__ntaDebug.checkForUpdate = (force) => checkForUpdate(Boolean(force));
+  window.__ntaDebug.live = () => liveSituation();
   window.__ntaDebug.calibrationAuto = () => CONFIG.calibration.auto === true;
   window.__ntaDebug.refreshCalibration = () => refreshCalibration();
 
@@ -8790,6 +8876,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         copies: peerCount,
         tab: tabLeaseInfo(),
         typingRescue: typingRescueUntil > Date.now() ? 'active' : 'off',
+        live: liveSituation(),
       },
       switches: {
         breaks: CONFIG.breaks.enabled !== false,
@@ -9814,6 +9901,7 @@ All of this only aims at believable statistics. It is your call and your risk.
                   <div class="row result-row" style="display:none" title="Place and prize of the last race, read from the game's own race result"><span>result</span><b data-field="result">—</b></div>
                   <div class="row clock-row" style="display:none" title="The precise clock could not start (the site's CSP blocked the Worker). In a background tab the browser slows page timers down and typing can stall long enough for a disqualification."><span>clock</span><b data-field="clock">page</b></div>
                   <div class="row guard-row" style="display:none" title="Why the bot is waiting: a guard break, duplicate copies of the script or a site block"><span>guard</span><b data-field="guard">—</b></div>
+                  <div class="row watch-row" title="Real-time race watchdog: phase, which tab holds the typing lease and how long the game has gone without accepting a key"><span>watch</span><b data-field="watch">—</b></div>
                   <div class="row box-row" style="display:none" title="Daily Mystery Box in the garage"><span>box</span><b data-field="box">—</b></div>
                   <div class="row break-row secondary"><span>break</span><b data-field="break">—</b></div>
                   <div class="row dq-row" style="display:none"><span>dq streak</span><b data-field="dq">×0</b></div>
@@ -10185,6 +10273,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       result: pick('[data-field="result"]'),
       guardRow: pick('.guard-row'),
       guard: pick('[data-field="guard"]'),
+      watchRow: pick('.watch-row'),
+      watch: pick('[data-field="watch"]'),
       todayRow: pick('[data-field="todayRow"]'),
       today: pick('[data-field="today"]'),
       boxRow: pick('.box-row'),
@@ -11964,6 +12054,21 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (guardText) setText(panel.refs.guard, guardText);
       const standby = !primaryRole && !session.stopped ? '1' : '0';
       if (panel.root.dataset.standby !== standby) panel.root.dataset.standby = standby;
+    }
+
+    // Fila watch: la foto en vivo. El panel puede decir "waiting" mientras la
+    // carrera ya esta en cuenta atras; aqui se ve la fase real, quien tiene el
+    // lease y cuanto lleva el juego sin contar una tecla.
+    if (panel.refs.watchRow) {
+      const live = liveSituation();
+      const owner = live.lease.mine ? 'this tab' : live.lease.owner ? 'other tab' : 'no lease';
+      const age = live.phase === 'racing' || live.phase === 'countdown'
+        ? ` · ${live.acceptedAgeMs < 10000
+          ? (live.acceptedAgeMs / 1000).toFixed(1)
+          : Math.round(live.acceptedAgeMs / 1000)}s`
+        : '';
+      setText(panel.refs.watch, `${live.phase} · ${owner}${age}${live.rescue ? ' · rescue' : ''}`);
+      panel.refs.watchRow.title = `Real-time watchdog: ${live.phase}; typing lease ${owner}${live.lease.expiresInMs ? ` (${Math.ceil(live.lease.expiresInMs / 1000)} s left)` : ''}; last accepted key ${live.acceptedAgeMs ? `${(live.acceptedAgeMs / 1000).toFixed(1)} s ago` : 'not yet'}; last sent key ${live.sentAgeMs ? `${(live.sentAgeMs / 1000).toFixed(1)} s ago` : 'not yet'}.`;
     }
 
     // Resumen del dia: carreras, media real frente a la media objetivo, cajas y
@@ -18006,6 +18111,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       // Eleccion de copia en este marco: una escribe, las demas esperan. Se
       // refresca en cada latido del panel, que es el unico que corre siempre.
       heart('role', refreshRole);
+      heart('supervise', superviseLive);
       heart('panel', () => {
         if (!document.getElementById(PANEL_ID)) createPanel();
       });
