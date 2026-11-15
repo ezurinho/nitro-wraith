@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.35 — 2026-11-15
+
+- feat: keep the garage update reachable when folded
+
 ## 8.14.34 — 2026-11-15
 
 - feat: audit lifetime calibration and keep the last complete snapshot
