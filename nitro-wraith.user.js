@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NITRO WRAITH
 // @namespace    nitro.wraith
-// @version      8.14.25
+// @version      8.14.26
 // @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
 // @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
 // @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
@@ -692,7 +692,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     startLagMaxMs: 800,    // tope de la correccion del semaforo al abrir el reloj
     idleLimit: 40,
     stallLimit: 15,        // teclas correctas seguidas sin avanzar => posible bloqueo
-    stallGraceMs: 6000,    // cuanto se aguanta sin avanzar antes de dar la carrera por perdida
+    stallGraceMs: 6000,    // cuanto se aguanta sin avanzar antes de dejar de insistir
+    stallGiveUpMs: 30000,  // sin avance ni DQ: se para el bot, no se abandona la carrera viva
 
     // Inactivity disqualification: the server kicks you out if you stop sending
     // keys inside a race (~12 s). Pausing mid-race is therefore a guaranteed loss,
@@ -725,7 +726,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   };
 
-  const VERSION = '8.14.25';
+  const VERSION = '8.14.26';
 
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se guarda el ultimo resultado y se
@@ -1468,6 +1469,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // no es un temporizador. Si el Worker no se puede crear (CSP del sitio), se
   // usa el setTimeout de siempre y todo funciona como antes.
   let preciseClockKind = 'page';
+  const WORKER_REPLY_GRACE_MS = 1500;
   const preciseSleep = (() => {
     let worker = null;
 
@@ -1487,31 +1489,59 @@ All of this only aims at believable statistics. It is your call and your risk.
     let nextId = 1;
     const pending = new Map();
 
-    worker.onmessage = (event) => {
-      const resolve = pending.get(event.data);
-      if (!resolve) return;
-      pending.delete(event.data);
-      resolve();
-    };
-
-    // Un error del Worker no puede dejar una carrera colgada: se resuelven las
-    // esperas pendientes y se vuelve al reloj normal.
-    worker.onerror = () => {
-      for (const resolve of pending.values()) resolve();
-      pending.clear();
+    // Si el Worker deja de contestar (por ejemplo, porque el navegador congela
+    // la pestana), una espera no puede quedarse colgada: la carrera se quedaria
+    // sin teclas y terminaria en DQ. Cada espera tiene su propio tope y cae al
+    // reloj de la pagina; las demas no se resuelven de golpe, para no disparar
+    // varios temporizadores de la cola a la vez. El reloj queda marcado como no
+    // fiable para que no se abra otra carrera oculta hasta que responda.
+    const degradeClock = () => {
+      const dead = worker;
       worker = null;
       preciseClockKind = 'page';
+      try { if (dead) dead.terminate(); } catch { /* ya estaba muerto */ }
     };
 
+    worker.onmessage = (event) => {
+      const entry = pending.get(event.data);
+      if (!entry) return;
+      pending.delete(event.data);
+      clearTimeout(entry.timer);
+      entry.resolve();
+    };
+
+    worker.onerror = degradeClock;
+
     return (ms) => new Promise((resolve) => {
+      const delay = Math.max(0, Number(ms) || 0);
       if (!worker) {
-        setTimeout(resolve, ms);
+        setTimeout(resolve, delay);
         return;
       }
 
       const id = nextId++;
-      pending.set(id, resolve);
-      worker.postMessage([id, Math.max(0, ms)]);
+      let settled = false;
+      const entry = {
+        resolve: () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        },
+        timer: setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          pending.delete(id);
+          degradeClock();
+          resolve();
+        }, delay + WORKER_REPLY_GRACE_MS),
+      };
+      pending.set(id, entry);
+
+      try {
+        worker.postMessage([id, delay]);
+      } catch {
+        degradeClock();
+      }
     });
   })() || sleep;
   // Temporizadores de la cola (Continue, Race Now, DQ, re-login, caja). Con la
@@ -5043,9 +5073,9 @@ All of this only aims at believable statistics. It is your call and your risk.
   function resumeAuto() {
     if (!session.stopped) return false;
 
-    // Un baneo permanente no se salta con A. La marca dura 24 h y el proximo
-    // intento vuelve a leer el mismo aviso, asi que no se entra en un bucle de
-    // «Race Again» contra una cuenta cerrada.
+    // Un baneo permanente no se salta con A. La marca no caduca sola: solo se
+    // quita con «Clear ban» en el garaje, despues de revisar la cuenta. Asi no
+    // se entra en un bucle de «Race Again» contra una cuenta cerrada.
     if (terminalBanActive()) {
       log('Account permanently banned: the bot stays stopped. Review the account before racing again.');
       updatePanel();
@@ -5077,6 +5107,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     session.stopped = false;
     session.stopAfterRace = false;
     session.stopManual = false;
+    setBanClearHeld(false);
     dqBlockedNoted = false;
     // Deshacer la marca de parada: el garaje ya puede arrancar solo otra vez.
     clearStopped();
@@ -5158,6 +5189,27 @@ All of this only aims at believable statistics. It is your call and your risk.
   const STOP_HISTORY_MAX = 20;
   const STOP_HISTORY_DAYS = 7;
   const STOP_HOLD_MAX = 24 * 60 * 60 * 1000;
+  const BAN_CLEAR_HOLD = 'ntQueue:banClearHold';
+
+  // «Clear ban» no debe dejar que el garaje se rearme solo en el siguiente
+  // latido: la cuenta sigue siendo la misma y el usuario tiene que decidir
+  // cuando vuelve a armar la cola.
+  function banClearHeld() {
+    try {
+      return localStorage.getItem(BAN_CLEAR_HOLD) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  function setBanClearHeld(on) {
+    try {
+      if (on) localStorage.setItem(BAN_CLEAR_HOLD, '1');
+      else localStorage.removeItem(BAN_CLEAR_HOLD);
+    } catch {
+      /* almacenamiento bloqueado */
+    }
+  }
 
   // La retencion se calcula igual en la marca activa y en la tarjeta de la
   // ultima parada. Una salida por resultados no debe retener horas: ese fallo
@@ -5172,6 +5224,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   function markStopped(reason, holdMs) {
+    // Una parada nueva manda sobre la pausa manual que dejó «Clear ban».
+    setBanClearHeld(false);
     const entry = {
       at: Date.now(),
       reason: String(reason || ''),
@@ -5216,7 +5270,10 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   function clearStopped() {
     try {
-      const raw = localStorage.getItem(STOP_MARK);
+      // La marca activa suele estar, pero si solo queda el registro de la
+      // ultima parada (por ejemplo tras limpiar storage o un reload a medias)
+      // hay que marcarlo igual: si no, un baneo terminal no se podria borrar.
+      const raw = localStorage.getItem(STOP_MARK) || localStorage.getItem(LAST_STOP);
       const stop = raw ? JSON.parse(raw) : null;
       if (stop && Number.isFinite(Number(stop.at))) {
         localStorage.setItem(LAST_STOP, JSON.stringify({
@@ -5238,12 +5295,16 @@ All of this only aims at believable statistics. It is your call and your risk.
       const saved = JSON.parse(localStorage.getItem(LAST_STOP) || 'null');
       if (!saved || !Number.isFinite(Number(saved.at))) return null;
       const holdMs = stopHoldMs(saved);
+      const clearedAt = Number(saved.clearedAt) || 0;
       return {
         at: Number(saved.at),
         reason: String(saved.reason || ''),
-        clearedAt: Number(saved.clearedAt) || 0,
+        clearedAt,
         clearedBy: String(saved.clearedBy || ''),
         holdMs,
+        // Un baneo permanente no caduca con el reloj: solo se quita cuando el
+        // usuario borra la parada a mano (Clear ban).
+        terminal: Boolean(!clearedAt && looksTerminalBan(saved.reason)),
         endAt: Number(saved.at) + holdMs,
       };
     } catch {
@@ -5254,8 +5315,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   function terminalBanActive() {
     const saved = lastStopInfo();
     if (!saved || saved.clearedAt) return false;
-    if (!looksTerminalBan(saved.reason)) return false;
-    return Date.now() < saved.endAt;
+    return saved.terminal === true;
   }
 
   let terminalBanNoted = false;
@@ -5268,7 +5328,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (terminalBanNoted) return true;
     terminalBanNoted = true;
     panic('account permanently banned; automation stopped', STOP_HOLD_MAX);
-    storeNotice('Account permanently banned: the bot stopped and will not retry.');
+    storeNotice('Account permanently banned: the bot stays stopped until you clear the ban manually.');
     beep('block');
     return true;
   }
@@ -5575,11 +5635,29 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Antes de abrir una carrera, si los temporizadores van frenados se espera a
   // que vuelvan a ir finos: una carrera a 60 WPM con mala precision es peor que
   // no correrla. Devuelve true si hubo que esperar.
+  async function backgroundClockHealthy() {
+    if (preciseClockKind !== 'worker') return false;
+    const started = performance.now();
+    await preciseSleep(120);
+    return preciseClockKind === 'worker' && performance.now() - started < 900;
+  }
+
   async function waitWhileThrottled() {
     // Con el reloj Worker la cadencia no depende de los timers de la pagina. Si
-    // el Worker no se pudo crear, la espera sigue siendo necesaria: en segundo
-    // plano los timers normales se frenan y la carrera saldria con DQ.
-    if (backgroundFarm() && pageHidden() && preciseClockKind === 'worker') return false;
+    // el Worker no responde (CSP, pestana congelada o Worker terminado), la
+    // espera sigue siendo necesaria: en segundo plano los timers normales se
+    // frenan y la carrera saldria con DQ. No basta con que el Worker se haya
+    // creado: se comprueba que contesta antes de abrir otra carrera oculta.
+    if (backgroundFarm() && pageHidden()) {
+      if (await backgroundClockHealthy()) return false;
+
+      log('Background clock unavailable: waiting for the tab.');
+      while (!session.stopped && pageHidden()) {
+        await sleep(1000);
+        if (await backgroundClockHealthy()) return false;
+      }
+      if (session.stopped) return true;
+    }
 
     if (!(await isThrottled())) return false;
 
@@ -6812,6 +6890,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     let stalls = 0;
     let sendFails = 0;
     let blockedSince = 0;
+    let stallNoted = false;
     let expectedAfter = -1;
 
     while (!session.stopped) {
@@ -6848,6 +6927,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         stalls = 0;
         sendFails = 0;
         blockedSince = 0;
+        stallNoted = false;
         expectedAfter = -1;
         continue;
       }
@@ -6894,9 +6974,9 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       // Enviamos la tecla correcta y el indice no avanzo: la carrera dejo de
       // aceptar entrada. Puede ser el final (resultados), una instancia muerta
-      // o un overlay que la bloquea un momento (CAPTCHA): salirse de una
-      // carrera viva es descalificacion segura, asi que se aguanta un margen
-      // (CONFIG.stallGraceMs) antes de darla por perdida.
+      // o un overlay que la bloquea un momento (CAPTCHA). Salirse de una
+      // carrera viva es descalificacion segura, asi que no se navega fuera: se
+      // sigue reintentando y se espera al resultado o al modal de DQ.
       if (expectedAfter >= 0) {
         if (index < expectedAfter) {
           if (!blockedSince) {
@@ -6915,14 +6995,26 @@ All of this only aims at believable statistics. It is your call and your risk.
               if (solved) {
                 blockedSince = 0;
                 stalls = 0;
+                stallNoted = false;
                 continue;
               }
-              log(`The CAPTCHA was not solved in ${Math.round(CONFIG.captchaHoldMs / 1000)} s; moving on.`);
-              return finishRace(app);
+              log(`The CAPTCHA was not solved in ${Math.round(CONFIG.captchaHoldMs / 1000)} s; stopping instead of leaving the live race.`);
+              panic('CAPTCHA was not solved; no new race opened');
+              return false;
             }
 
-            log(`The race has ignored keys for ${Math.round((Date.now() - blockedSince) / 1000)} s; moving on.`);
-            return finishRace(app);
+            // No se llama a finishRace: el boton Race Again o una recarga con
+            // la carrera en marcha la descalifican. Se mantiene la carrera
+            // abierta y se sigue reintentando; si el servidor decide DQ, el
+            // modal de arriba lo detecta y ahi si se cierra la carrera.
+            if (!stallNoted) {
+              stallNoted = true;
+              log('The race is not accepting keys; keeping it open instead of leaving a live race (leaving would be a DQ).');
+            }
+            if (Date.now() - blockedSince >= CONFIG.stallGiveUpMs) {
+              panic('the race stopped accepting keys; no new race opened');
+              return false;
+            }
           }
 
           // Sin avanzar pero dentro del margen: se reintenta sin martillear.
@@ -6933,6 +7025,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         } else {
           stalls = 0;
           blockedSince = 0;
+          stallNoted = false;
         }
         expectedAfter = -1;
       }
@@ -6947,6 +7040,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         idle = 0;
         lastIndex = index;
         blockedSince = 0;
+        stallNoted = false;
       }
 
       if (shouldUseNitro(content, index)) {
@@ -8008,6 +8102,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.recoverDq = () => recoverFromDqModal();
   window.__ntaDebug.terminalBanText = (text) => looksTerminalBan(String(text || ''));
   window.__ntaDebug.terminalBan = (text) => handleTerminalBan(String(text || ''));
+  window.__ntaDebug.terminalActive = () => terminalBanActive();
   window.__ntaDebug.resetTerminalBan = () => {
     terminalBanNoted = false;
     return true;
@@ -11328,9 +11423,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       const pending = session.stopAfterRace ? 'true' : 'false';
       if (panel.refs.stop.dataset.pending !== pending) panel.refs.stop.dataset.pending = pending;
       setText(panel.refs.stop, session.stopped ? 'Resume' : 'Stop');
-      const title = session.stopped
-        ? 'Resume now · Alt+A (daily budget and active hours still apply)'
-        : 'Stop after the current race · Alt+S';
+      const title = session.stopped && terminalBanActive()
+        ? 'Account banned: clear the stop in the garage before racing again'
+        : session.stopped
+          ? 'Resume now · Alt+A (daily budget and active hours still apply)'
+          : 'Stop after the current race · Alt+S';
       if (panel.refs.stop.title !== title) panel.refs.stop.title = title;
       if (panel.refs.stop.disabled !== false) panel.refs.stop.disabled = false;
     }
@@ -11981,7 +12078,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     // la misma historia.
     const activeStop = off ? lastStopInfo() : null;
     const stopLeft = activeStop ? Math.max(0, activeStop.endAt - Date.now()) : 0;
-    const stoppedNow = Boolean(activeStop && !activeStop.clearedAt && stopLeft > 0);
+    // Un baneo terminal no tiene cuenta atras: sigue parado hasta que se borre
+    // a mano, aunque la retencion de 24 h ya haya vencido.
+    const terminalStop = Boolean(activeStop && !activeStop.clearedAt && activeStop.terminal);
+    const stoppedNow = terminalStop || Boolean(activeStop && !activeStop.clearedAt && stopLeft > 0);
     const stopKind = stoppedNow ? stopReasonKind(activeStop.reason) : null;
     const stateText = off ? 'waiting' : breaking ? 'break' : session.paused ? 'paused' : (session.typing ? 'racing' : 'idle');
     setText(panel.refs.footState, stateText);
@@ -11999,12 +12099,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       : '0:00';
     setText(panel.refs.footClock, raceClock);
     setText(panel.refs.footHint, off
-      ? (stoppedNow ? `${stopKind.label} · ${stopWaitText(stopLeft)} left` : 'Alt+A resume')
+      ? (terminalStop ? 'ban · until cleared'
+        : stoppedNow ? `${stopKind.label} · ${stopWaitText(stopLeft)} left` : 'Alt+A resume')
       : session.paused ? 'resume' : 'Alt+S stop');
     // `off` ya ES session.stopped, asi que la rama que volvia a mirarlo nunca
     // se alcanzaba: el descanso se pintaba como "waiting" y no como "break".
     setText(panel.refs.liveTag, off
-      ? (stoppedNow ? `stopped · ${stopKind.label}` : 'stopped · Alt+A resume')
+      ? (terminalStop ? 'stopped · ban'
+        : stoppedNow ? `stopped · ${stopKind.label}` : 'stopped · Alt+A resume')
       : session.typing ? 'racing' : breaking ? 'break' : 'waiting');
 
     // El registro ocupa una vista entera y solo se ve al abrir LOG. Mientras
@@ -12764,6 +12866,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     function watchStuck() {
+      // «Clear ban» deja la cola pausada a proposito: no es un marco muerto ni
+      // un atasco que haya que recargar. Solo un Resume/Alt+A manual la arma.
+      if (banClearHeld()) {
+        noteProgress();
+        return;
+      }
       if (!isArmed()) {
         // Desarmado a proposito (parada reciente, tope de tanda): no hay nada
         // que desatascar y el vigilante calla.
@@ -13979,6 +14087,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     function stoppedRecently() {
+      // Un baneo terminal no prescribe: el garaje no puede rearmarse solo al
+      // vencer las 24 h, y el vigilante tampoco debe intentar desatascarlo.
+      if (terminalBanActive()) return true;
       const saved = stoppedInfo();
       if (!saved) return false;
       // Una parada de emergencia (racha de DQ) trae su propia retencion: mas
@@ -14663,6 +14774,20 @@ All of this only aims at believable statistics. It is your call and your risk.
           return;
         }
 
+        // Un baneo terminal no se reanuda por accidente. El boton cambia a
+        // «Clear ban» y solo borra la parada: la cuenta sigue baneada hasta que
+        // el sitio diga lo contrario, y despues hay que armar la cola a mano.
+        if (terminalBanActive()) {
+          clearStopped();
+          setArmed(false);
+          setBanClearHeld(true);
+          garageAutoDone = true;
+          queueWhy('Terminal ban: stop cleared manually. The account remains banned unless the site lifts it.');
+          queueLog('Terminal ban stop cleared manually; the queue stays paused until you arm it again.');
+          paintGaragePanel();
+          return;
+        }
+
         const live = typerState();
         if (live) {
           const sent = forwardHotkeyToFrames('KeyA', 'a');
@@ -14679,6 +14804,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           return;
         }
         clearStopped();
+        setBanClearHeld(false);
         setArmed(true);
         garageAutoDone = true;
         queueWhy('Resume: stop cleared from the garage panel; the queue is armed.');
@@ -14932,6 +15058,8 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       if (loginRetryAt > Date.now()) return 'waiting · login retry';
       if (!signed) return 'waiting · sign in';
+      if (terminalBanActive()) return 'hold · account ban';
+      if (banClearHeld()) return 'paused · ban cleared';
       if (blockedMin > 0) return `hold · site block ${blockedMin}m`;
       if (activeGate()) return 'waiting · active hours';
       if (armed) return 'on · armed';
@@ -15039,9 +15167,15 @@ All of this only aims at believable statistics. It is your call and your risk.
         : (boxButton()
           ? 'Press the site\'s claim button now'
           : 'Go to the garage and claim the daily Mystery Box');
-      qpanel.resumeBtn.title = stoppedRecently()
-        ? 'Clear the stop and start now; with a live race this sends the same Alt+A'
-        : 'Send Alt+A to a live race, or re-arm the queue from the garage';
+      const terminalBan = terminalBanActive();
+      qpanel.resumeBtn.textContent = terminalBan ? 'Clear ban' : 'Resume';
+      qpanel.resumeBtn.title = terminalBan
+        ? 'Account permanently banned: clear the stop only after reviewing the account; the bot stays paused until you arm it again'
+        : (banClearHeld()
+          ? 'Terminal ban stop cleared; press Resume to arm the queue again'
+          : (stoppedRecently()
+            ? 'Clear the stop and start now; with a live race this sends the same Alt+A'
+            : 'Send Alt+A to a live race, or re-arm the queue from the garage'));
 
       // El Stop no es un interruptor: una vez parado, Resume es la salida. Se
       // desactiva para que dos clics seguidos no confundan la parada con un
@@ -15184,17 +15318,22 @@ All of this only aims at believable statistics. It is your call and your risk.
       // reconstruir que paso sin confundirlo con una parada en curso.
       const lastStop = lastStopInfo();
       const stopLeft = lastStop ? Math.max(0, lastStop.endAt - Date.now()) : 0;
-      const activeStop = Boolean(lastStop && !lastStop.clearedAt && stopLeft > 0);
+      const terminalStop = Boolean(lastStop && !lastStop.clearedAt && lastStop.terminal);
+      const activeStop = Boolean(lastStop && !lastStop.clearedAt && (terminalStop || stopLeft > 0));
       const recentStop = Boolean(lastStop && Date.now() - lastStop.at < 24 * 3600000);
       qpanel.stopRow.hidden = !(activeStop || recentStop);
       if (activeStop) {
         const kind = stopReasonKind(lastStop.reason);
         qpanel.stopLabel.textContent = 'stopped';
-        qpanel.lastStop.textContent = `${kind.label} · ${shortWait(stopLeft)} left`;
+        qpanel.lastStop.textContent = terminalStop
+          ? 'ban · until cleared'
+          : `${kind.label} · ${shortWait(stopLeft)} left`;
         qpanel.lastStop.dataset.warn = kind.warn;
-        qpanel.stopRow.title = `Stopped ${new Date(lastStop.at).toLocaleTimeString()} · ${lastStop.reason || 'manual stop'}`
-          + ` · ${shortWait(stopLeft)} left of ${shortWait(lastStop.holdMs)}.`
-          + (kind.label === 'ban' ? ' The account is blocked; the bot will not retry.' : ' Resume or Alt+A starts again.');
+        qpanel.stopRow.title = terminalStop
+          ? `Stopped ${new Date(lastStop.at).toLocaleTimeString()} · ${lastStop.reason || 'permanent ban'} · the account is blocked; automation stays stopped until you clear it with «Clear ban».`
+          : `Stopped ${new Date(lastStop.at).toLocaleTimeString()} · ${lastStop.reason || 'manual stop'}`
+            + ` · ${shortWait(stopLeft)} left of ${shortWait(lastStop.holdMs)}.`
+            + (kind.label === 'ban' ? ' The account is blocked; the bot will not retry.' : ' Resume or Alt+A starts again.');
       } else if (recentStop) {
         const kind = stopReasonKind(lastStop.reason);
         const state = lastStop.clearedAt
@@ -15607,7 +15746,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       const liveTyper = typerState();
 
       if (garageAutoDone && !isArmed() && signedIn()
-        && !stoppedRecently() && !(liveTyper && liveTyper.stopped)
+        && !banClearHeld() && !stoppedRecently() && !(liveTyper && liveTyper.stopped)
         && raceNowBounces() < CONFIG.queue.raceNowBounceMax) {
         garageAutoDone = false;
       }
@@ -15622,7 +15761,13 @@ All of this only aims at believable statistics. It is your call and your risk.
           signedOutNoted = true;
           queueWhy('Garage: signed out; the queue stays waiting until you log in.');
         } else {
-          if (stoppedRecently()) {
+          if (terminalBanActive()) {
+            setArmed(false);
+            queueWhy('Garage: terminal account ban; clear the stop manually before racing again.');
+          } else if (banClearHeld()) {
+            setArmed(false);
+            queueWhy('Garage: terminal ban stop cleared; the queue stays paused until you press Resume.');
+          } else if (stoppedRecently()) {
             // Se paro a proposito hace un momento (tope de tanda o Esc): se
             // respeta la retencion y se rearma solo al vencer. Sin esto, el
             // garaje abriria otra carrera al instante y el servidor la
@@ -16492,7 +16637,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       loginReloadAt = 0;
       loginManualHold = false;
       hideLoginRefreshBadge();
-      setArmed(true);
+      // Recuperar la sesion no salta una parada terminal ni la pausa manual
+      // que deja «Clear ban»: la cola sigue quieta hasta un Resume explicito.
+      const resumeQueue = !terminalBanActive() && !banClearHeld();
+      if (resumeQueue) setArmed(true);
       clearLoginRetry();
 
       // El aviso cambia segun lo que paso de verdad: si se llego a pulsar el
@@ -16504,8 +16652,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (attempts > 0) disk.set(LOGIN_MEMORY_KEY, JSON.stringify({ method: provider, at: Date.now() }));
       const label = SSO_LABEL[provider];
       const via = attempts > 0 ? ` through ${label}` : '';
-      queueLog(`Session recovered${via}; resuming races.`);
-      storeNotice(attempts > 0 ? `Session recovered on its own through ${label}.` : 'Session alive again; resuming races.');
+      queueLog(`Session recovered${via}; ${resumeQueue ? 'resuming races.' : 'the queue stays paused.'}`);
+      storeNotice(resumeQueue
+        ? (attempts > 0 ? `Session recovered on its own through ${label}.` : 'Session alive again; resuming races.')
+        : 'Session recovered; the queue stays paused until you press Resume.');
     }
 
     // El modal de la descalificacion se cierra SIEMPRE, y hacia el garaje: desde
@@ -16727,7 +16877,11 @@ All of this only aims at believable statistics. It is your call and your risk.
         // parar, con el panel parpadeando y sin abrir nunca carrera). Fuera de
         // /race el boton de parar es del garaje.
         const racePage = location.pathname === '/race' || location.pathname.startsWith('/race/');
-        if (racePage || !state.stopped) {
+        if (terminalBanActive() || banClearHeld()) {
+          // Un baneo terminal (o su pausa manual) manda sobre el estado vivo
+          // del tipador: una pestana de carrera no puede rearmar la cola sola.
+          setArmed(false);
+        } else if (racePage || !state.stopped) {
           // Parado es parado: ya no hay un modo NORMAL que mirar aparte.
           setArmed(!state.stopped);
         }
@@ -17172,12 +17326,17 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   // true = esta pestaña puede actuar. Si el lease es de otra pestaña y sigue
   // fresco, no se toca: la copia en espera no abre carreras ni reclama cajas.
-  function claimTabLease(reason = '') {
+  function claimTabLease(reason = '', force = false) {
     try {
       const now = Date.now();
       const tab = tabIdentity();
       const lease = readTabLease();
-      if (lease && String(lease.tab) !== tab) return false;
+      // Una carrera viva puede recuperar el turno de una pestaña de garaje que
+      // lo tenia sin estar escribiendo. Sin esto, pulsar Resume/Race Now en el
+      // garaje dejaba a la pestaña de la carrera en standby y la carrera se
+      // quedaba sin teclas hasta la DQ. No se pisa a otra pestaña que ya esta
+      // escribiendo (reason 'typing'): esa es la que debe seguir.
+      if (lease && String(lease.tab) !== tab && !force) return false;
       if (lease && lease.id === INSTANCE_ID && now - Number(lease.at) < 900) return true;
 
       // Si el lease es de esta pestaña pero lo escribio la otra mitad (cola o
@@ -17306,14 +17465,23 @@ All of this only aims at believable statistics. It is your call and your risk.
     // escribe; el lease decide SI esta pestaña puede escribir. Las dos mitades
     // de una misma pestaña comparten tabIdentity, asi que no compiten aqui.
     const wasTabPrimary = tabPrimary;
+    const lease = readTabLease();
+    const ownLease = !lease || String(lease.tab) === tabIdentity();
+    // Una pestaña con carrera viva manda sobre una pestaña de garaje que solo
+    // tiene el lease por haber pulsado Resume/Race Now. Si la otra pestaña ya
+    // esta escribiendo, no se toca: solo hay un teclado.
+    const liveTakeover = Boolean(primary && !ownLease && raceIsLive()
+      && String(lease.reason || '') !== 'typing');
     let tabTurn = false;
     if (primary) {
-      tabTurn = claimTabLease('typing');
+      tabTurn = claimTabLease('typing', liveTakeover);
     } else {
-      const lease = readTabLease();
-      tabTurn = !lease || String(lease.tab) === tabIdentity();
+      tabTurn = ownLease;
     }
     tabPrimary = tabTurn;
+    if (liveTakeover && tabTurn) {
+      log('A live race takes the typing turn from the other tab.');
+    }
 
     if (primary && tabTurn !== wasTabPrimary) {
       if (!tabTurn) {

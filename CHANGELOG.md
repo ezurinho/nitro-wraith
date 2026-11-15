@@ -1,5 +1,15 @@
 # Changelog
 
+## 8.14.26 — 2026-11-15
+
+- fix: keep a terminal account ban stopped until it is cleared
+- fix: keep the queue paused until Resume after a ban is cleared
+- fix: keep login recovery from rearming a terminal stop
+- fix: keep a live race tab ahead of the garage tab
+- fix: stop a live race from abandoning itself after 6 s
+- fix: fall back to the timer when the worker clock does not answer
+- test: cover a terminal ban after 24 h
+
 ## 8.14.25 — 2026-11-14
 
 - test: measure the folded panel by DOM work
@@ -7,7 +17,7 @@
 
 ## 8.14.24 — 2026-11-14
 
-- feat: stop on a permanent account ban
+- feat: stop automation on a terminal account ban
 
 ## 8.14.23 — 2026-11-14
 

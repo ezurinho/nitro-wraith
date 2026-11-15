@@ -3885,6 +3885,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const row = root.querySelector('[data-f="stopRow"]');
       const label = root.querySelector('[data-f="stopLabel"]');
       const text = root.querySelector('[data-f="lastStop"]');
+      const resume = root.querySelector('[data-act="resume"]');
       const paint = () => window.__ntaDebug.garagePaint();
       const read = () => ({
         hidden: row.hidden,
@@ -3893,6 +3894,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         text: text.textContent.trim(),
         title: row.title,
         warn: text.dataset.warn || '',
+        resume: (resume.textContent || '').trim(),
+        resumeTitle: resume.title,
       });
 
       localStorage.setItem('ntQueue:lastStop', JSON.stringify({
@@ -3944,8 +3947,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && /cleared manually at/.test(garageStop.cleared.title)
         && garageStop.afterHidden === true, garageStop);
     check('the garage does not label a permanent account ban as manual',
-      garageStop.ban.label === 'stopped' && garageStop.ban.text.startsWith('ban · ')
-        && garageStop.ban.warn === '2' && /will not retry/.test(garageStop.ban.title),
+      garageStop.ban.label === 'stopped' && garageStop.ban.text === 'ban · until cleared'
+        && garageStop.ban.warn === '2'
+        && garageStop.ban.resume === 'Clear ban'
+        && /stays stopped until you clear it/.test(garageStop.ban.title)
+        && /Clear ban/.test(garageStop.ban.title),
       garageStop.ban);
 
     // Resumen de las ultimas paradas: cuenta motivos, no la ultima marca. Una
@@ -4828,7 +4834,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     dqStopped.hasHook && dqStopped.result === true && dqStopped.clicks.length === 0, dqStopped);
 
   // Un baneo permanente tampoco es una DQ: no hay «Race Again» que valga. El
-  // bot tiene que pararse, dejar una retencion larga y no reanudar con Alt+A.
+  // bot tiene que pararse, no caducar solo y no reanudar con Alt+A.
   const terminalBan = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     const d = w.__ntaDebug;
@@ -4850,15 +4856,35 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     const stopped = d.terminalBan(modal.textContent);
     const saved = JSON.parse(w.localStorage.getItem('ntQueue:stoppedAt') || 'null');
     const clicks = w.__banClicks.slice();
+    const activeNow = d.terminalActive ? d.terminalActive() : null;
     const resumed = d.resume();
     const stillStopped = JSON.parse(w.localStorage.getItem('ntQueue:stoppedAt') || 'null');
+
+    // Aunque pase la retencion de 24 h, el aviso terminal sigue mandando: no
+    // debe reabrirse solo por reloj ni saltarse con A.
+    const past = JSON.parse(w.localStorage.getItem('ntQueue:lastStop') || 'null');
+    if (past) {
+      past.at = Date.now() - 25 * 3600000;
+      w.localStorage.setItem('ntQueue:lastStop', JSON.stringify(past));
+    }
+    const activeAfterDay = d.terminalActive ? d.terminalActive() : null;
+    d.paint();
+    const root = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panelHint = (root.querySelector('[data-field="footHint"]') || {}).textContent || '';
+    const panelTag = (root.querySelector('[data-field="liveTag"]') || {}).textContent || '';
+    const panelTitle = (root.querySelector('.stop') || {}).title || '';
+    const resumedAfterDay = d.resume();
 
     modal.remove();
     d.resetTerminalBan();
     w.localStorage.removeItem('ntQueue:stoppedAt');
     w.localStorage.removeItem('ntQueue:lastStop');
     d.patchSession({ stopped: false });
-    return { hasHook: true, falsePositive, detected, stopped, saved, clicks, resumed, stillStopped };
+    return {
+      hasHook: true, falsePositive, detected, stopped, saved, clicks,
+      activeNow, resumed, stillStopped, activeAfterDay, resumedAfterDay,
+      panelHint, panelTag, panelTitle,
+    };
   })()`);
   check('a permanent account ban stops the bot and never presses Race Again',
     terminalBan.hasHook && terminalBan.falsePositive === false
@@ -4866,7 +4892,13 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && terminalBan.clicks.length === 0
       && terminalBan.saved && /permanently banned/.test(terminalBan.saved.reason)
       && terminalBan.saved.holdMs >= 23 * 3600000
-      && terminalBan.resumed === false && terminalBan.stillStopped, terminalBan);
+      && terminalBan.activeNow === true
+      && terminalBan.resumed === false && terminalBan.stillStopped
+      && terminalBan.activeAfterDay === true && terminalBan.resumedAfterDay === false
+      && terminalBan.panelHint === 'ban · until cleared'
+      && terminalBan.panelTag === 'stopped · ban'
+      && /clear the stop in the garage/.test(terminalBan.panelTitle),
+    terminalBan);
 
   // La firma de la serie tiene que llevar el perfil: antes setPaceProfile la
   // llamaba sin el y la firma quedaba en ':count:min:max', asi que la serie de
