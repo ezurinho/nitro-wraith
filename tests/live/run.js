@@ -2659,37 +2659,52 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   const challenges = await cdp.evaluate(`(async () => {
     const w = document.querySelector('iframe').contentWindow;
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
-    const soon = Math.floor(Date.now() / 1000) + 3600;
-    w.NTGLOBALS = {
-      CHALLENGES: [
-        { challengeID: 1, type: 1, goal: 3, expiration: soon },
-        { challengeID: 2, type: 2, goal: 100, expiration: soon },
-        { challengeID: 3, type: 3, goal: 1, expiration: soon },
-      ],
-      CHALLENGE_TYPES: {
-        1: ['Complete \${goal} \${field}', 'race'],
-        2: ['Type \${goal} \${field}', 'word'],
-        3: ['Use \${goal} \${field}', 'nitro'],
-      },
-    };
-    w.localStorage.setItem('persist:nt', JSON.stringify({
-      user: JSON.stringify({
-        avgSpeed: 108.2,
-        avgAcc: 97.4,
-        challenges: [
-          { challengeID: 1, progress: 3 },
-          { challengeID: 2, progress: 40 },
-          { challengeID: 3, progress: 1 },
+    const seed = () => {
+      const soon = Math.floor(Date.now() / 1000) + 3600;
+      w.NTGLOBALS = {
+        CHALLENGES: [
+          { challengeID: 1, type: 1, goal: 3, expiration: soon },
+          { challengeID: 2, type: 2, goal: 100, expiration: soon },
+          { challengeID: 3, type: 3, goal: 1, expiration: soon },
         ],
-      }),
-    }));
-
-    await new Promise((resolve) => setTimeout(resolve, 6000));
-    return {
+        CHALLENGE_TYPES: {
+          1: ['Complete \${goal} \${field}', 'race'],
+          2: ['Type \${goal} \${field}', 'word'],
+          3: ['Use \${goal} \${field}', 'nitro'],
+        },
+      };
+      w.localStorage.setItem('persist:nt', JSON.stringify({
+        user: JSON.stringify({
+          avgSpeed: 108.2,
+          avgAcc: 97.4,
+          challenges: [
+            { challengeID: 1, progress: 3 },
+            { challengeID: 2, progress: 40 },
+            { challengeID: 3, progress: 1 },
+          ],
+        }),
+      }));
+    };
+    const read = () => ({
       count: shadow.querySelector('[data-field="chCount"]').textContent,
       rows: shadow.querySelector('[data-field="chList"]').children.length,
       text: shadow.querySelector('[data-field="chList"]').textContent,
-    };
+    });
+
+    seed();
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    let out = read();
+    // La web puede reescribir persist:nt sin challenges mientras el banco
+    // espera. Si la foto llego vacia, se vuelve a sembrar y se fuerza la misma
+    // lectura que usa el latido; no se da por bueno un panel vacio.
+    if (out.count === 'no data') {
+      seed();
+      w.__ntaDebug.refreshChallenges();
+      w.__ntaDebug.paint(true);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      out = read();
+    }
+    return out;
   })()`, true);
   check('LOG shows the daily challenge progress',
     challenges.count === '2/3' && challenges.rows === 3 && /40\/100/.test(challenges.text), challenges);
@@ -4151,14 +4166,33 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     // El garaje tambien avisa de una version nueva: es donde suele estar el
     // usuario cuando el panel de carrera no esta montado. Comparte el mismo
     // estado `nta:update` y la misma descarga que la cabecera.
-    const garageUpdate = await cdp.evaluate(`(() => {
+    const garageUpdate = await cdp.evaluate(`(async () => {
       const root = document.getElementById('nt-queue-panel').shadowRoot;
       const btn = root.querySelector('[data-act="update"]');
       if (!btn) return { has: false };
+      const compact = root.querySelector('[data-f="updateCompact"]');
+      const fold = root.querySelector('[data-f="fold"]');
+      const panel = root.querySelector('.p');
       const paint = () => window.__ntaDebug.garagePaint();
+      if (!compact) return { has: false, noCompact: true };
+      const realOpen = window.open;
+      let opened = null;
+      window.open = (url, target, features) => {
+        opened = { url, target, features };
+        return null;
+      };
+      if (panel.dataset.fold === '1') {
+        fold.click();
+        await new Promise((r) => setTimeout(r, 80));
+      }
       localStorage.removeItem('nta:update');
       paint();
-      const hidden = { hidden: btn.hidden, display: getComputedStyle(btn).display };
+      const hidden = {
+        hidden: btn.hidden,
+        display: getComputedStyle(btn).display,
+        compactHidden: compact.hidden,
+        compactDisplay: getComputedStyle(compact).display,
+      };
       localStorage.setItem('nta:update', JSON.stringify({ at: Date.now(), latest: '99.0.0' }));
       paint();
       const rect = btn.getBoundingClientRect();
@@ -4172,19 +4206,50 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         width: rect.width,
         icon: Boolean(icon),
         iconWidth: icon ? icon.getBoundingClientRect().width : 0,
+        compactHidden: compact.hidden,
+        compactDisplay: getComputedStyle(compact).display,
       };
+      btn.click();
+      const click = opened;
+      fold.click();
+      await new Promise((r) => setTimeout(r, 100));
+      const folded = {
+        full: getComputedStyle(btn.closest('.acts')).display,
+        compactHidden: compact.hidden,
+        compactDisplay: getComputedStyle(compact).display,
+        compactWidth: compact.getBoundingClientRect().width,
+        compactTitle: compact.title,
+        compactAria: compact.getAttribute('aria-label'),
+      };
+      compact.click();
+      const compactClick = opened;
+      fold.click();
       localStorage.removeItem('nta:update');
       paint();
-      return { has: true, hidden, shown, afterHidden: btn.hidden };
-    })()`);
+      window.open = realOpen;
+      return { has: true, hidden, shown, click, folded, compactClick, afterHidden: btn.hidden, afterCompactHidden: compact.hidden };
+    })()`, true);
     check('the garage panel shows an update button only when a newer version is available',
       garageUpdate.has && garageUpdate.hidden.hidden === true
-        && garageUpdate.hidden.display === 'none'
+        && garageUpdate.hidden.display === 'none' && garageUpdate.hidden.compactHidden === true
         && garageUpdate.shown.hidden === false && garageUpdate.shown.display !== 'none'
         && /^update v99\.0\.0$/i.test(garageUpdate.shown.text) && garageUpdate.shown.width > 0
         && garageUpdate.shown.icon === true && garageUpdate.shown.iconWidth > 0
         && /99\.0\.0/.test(garageUpdate.shown.title) && /download/i.test(garageUpdate.shown.aria)
-        && garageUpdate.afterHidden === true, garageUpdate);
+        && garageUpdate.shown.compactHidden === false && garageUpdate.shown.compactDisplay === 'none'
+        && garageUpdate.afterHidden === true && garageUpdate.afterCompactHidden === true,
+      garageUpdate);
+    check('the garage update button opens the userscript download and stays reachable when folded',
+      garageUpdate.click && /nitro-wraith\.user\.js/.test(garageUpdate.click.url)
+        && garageUpdate.click.target === '_blank' && /noopener/.test(garageUpdate.click.features)
+        && garageUpdate.folded.full === 'none'
+        && garageUpdate.folded.compactHidden === false
+        && garageUpdate.folded.compactDisplay === 'grid'
+        && garageUpdate.folded.compactWidth > 0
+        && /99\.0\.0/.test(garageUpdate.folded.compactTitle)
+        && /update/i.test(garageUpdate.folded.compactAria)
+        && garageUpdate.compactClick && /nitro-wraith\.user\.js/.test(garageUpdate.compactClick.url),
+      garageUpdate);
 
     // Los tres Daily Challenges en el garaje, con su reinicio. Se siembra el
     // mismo estado que deja el juego y se fuerza la cache de 5 s.

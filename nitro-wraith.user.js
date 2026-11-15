@@ -748,6 +748,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // El panel del garaje vive en otro bloque lexico; se guarda aqui el boton
   // para que una comprobacion iniciada desde la carrera tambien lo actualice.
   let garageUpdateNode = null;
+  let garageCompactUpdateNode = null;
 
   function versionNewer(candidate, current) {
     const a = String(candidate || '').split('.').map((part) => Number(part) || 0);
@@ -860,14 +861,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
-  function paintUpdateBadge(node, withVersion = false) {
+  function paintUpdateBadge(node, withVersion = false, iconOnly = false) {
     if (!node) return;
     const info = updateInfo();
     if (node.hidden !== !info) node.hidden = !info;
     if (!info) return;
-    const textNode = node.querySelector('span') || node;
+    const textNode = iconOnly ? null : (node.querySelector('span') || node);
     const badgeText = withVersion ? `update v${info.latest}` : 'update';
-    if (textNode.textContent !== badgeText) textNode.textContent = badgeText;
+    if (textNode && textNode.textContent !== badgeText) textNode.textContent = badgeText;
     const title = `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
     if (node.title !== title) node.title = title;
     const label = `Update available: v${info.latest}. Download the new userscript.`;
@@ -890,6 +891,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       paintUpdateBadge(garageUpdateNode, true);
+      paintUpdateBadge(garageCompactUpdateNode, false, true);
       if (!previous || previous.error !== error) {
         log(`Update check failed: ${error} (retrying in 30 min).`);
       }
@@ -925,6 +927,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       paintUpdateBadge(garageUpdateNode, true);
+      paintUpdateBadge(garageCompactUpdateNode, false, true);
       if (previous && previous.error) log(`Update check recovered: latest meta v${fetched}.`);
       return true;
     } catch (error) {
@@ -14785,6 +14788,19 @@ All of this only aims at believable statistics. It is your call and your risk.
           .fold:hover { color: var(--acc-2); background: var(--acc-dim); border-color: var(--line-strong); }
           .fold:active { transform: scale(.92); }
           .fold:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+          /* Acceso compacto al update cuando el panel esta plegado. No ocupa
+             sitio en la cabecera normal porque ahi ya manda el boton grande. */
+          .hupd { all: unset; flex: none; display: none; place-items: center;
+                  width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
+                  color: var(--acc-2); background: var(--acc-dim);
+                  border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
+                  transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
+          .hupd[hidden] { display: none !important; }
+          .p[data-fold="1"] .hupd:not([hidden]) { display: grid; }
+          .hupd:hover { color: var(--ink); background: color-mix(in srgb, var(--acc) 20%, transparent); border-color: var(--acc); }
+          .hupd:active { transform: scale(.92); }
+          .hupd:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+          .hupd svg { width: 12px; height: 12px; display: block; }
 
           .rows { display: grid; padding: 8px 12px 6px; }
           .r { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
@@ -14957,6 +14973,9 @@ All of this only aims at believable statistics. It is your call and your risk.
             </span>
             <span><b class="t">NITRO WRAITH</b><span class="s" data-f="sub">garage · queue</span></span>
             <span class="mode" role="status" aria-live="polite" title="Always AUTO: it starts and re-arms by itself. To stop it, use Stop / Esc in the race.">AUTO</span>
+            <button class="hupd" type="button" data-f="updateCompact" hidden title="A newer NITRO WRAITH is available; click to download the userscript" aria-label="Update available. Download the new userscript.">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg>
+            </button>
             <button class="fold" type="button" data-f="fold" aria-expanded="true" aria-label="Fold the garage panel" title="Fold the garage panel (Alt+G)">−</button>
           </div>
           <div class="rows">
@@ -15001,6 +15020,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       document.body.appendChild(host);
 
       garageUpdateNode = root.querySelector('[data-f="update"]');
+      garageCompactUpdateNode = root.querySelector('[data-f="updateCompact"]');
       const refs = {
         host,
         head: root.querySelector('.h'),
@@ -15061,6 +15081,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         retryBtn: root.querySelector('[data-act="retry"]'),
         diagBtn: root.querySelector('[data-act="diag"]'),
         update: garageUpdateNode,
+        updateCompact: garageCompactUpdateNode,
       };
 
       // Ciclo de tema desde el garaje: el selector grande vive en el iframe de
@@ -15072,6 +15093,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       });
 
       refs.update.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openUpdateDownload();
+      });
+      refs.updateCompact.addEventListener('click', (event) => {
         event.stopPropagation();
         openUpdateDownload();
       });
@@ -15512,6 +15537,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       paintUpdateHealth();
       paintUpdateBadge(qpanel.update, true);
+      paintUpdateBadge(qpanel.updateCompact, false, true);
 
       const signed = signedIn();
       const armed = signed && isArmed();
