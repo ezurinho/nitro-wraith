@@ -55,6 +55,8 @@ jobs:
         if: steps.current.outputs.skip != '1'
         run: |
           node --check tools/release.js
+          node --check tools/readme.js
+          node tools/readme.js check
           node tools/release.js check
 
       - name: Prepare release
@@ -107,6 +109,9 @@ jobs:
         if: steps.current.outputs.skip != '1' && steps.decision.outputs.MODE == 'bump'
         run: |
           node --check nitro-wraith.user.js
+          node tools/readme.js sync
+          node --check tools/readme.js
+          node tools/readme.js check
           node tools/release.js check
           git add nitro-wraith.user.js nitro-wraith.meta.js package.json README.md CHANGELOG.md
           git commit -m "release: ${{ steps.prepare.outputs.VERSION }} [skip ci]"
