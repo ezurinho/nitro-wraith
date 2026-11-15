@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.30 — 2026-11-15
+
+- fix: anchor pace calibration to the lifetime average
+- test: give the Web Lock handoff more time
+
 ## 8.14.29 — 2026-11-15
 
 - fix: identify a tab by document/window.name instead of cloned sessionStorage
