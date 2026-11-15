@@ -4087,14 +4087,39 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && stopMix.afterHidden === true
         && Array.isArray(stopMix.stored) && stopMix.stored.length === 5, stopMix);
 
-    // El aviso de version vive una sola vez, en la cabecera del panel de carrera.
-    // El garaje ya no crea un segundo boton que abria la misma descarga.
+    // El garaje tambien avisa de una version nueva: es donde suele estar el
+    // usuario cuando el panel de carrera no esta montado. Comparte el mismo
+    // estado `nta:update` y la misma descarga que la cabecera.
     const garageUpdate = await cdp.evaluate(`(() => {
       const root = document.getElementById('nt-queue-panel').shadowRoot;
-      return { badges: root.querySelectorAll('[data-f="update"], .upd').length };
+      const btn = root.querySelector('[data-act="update"]');
+      if (!btn) return { has: false };
+      const paint = () => window.__ntaDebug.garagePaint();
+      localStorage.removeItem('nta:update');
+      paint();
+      const hidden = { hidden: btn.hidden, display: getComputedStyle(btn).display };
+      localStorage.setItem('nta:update', JSON.stringify({ at: Date.now(), latest: '99.0.0' }));
+      paint();
+      const rect = btn.getBoundingClientRect();
+      const shown = {
+        hidden: btn.hidden,
+        display: getComputedStyle(btn).display,
+        text: (btn.textContent || '').trim(),
+        title: btn.title,
+        aria: btn.getAttribute('aria-label'),
+        width: rect.width,
+      };
+      localStorage.removeItem('nta:update');
+      paint();
+      return { has: true, hidden, shown, afterHidden: btn.hidden };
     })()`);
-    check('the garage panel does not duplicate the header update control',
-      garageUpdate.badges === 0, garageUpdate);
+    check('the garage panel shows an update button only when a newer version is available',
+      garageUpdate.has && garageUpdate.hidden.hidden === true
+        && garageUpdate.hidden.display === 'none'
+        && garageUpdate.shown.hidden === false && garageUpdate.shown.display !== 'none'
+        && /^update$/i.test(garageUpdate.shown.text) && garageUpdate.shown.width > 0
+        && /99\.0\.0/.test(garageUpdate.shown.title) && /download/i.test(garageUpdate.shown.aria)
+        && garageUpdate.afterHidden === true, garageUpdate);
 
     // Los tres Daily Challenges en el garaje, con su reinicio. Se siembra el
     // mismo estado que deja el juego y se fuerza la cache de 5 s.

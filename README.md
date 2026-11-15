@@ -75,8 +75,8 @@ multiple accounts. Those are boundaries, not missing features.
 - **Tune:** pace profile, limits, breaks, stickers, sound and the safety guard.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
-The header has a small `UPDATE` button only when the Gist has a newer version.
-If the button is absent, the installed copy is current.
+The race header and the garage panel show a small `UPDATE` button only when the
+Gist has a newer version. If the button is absent, the installed copy is current.
 
 ### Pace that looks like yours
 

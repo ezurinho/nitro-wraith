@@ -745,6 +745,9 @@ All of this only aims at believable statistics. It is your call and your risk.
   const UPDATE_RETRY_MS = 30 * 60000;
   const UPDATE_FETCH_TIMEOUT_MS = 8000;
   let updateChecking = false;
+  // El panel del garaje vive en otro bloque lexico; se guarda aqui el boton
+  // para que una comprobacion iniciada desde la carrera tambien lo actualice.
+  let garageUpdateNode = null;
 
   function versionNewer(candidate, current) {
     const a = String(candidate || '').split('.').map((part) => Number(part) || 0);
@@ -885,6 +888,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       saveUpdateState({ at: Date.now(), latest: keep, status, error });
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
+      paintUpdateBadge(garageUpdateNode);
       if (!previous || previous.error !== error) {
         log(`Update check failed: ${error} (retrying in 30 min).`);
       }
@@ -919,6 +923,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       saveUpdateState({ at: Date.now(), latest: keep, status: response.status || 200, error: null });
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
+      paintUpdateBadge(garageUpdateNode);
       if (previous && previous.error) log(`Update check recovered: latest meta v${fetched}.`);
       return true;
     } catch (error) {
@@ -14909,10 +14914,12 @@ All of this only aims at believable statistics. It is your call and your risk.
             <button class="act ghost" type="button" data-act="resume" title="Clear a stop and start now; with a live race this sends the same Alt+A">Resume</button>
             <button class="act ghost" type="button" data-act="retry" hidden title="Advance the next sign-in retry without waiting for the countdown">Retry login</button>
             <button class="act ghost tool" type="button" data-act="diag" title="Copy a diagnostic of the queue: mode, state, active waits, last decision, last failure, today and budgets">Copy</button>
+            <button class="act" type="button" data-act="update" data-f="update" hidden title="A newer NITRO WRAITH is available; click to download the userscript">Update</button>
           </div>
         </div>`;
       document.body.appendChild(host);
 
+      garageUpdateNode = root.querySelector('[data-f="update"]');
       const refs = {
         host,
         head: root.querySelector('.h'),
@@ -14972,6 +14979,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         resumeBtn: root.querySelector('[data-act="resume"]'),
         retryBtn: root.querySelector('[data-act="retry"]'),
         diagBtn: root.querySelector('[data-act="diag"]'),
+        update: garageUpdateNode,
       };
 
       // Ciclo de tema desde el garaje: el selector grande vive en el iframe de
@@ -14980,6 +14988,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       refs.theme.addEventListener('click', (event) => {
         event.stopPropagation();
         cycleTheme();
+      });
+
+      refs.update.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openUpdateDownload();
       });
 
       refs.diagBtn.addEventListener('click', async (event) => {
@@ -15175,6 +15188,13 @@ All of this only aims at believable statistics. It is your call and your risk.
       });
       restoreQPanel();
       dragQPanel(refs.head);
+
+      // El garaje es donde suele estar el usuario cuando espera una version
+      // nueva. La comprobacion es la misma que usa el panel de carrera y el
+      // intervalo se apoya en su marca de tiempo: si ya se comprobo hace poco,
+      // no vuelve a pedir el meta.
+      checkForUpdate();
+      setInterval(checkForUpdate, UPDATE_RETRY_MS);
 
       // Si la ventana se encoge, el panel guardado puede quedar fuera de la
       // pantalla: se vuelve a meter con la misma posicion.
@@ -15410,6 +15430,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (!qpanel) return;
 
       paintUpdateHealth();
+      paintUpdateBadge(qpanel.update);
 
       const signed = signedIn();
       const armed = signed && isArmed();
