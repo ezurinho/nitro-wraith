@@ -5207,6 +5207,17 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         a: a0.role, aLease: a0.lease, b: b0.role, bLease: b0.lease,
       })}`);
     }
+    const leader = a0.role.primary
+      ? { tab: tabA, name: 'A' }
+      : { tab: tabB, name: 'B' };
+    const follower = leader.name === 'A' ? tabB : tabA;
+    // La pestaña que tiene el turno puede ser la que Chrome dejo en segundo
+    // plano (la primera que se abrio). Su bucle no pide el Web Lock mientras
+    // esta oculta, y la standby no debe pedirlo: parece que no hay titular
+    // aunque el reparto sea correcto. Traer al frente al titular hace que el
+    // test mida el reparto real en vez de una pestaña dormida.
+    try { await leader.tab.send('Page.bringToFront'); } catch { /* target cerrado */ }
+    await sleep(200);
     check('two tabs: each tab mounts its own panel and guard',
       a0.panel && b0.panel && a0.hook && b0.hook
         && a0.registry === 1 && b0.registry === 1,
@@ -5227,14 +5238,23 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     // El lease de localStorage puede perder una carrera read-check-write; el
     // Web Lock es la exclusion atomica. La pestaña que manda tiene que ser la
     // unica que lo sostiene.
-    await waitFor(async () => {
-      const one = await tabA.evaluate(roleRead);
-      const two = await tabB.evaluate(roleRead);
-      const held = [one, two].filter((item) => item.typingLock && item.typingLock.held);
-      return held.length === 1;
-    }, 5000, 'exactly one Web Lock holder');
-    const lockA = await tabA.evaluate(roleRead);
-    const lockB = await tabB.evaluate(roleRead);
+    let lockA = null;
+    let lockB = null;
+    const lockUntil = Date.now() + 10000;
+    while (Date.now() < lockUntil) {
+      lockA = await tabA.evaluate(roleRead);
+      lockB = await tabB.evaluate(roleRead);
+      const held = [lockA, lockB].filter((item) => item.typingLock && item.typingLock.held);
+      if (held.length === 1) break;
+      await sleep(200);
+    }
+    if (!lockA || !lockB || [lockA, lockB].filter((item) => item.typingLock && item.typingLock.held).length !== 1) {
+      throw new Error(`timed out waiting for exactly one Web Lock holder: ${JSON.stringify({
+        leader: leader.name,
+        a: { role: lockA && lockA.role, lock: lockA && lockA.typingLock },
+        b: { role: lockB && lockB.role, lock: lockB && lockB.typingLock },
+      })}`);
+    }
     check('two tabs: exactly one tab holds the Web Lock used for typing',
       Boolean(lockA.typingLock && lockB.typingLock)
         && lockA.typingLock.supported === true && lockB.typingLock.supported === true
@@ -5254,11 +5274,6 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && (ownerLock.role.primary ? ownerLock.typingLock.held === true : otherLock.typingLock.held === true)
         && (ownerLock.role.primary ? otherLock.typingLock.held === false : ownerLock.typingLock.held === false),
       { a: { role: ownerLock.role, lock: ownerLock.typingLock }, b: { role: otherLock.role, lock: otherLock.typingLock } });
-
-    const leader = a0.role.primary
-      ? { tab: tabA, name: 'A' }
-      : { tab: tabB, name: 'B' };
-    const follower = leader.name === 'A' ? tabB : tabA;
 
     // Parar la pestaña que lleva el turno lo suelta de verdad: el guardia de
     // esa pestaña ya no lo renueva y la otra toma el lease en su siguiente
@@ -5290,6 +5305,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     // El relevo del lock depende del siguiente latido de la pestaña que toma el
     // turno. En un runner lento puede pasar de 5 s sin que el estado sea
     // incorrecto; la condicion sigue siendo la misma, solo se le da margen.
+    // Igual que antes, se trae al frente al nuevo titular: una pestaña oculta
+    // no pide el lock y el test confundiria rol con adquisicion.
+    try { await follower.send('Page.bringToFront'); } catch { /* target cerrado */ }
+    await sleep(200);
     await waitFor(async () => {
       const one = await follower.evaluate(roleRead);
       const two = await leader.tab.evaluate(roleRead);
