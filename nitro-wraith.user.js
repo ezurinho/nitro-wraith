@@ -2265,7 +2265,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       // Otra cuenta puede tener un total parecido; un cambio grande de carreras
       // invalida la foto para no calibrar una cuenta con la media de otra.
       if (raw.races && races && Math.abs(raw.races - races) > Math.max(500, races * 0.2)) return null;
-      return raw;
+      return {
+        ...raw,
+        rows: Number(raw.rows) || 0,
+        pages: Number(raw.pages) || 0,
+      };
     } catch {
       return null;
     }
@@ -2277,8 +2281,16 @@ All of this only aims at believable statistics. It is your call and your risk.
   // cuenta; se usa como suelo, nunca como excusa para bajar el ritmo.
   async function fetchLifetimeWpm(races) {
     const cached = readLifetimeCache(races);
+    const cacheValue = cached ? {
+      wpm: cached.wpm,
+      at: cached.at,
+      rows: Number(cached.rows) || 0,
+      pages: Number(cached.pages) || 0,
+      cached: true,
+      stale: false,
+    } : null;
     const now = Date.now();
-    if (cached && now - cached.at < 24 * 60 * 60 * 1000) return cached.wpm;
+    if (cacheValue && now - cached.at < 24 * 60 * 60 * 1000) return cacheValue;
 
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), CONFIG.calibration.timeoutMs) : null;
@@ -2286,6 +2298,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     let secs = 0;
     let totalRaces = 0;
     let rowsSeen = 0;
+    let pagesSeen = 0;
+    let complete = true;
 
     try {
       const headers = accountHeaders();
@@ -2296,7 +2310,11 @@ All of this only aims at believable statistics. It is your call and your risk.
           headers,
           signal: controller ? controller.signal : undefined,
         });
-        if (!response.ok) break;
+        if (!response.ok) {
+          complete = false;
+          break;
+        }
+        pagesSeen++;
         const body = await response.json();
         const rows = accountRows(body);
         if (!rows.length) break;
@@ -2316,13 +2334,32 @@ All of this only aims at believable statistics. It is your call and your risk.
         if (rows.length < 30) break;
       }
 
-      if (!rowsSeen || typed <= 0 || secs <= 0) return cached ? cached.wpm : null;
+      // Una pagina que falla a mitad deja una foto parcial: usarla como
+      // historico bajaria el objetivo sin que el usuario haya empeorado.
+      if (!complete) return cacheValue ? { ...cacheValue, stale: true } : null;
+      if (!rowsSeen || typed <= 0 || secs <= 0) return cacheValue ? { ...cacheValue, stale: true } : null;
       const wpm = (typed / 5) / (secs / 60);
-      if (!Number.isFinite(wpm) || wpm < 15 || wpm > 300) return cached ? cached.wpm : null;
-      disk.set(KEYS.lifetimeWpm, JSON.stringify({ wpm, at: now, races: totalRaces || races || 0 }));
-      return wpm;
+      if (!Number.isFinite(wpm) || wpm < 15 || wpm > 300) {
+        return cacheValue ? { ...cacheValue, stale: true } : null;
+      }
+      const result = {
+        wpm,
+        at: now,
+        rows: rowsSeen,
+        pages: pagesSeen,
+        cached: false,
+        stale: false,
+      };
+      disk.set(KEYS.lifetimeWpm, JSON.stringify({
+        wpm,
+        at: now,
+        races: totalRaces || races || 0,
+        rows: rowsSeen,
+        pages: pagesSeen,
+      }));
+      return result;
     } catch {
-      return cached ? cached.wpm : null;
+      return cacheValue ? { ...cacheValue, stale: true } : null;
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -2355,14 +2392,15 @@ All of this only aims at believable statistics. It is your call and your risk.
         || (persisted && persisted.bestWpm) || null;
       const races = pickAccountStat(data, ['racesPlayed', 'totalRaces', 'races'], 0, 100000000)
         || (persisted && persisted.races) || null;
-      const lifetimeWpm = await fetchLifetimeWpm(races);
+      const lifetime = await fetchLifetimeWpm(races);
+      const lifetimeWpm = lifetime ? lifetime.wpm : null;
       const wpm = Number(currentWpm) > 0 || Number(lifetimeWpm) > 0
         ? Math.max(Number(currentWpm) || 0, Number(lifetimeWpm) || 0)
         : null;
 
       if (wpm || accuracy) {
-        accountStats = { wpm, currentWpm, lifetimeWpm, accuracy, bestWpm, races, source: 'api' };
-        return { wpm, currentWpm, lifetimeWpm, accuracy, bestWpm, races, reason: null };
+        accountStats = { wpm, currentWpm, lifetimeWpm, lifetime, accuracy, bestWpm, races, source: 'api' };
+        return { wpm, currentWpm, lifetimeWpm, lifetime, accuracy, bestWpm, races, reason: null };
       }
 
       if (persisted && (persisted.wpm || persisted.accuracy)) {
@@ -2371,11 +2409,12 @@ All of this only aims at believable statistics. It is your call and your risk.
           wpm: Number(lifetimeWpm) > Number(persisted.wpm) ? lifetimeWpm : persisted.wpm,
           currentWpm: persisted.wpm,
           lifetimeWpm,
+          lifetime,
         };
         return { ...accountStats, reason: null };
       }
       if (lifetimeWpm) {
-        accountStats = { wpm: lifetimeWpm, currentWpm: null, lifetimeWpm, accuracy: null, bestWpm, races, source: 'monthly' };
+        accountStats = { wpm: lifetimeWpm, currentWpm: null, lifetimeWpm, lifetime, accuracy: null, bestWpm, races, source: 'monthly' };
         return { ...accountStats, reason: null };
       }
       return failed(response.ok ? 'no average in the response' : `HTTP ${response.status}`);
@@ -2400,9 +2439,13 @@ All of this only aims at believable statistics. It is your call and your risk.
         const top = Number(stats.bestWpm) > 0 ? ` (top ${Number(stats.bestWpm).toFixed(0)} WPM)` : '';
         const recent = Number(stats.currentWpm);
         const lifetime = Number(stats.lifetimeWpm);
-        const source = lifetime > 0 && recent > 0 && lifetime > recent + 0.5
-          ? ` (lifetime ${lifetime.toFixed(1)}; recent profile ${recent.toFixed(1)})`
+        const info = stats.lifetime;
+        const provenance = info && info.rows
+          ? `; ${info.rows} month${info.rows === 1 ? '' : 's'} / ${info.pages} page${info.pages === 1 ? '' : 's'}${info.stale ? ' cached' : ''}`
           : '';
+        const source = lifetime > 0 && recent > 0 && lifetime > recent + 0.5
+          ? ` (lifetime ${lifetime.toFixed(1)}; recent profile ${recent.toFixed(1)}${provenance})`
+          : provenance ? ` (${provenance.slice(2)})` : '';
         const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
         log(`Pace auto-calibrated: account average ${Number(stats.wpm).toFixed(1)} WPM${source}${top}${count} -> ${range.min}-${range.max}.`);
         setPaceProfile(paceProfile, { force: true });
@@ -2528,9 +2571,13 @@ All of this only aims at believable statistics. It is your call and your risk.
         ? Math.round(Number(accountStats.currentWpm)) : null;
       const lifetime = accountStats && Number(accountStats.lifetimeWpm) > 0
         ? Math.round(Number(accountStats.lifetimeWpm)) : null;
-      const source = lifetime && recent && lifetime > recent
-        ? ` The target is anchored to the lifetime monthly average${recent ? ` (${lifetime} WPM); the short profile window is ${recent} WPM` : ''}.`
+      const lifetimeInfo = accountStats && accountStats.lifetime;
+      const provenance = lifetimeInfo && lifetimeInfo.rows
+        ? ` ${lifetimeInfo.rows} month${lifetimeInfo.rows === 1 ? '' : 's'} across ${lifetimeInfo.pages} page${lifetimeInfo.pages === 1 ? '' : 's'}${lifetimeInfo.stale ? ' (cached fallback)' : ''}.`
         : '';
+      const source = lifetime && recent && lifetime > recent
+        ? ` The target is anchored to the lifetime monthly average${recent ? ` (${lifetime} WPM); the short profile window is ${recent} WPM` : ''}.${provenance}`
+        : provenance;
       panel.refs.paceSource.title = `Pace target ${wpmText} WPM, centred on this account's average${top ? `; account top ${top} WPM` : ''}. Read automatically from the site profile and the stats API.${source}`;
     }
 
@@ -9050,6 +9097,31 @@ All of this only aims at believable statistics. It is your call and your risk.
       page: location.pathname,
       mode: MODE,
       profile: { name: paceProfile, min: tier.min, max: tier.max, hardCap: CONFIG.wpm.hardCap },
+      calibration: {
+        target: calibratedRange ? `${calibratedRange.min}-${calibratedRange.max} WPM` : null,
+        accuracy: calibratedAccuracy ? `${calibratedAccuracy.min}-${calibratedAccuracy.max}%` : null,
+        at: calibrationStamp() ? new Date(calibrationStamp()).toISOString() : null,
+        account: accountStats
+          ? {
+            wpm: accountStats.wpm || null,
+            recent: accountStats.currentWpm || null,
+            lifetime: accountStats.lifetimeWpm || null,
+            accuracy: accountStats.accuracy || null,
+            races: accountStats.races || null,
+            source: accountStats.source || null,
+          }
+          : null,
+        lifetime: accountStats && accountStats.lifetime
+          ? {
+            wpm: accountStats.lifetime.wpm,
+            months: accountStats.lifetime.rows,
+            pages: accountStats.lifetime.pages,
+            cached: accountStats.lifetime.cached === true,
+            stale: accountStats.lifetime.stale === true,
+            at: accountStats.lifetime.at ? new Date(accountStats.lifetime.at).toISOString() : null,
+          }
+          : null,
+      },
       target: {
         wpm: profile.targetWPM,
         accuracyGoal: Number(profile.accuracyGoal.toFixed(1)),

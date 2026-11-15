@@ -11,6 +11,12 @@ does not try to beat the game's limits; it tries to stay inside them.
 - The stats API's monthly totals cover a much longer history. The script uses the
   higher lifetime average as an anchor when those totals are available; this
   keeps its own low races from dragging the target downward.
+- A monthly snapshot is cached for 24 hours. If a page fails after that, the last
+  complete snapshot is reused and marked as stale; a partial page is never used
+  to lower the target.
+- The calibration diagnostic reports the recent average, the lifetime average,
+  the number of monthly rows and API pages, and whether the snapshot is cached
+  or stale.
 - The script keeps its own target below the hard 120 WPM ceiling and never raises
   the target to chase a fast result.
 - Accuracy below 96% loses the accuracy bonus, so the floor is 96%.

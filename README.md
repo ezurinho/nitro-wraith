@@ -90,7 +90,9 @@ The profile average is a short rolling window, so a slow streak can drag it
 down. When the stats API exposes the monthly totals, the script anchors the
 target to the higher lifetime average and never calibrates below it. The recent
 profile average still appears in the panel; it just cannot pull the bot into a
-self-reinforcing slow loop.
+self-reinforcing slow loop. The calibration report also shows how many monthly
+rows and API pages were used; if a page fails, the last complete snapshot is
+kept so a partial history cannot lower the target.
 
 ### Six themes
 

@@ -2483,6 +2483,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   // mas alta, para que la calibracion no se retroalimente hacia abajo.
   const lifetimeCalibration = await cdp.evaluate(`(async () => {
     const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const realFetch = w.fetch;
     w.localStorage.removeItem('autoTyperLifetimeWpm');
@@ -2498,7 +2499,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       if (String(url).includes('/api/v2/stats/data/bymonth')) {
         return Promise.resolve(new w.Response(
           JSON.stringify({ success: true, data: [
-            { typed: 120000, secs: 12000, races: 1000 },
+            { typed: 120000, secs: 12000, races: 49200 },
           ] }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         ));
@@ -2515,6 +2516,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         account: shadow.querySelector('[data-field="calAccount"]').textContent,
         paceSource: shadow.querySelector('[data-field="paceSource"]').textContent,
         stored: JSON.parse(w.localStorage.getItem('autoTyperCalibratedRange') || 'null'),
+        accountInfo: d.autoPace().account,
+        report: d.diagnostic(),
       };
     } finally {
       w.fetch = realFetch;
@@ -2526,8 +2529,66 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && lifetimeCalibration.account === '120.0 WPM · 98.7%'
       && lifetimeCalibration.paceSource === 'auto · 120 avg · 230 top'
       && lifetimeCalibration.stored && lifetimeCalibration.stored.min === 113
-      && lifetimeCalibration.stored.max === 120,
+      && lifetimeCalibration.stored.max === 120
+      && lifetimeCalibration.accountInfo && lifetimeCalibration.accountInfo.lifetime
+      && lifetimeCalibration.accountInfo.lifetime.rows === 1
+      && lifetimeCalibration.accountInfo.lifetime.pages === 1
+      && lifetimeCalibration.accountInfo.lifetime.cached === false
+      && lifetimeCalibration.report.calibration
+      && lifetimeCalibration.report.calibration.account.recent === 57
+      && lifetimeCalibration.report.calibration.lifetime.months === 1
+      && lifetimeCalibration.report.calibration.lifetime.pages === 1,
     lifetimeCalibration);
+
+  // Si el historico falla despues de 24 h, la ultima foto buena sigue siendo
+  // valida: el objetivo no puede volver a la media corta y empezar a bajar.
+  const lifetimeFallback = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const realFetch = w.fetch;
+    w.localStorage.setItem('autoTyperLifetimeWpm', JSON.stringify({
+      wpm: 120, at: Date.now() - 25 * 60 * 60 * 1000,
+      races: 49200, rows: 8, pages: 2,
+    }));
+    w.fetch = (url, options) => {
+      if (String(url).includes('/api/v2/stats/summary')) {
+        return Promise.resolve(new w.Response(
+          JSON.stringify({ success: true, data: { stats: {
+            wpm: 57, accuracy: 98.7, highestSpeed: 230, racesPlayed: 49226,
+          } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ));
+      }
+      if (String(url).includes('/api/v2/stats/data/bymonth')) {
+        return Promise.resolve(new w.Response('', { status: 503 }));
+      }
+      return realFetch(url, options);
+    };
+    try {
+      const row = shadow.querySelector('[data-field="calRow"]');
+      row.click();
+      row.click();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return {
+        range: shadow.querySelector('[data-field="calWpm"]').textContent,
+        account: shadow.querySelector('[data-field="calAccount"]').textContent,
+        accountInfo: d.autoPace().account,
+      };
+    } finally {
+      w.fetch = realFetch;
+      w.localStorage.removeItem('autoTyperLifetimeWpm');
+      d.paint();
+    }
+  })()`, true);
+  check('a stale lifetime cache survives a monthly API failure',
+    lifetimeFallback.range === '113-120'
+      && lifetimeFallback.account === '120.0 WPM · 98.7%'
+      && lifetimeFallback.accountInfo && lifetimeFallback.accountInfo.lifetime
+      && lifetimeFallback.accountInfo.lifetime.stale === true
+      && lifetimeFallback.accountInfo.lifetime.rows === 8
+      && lifetimeFallback.accountInfo.lifetime.pages === 2,
+    lifetimeFallback);
 
   // La media de una cuenta principiante tambien manda: 30 WPM no puede caer
   // en el 40+ del suelo viejo, y 43 WPM tiene que quedar centrado en 43.
