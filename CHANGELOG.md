@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.32 — 2026-11-15
+
+- feat: show the new version in the garage update button
+
 ## 8.14.31 — 2026-11-15
 
 - feat: show the update control in the garage panel
