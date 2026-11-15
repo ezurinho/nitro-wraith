@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.33 — 2026-11-15
+
+- feat: give the garage update button a download icon
+
 ## 8.14.32 — 2026-11-15
 
 - feat: show the new version in the garage update button
