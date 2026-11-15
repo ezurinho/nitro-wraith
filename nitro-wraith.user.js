@@ -14863,6 +14863,12 @@ All of this only aims at believable statistics. It is your call and your risk.
              compacto para no apretar los dos botones que se usan de verdad. */
           .act.tool { flex: 0 0 auto; padding: 9px 12px; color: var(--dim); }
           .act.tool:hover:not(:disabled) { color: var(--acc); }
+          /* Update lleva su propio icono y el numero de version: se centra en
+             una linea y no se deja partir cuando el panel esta estrecho. */
+          .act.update { display: inline-flex; align-items: center; justify-content: center;
+                 gap: 6px; white-space: nowrap; }
+          .act.update svg { width: 12px; height: 12px; flex: none; }
+          .act.update[hidden] { display: none; }
           .act:focus-visible, .mode:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
           @media (prefers-reduced-motion: reduce) {
@@ -14915,7 +14921,9 @@ All of this only aims at believable statistics. It is your call and your risk.
             <button class="act ghost" type="button" data-act="resume" title="Clear a stop and start now; with a live race this sends the same Alt+A">Resume</button>
             <button class="act ghost" type="button" data-act="retry" hidden title="Advance the next sign-in retry without waiting for the countdown">Retry login</button>
             <button class="act ghost tool" type="button" data-act="diag" title="Copy a diagnostic of the queue: mode, state, active waits, last decision, last failure, today and budgets">Copy</button>
-            <button class="act" type="button" data-act="update" data-f="update" hidden title="A newer NITRO WRAITH is available; click to download the userscript">Update</button>
+            <button class="act update" type="button" data-act="update" data-f="update" hidden title="A newer NITRO WRAITH is available; click to download the userscript">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
+            </button>
           </div>
         </div>`;
       document.body.appendChild(host);

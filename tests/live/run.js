@@ -4101,6 +4101,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       localStorage.setItem('nta:update', JSON.stringify({ at: Date.now(), latest: '99.0.0' }));
       paint();
       const rect = btn.getBoundingClientRect();
+      const icon = btn.querySelector('svg');
       const shown = {
         hidden: btn.hidden,
         display: getComputedStyle(btn).display,
@@ -4108,6 +4109,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         title: btn.title,
         aria: btn.getAttribute('aria-label'),
         width: rect.width,
+        icon: Boolean(icon),
+        iconWidth: icon ? icon.getBoundingClientRect().width : 0,
       };
       localStorage.removeItem('nta:update');
       paint();
@@ -4118,6 +4121,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageUpdate.hidden.display === 'none'
         && garageUpdate.shown.hidden === false && garageUpdate.shown.display !== 'none'
         && /^update v99\.0\.0$/i.test(garageUpdate.shown.text) && garageUpdate.shown.width > 0
+        && garageUpdate.shown.icon === true && garageUpdate.shown.iconWidth > 0
         && /99\.0\.0/.test(garageUpdate.shown.title) && /download/i.test(garageUpdate.shown.aria)
         && garageUpdate.afterHidden === true, garageUpdate);
 
