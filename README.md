@@ -163,7 +163,9 @@ In the garage, **Resume** does the same as <kbd>Alt</kbd> + <kbd>A</kbd>.
 > invisible. Use your own account, at your own risk.
 
 The script never types credentials and never attempts a CAPTCHA. If the site
-reports a permanent ban, it stops and does not try the account again. Chrome can
+reports a permanent ban, it stops and does not try the account again. When the
+browser reports no network, the garage stops pressing "Race Now"/"Continue" and
+shows `waiting · offline`; the queue resumes by itself on the `online` event. Chrome can
 freeze a hidden tab, so keep the race tab visible for long unattended runs; AFK
 farming is off by default for the same reason. Its garage button makes the
 choice explicit, and the row tells you whether the hidden mode is actually on.

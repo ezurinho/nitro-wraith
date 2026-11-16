@@ -6430,6 +6430,23 @@ All of this only aims at believable statistics. It is your call and your risk.
     return false;
   }
 
+  // `navigator.onLine` no garantiza que el servidor responda, pero cuando el
+  // navegador afirma que no hay red no tiene sentido gastar clics de "Race Now"
+  // ni contar rebotes: la sesion y el servidor no van a contestar. Se usa solo
+  // el valor negativo porque un falso positivo de conexion no debe parar nada.
+  function onlineNow() {
+    return navigator.onLine !== false;
+  }
+
+  async function waitWhileOffline() {
+    if (onlineNow()) return false;
+
+    log('No network: holding the next race until the connection returns.');
+    while (!session.stopped && !onlineNow()) await preciseSleep(1000);
+    if (!session.stopped) log('Network back: the race loop resumes.');
+    return true;
+  }
+
   // Farmeo AFK: la pestana puede estar oculta. El reloj Worker mantiene la
   // cadencia y la cola tambien late con el; por eso no se espera a volver al
   // foco. Si se desactiva, se conserva el comportamiento antiguo.
@@ -7556,6 +7573,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     await waitWhilePaused();
     if (session.stopped) return false;
 
+    // La pantalla de resultados tambien espera a la red: pulsar "Race Again"
+    // offline solo deja la pagina dando vueltas y gasta el intento de recarga.
+    await waitWhileOffline();
+    if (session.stopped) return false;
+
     // Pestana en segundo plano: el navegador frena los temporizadores a ~1/s y
     // la carrera saldria a 60 WPM con mala precision. Mejor esperar aqui, que
     // es el unico punto sin carrera en curso.
@@ -7711,6 +7733,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     // abrir carrera: para eso estaba el descanso.
     await waitWhileBreaking();
     await waitWhileSiteBlocked();
+    if (session.stopped) return false;
+
+    // Sin red no se abre una carrera que no va a poder cargar ni reportar.
+    // La espera conserva los contadores y se reanuda sola con el evento online.
+    await waitWhileOffline();
     if (session.stopped) return false;
 
     // Ninguna carrera empieza con los temporizadores frenados: saldria lenta y
@@ -15205,6 +15232,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     // not press "Race Now" in the same breath.
     function handleMysteryBox() {
       if (!CONFIG.mysteryBox.enabled) return false;
+      // Sin red el intento solo gasta el boton y deja una espera artificial.
+      if (!onlineNow()) return false;
       // Interruptor explicito: por defecto la caja se reclama aunque el bot no
       // este armado; con requireArmed = true vuelve a exigir cola armada.
       if (CONFIG.mysteryBox.requireArmed && !isArmed()) return false;
@@ -15977,6 +16006,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       // garaje sola: un boton que no hace nada es peor que no tenerlo.
       refs.boxBtn.addEventListener('click', (event) => {
         event.stopPropagation();
+        if (!onlineNow()) {
+          queueLog('Mystery Box: no network; the claim waits.');
+          paintGaragePanel();
+          return;
+        }
         // Sin sesion no hay caja que reclamar: se dice, en vez de dejar el boton
         // mudo.
         if (!signedIn()) {
@@ -16038,6 +16072,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       // boton que ya no existe (o sobre la carrera siguiente).
       refs.raceBtn.addEventListener('click', (event) => {
         event.stopPropagation();
+        if (!onlineNow()) {
+          queueLog('Offline: the race waits for the network to return.');
+          paintGaragePanel();
+          return;
+        }
         if (blockUntil() > Date.now()) {
           queueLog('Site block: the account cannot race yet; wait for the block to pass.');
           paintGaragePanel();
@@ -16353,6 +16392,13 @@ All of this only aims at believable statistics. It is your call and your risk.
           title: `Site block after too many disqualifications; ${shortWait(blocked)} left.`,
         };
       }
+      if (!onlineNow()) {
+        return {
+          text: 'offline',
+          warn: 2,
+          title: 'No network: the queue and the next race wait until the connection returns.',
+        };
+      }
       if (hours) {
         return {
           text: 'scheduled',
@@ -16415,6 +16461,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (terminalBanActive()) return 'hold · account ban';
       if (banClearHeld()) return 'paused · ban cleared';
       if (blockedMin > 0) return `hold · site block ${blockedMin}m`;
+      if (!onlineNow()) return 'waiting · offline';
       if (activeGate()) return 'waiting · active hours';
       if (armed) return 'on · armed';
       if (stop) {
@@ -16983,6 +17030,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     // peticion falla, se conserva el respaldo del perfil y se reintenta luego.
     async function refreshSocial(force = false) {
       if (!socialPanelRoute()) return;
+      // Las tres GET se reintentan al volver online; offline solo llenarian
+      // la cache de fallos y dejarian el panel en «retry» sin motivo.
+      if (!onlineNow()) return;
       const now = Date.now();
       const profile = persistedSocial();
       const owner = socialOwner(profile);
@@ -18197,6 +18247,15 @@ All of this only aims at believable statistics. It is your call and your risk.
       // Eleccion de copia en esta ventana: la que no manda no pulsa nada.
       if (!refreshQueueRole()) return;
 
+      // Offline no se pulsa nada que dependa del servidor (ni Race Now, ni
+      // Continue, ni la caja). El estado visible lo explica y el evento online
+      // vuelve a llamar a loop() sin esperar al latido frenado.
+      if (!onlineNow()) {
+        clearContinue();
+        clearRaceNow();
+        return;
+      }
+
       // Una cuenta cerrada no tiene nada que automatizar: no se pulsa ningun
       // boton del modal, ni se abre una carrera para volver a chocar.
       if (terminalBanNoted) return;
@@ -18351,9 +18410,16 @@ All of this only aims at believable statistics. It is your call and your risk.
     let hiddenLoopQueued = false;
 
     function loop() {
-      onNavigate();
-      syncGaragePanel();
-      tick();
+      // Un nodo inesperado del sitio no puede tumbar el latido entero ni dejar
+      // de programar el siguiente ciclo oculto. El error queda en la consola y
+      // el proximo tick vuelve a intentarlo con la pagina ya repintada.
+      try {
+        onNavigate();
+        syncGaragePanel();
+        tick();
+      } catch (error) {
+        queueLog('Queue tick failed; retrying on the next beat.', error);
+      }
 
       // En segundo plano setInterval se clampa a 1/min: el reloj Worker mantiene
       // el latido de la cola al ritmo normal para abrir la siguiente carrera a
@@ -18426,6 +18492,23 @@ All of this only aims at believable statistics. It is your call and your risk.
     // el primer temporizador que sobrevive abre carrera nada mas volver (o antes)
     // y esa carrera empieza sin manos. Al volver se reprograma todo con su pausa
     // humana normal; el rato oculto tampoco cuenta como atasco.
+    // La red se trata como una puerta mas: al caer se cancelan los clics ya
+    // programados; al volver se despierta la cola de inmediato, sin esperar al
+    // intervalo que el navegador pueda tener frenado.
+    addEventListener('offline', () => {
+      clearContinue();
+      clearRaceNow();
+      clearIdleTimer();
+      queueWhy('Offline: races wait until the network returns.');
+      paintGaragePanel();
+    });
+    addEventListener('online', () => {
+      noteProgress();
+      queueLog('Online: the queue resumes.');
+      paintGaragePanel();
+      loop();
+    });
+
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         // Con el farmeo AFK las pulsaciones programadas se mantienen: si se

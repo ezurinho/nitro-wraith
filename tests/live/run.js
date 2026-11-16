@@ -6476,9 +6476,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const root = host && host.shadowRoot;
       const afkRow = root && root.querySelector('[data-f="afkRow"]');
       const afk = root && root.querySelector('[data-f="afk"]');
+      const state = root && root.querySelector('[data-f="state"]');
       const retryRow = root && root.querySelector('[data-f="retryRow"]');
       const d = window.__ntaDebug;
-      if (!afkRow || !afk || !retryRow || !d || !d.garagePaint || !d.setBackgroundFarm) return { hasRow: false };
+      if (!afkRow || !afk || !state || !retryRow || !d || !d.garagePaint || !d.setBackgroundFarm) return { hasRow: false };
 
       d.loginRetryCancel();
       localStorage.setItem('player_token', 'live-afk-token');
@@ -6488,6 +6489,16 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       sessionStorage.setItem('ntQueue:armedAt', JSON.stringify(Date.now()));
       sessionStorage.removeItem('ntQueue:raceNowBounces');
       sessionStorage.removeItem('ntQueue:raceNowBounceAt');
+
+      // La red es una puerta mas: offline no se abre nada y la fila lo dice.
+      let offline = null;
+      try {
+        Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+        d.garagePaint();
+        offline = (state.textContent || '').trim();
+      } catch { /* el navegador no deja simularlo */ }
+      try { delete navigator.onLine; } catch { /* sigue el getter normal */ }
+
       d.setBackgroundFarm(true);
       d.garagePaint();
       const active = {
@@ -6495,6 +6506,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         text: (afk.textContent || '').trim(),
         title: afkRow.title,
         retryHidden: retryRow.hidden,
+        offline,
       };
       d.setBackgroundFarm(false);
       return active;
@@ -6509,6 +6521,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     garageActive.hasRow && /^on\b/.test(garageActive.text)
       && /AFK cycle active/.test(garageActive.title)
       && garageActive.retryHidden === true,
+    garageActive);
+  check('the garage announces an offline hold instead of pressing Race Now',
+    garageActive.hasRow && garageActive.offline === 'waiting · offline',
     garageActive);
 
   // Panel social de solo lectura. Se abre una pestaña nueva y se inyecta el

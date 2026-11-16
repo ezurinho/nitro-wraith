@@ -62,6 +62,11 @@ does not try to beat the game's limits; it tries to stay inside them.
   no key sent for 7 seconds. That stays below the ~12 second DQ window when the
   main loop is stuck behind a lock or an unexpected wait.
 - The queue adds human delays, occasional long breaks, and session or daily limits.
+- With `navigator.onLine === false` the queue cancels scheduled clicks, stops
+  pressing Race Now/Continue/claim, and shows `waiting · offline`; the `online`
+  event wakes it immediately. The race loop waits before opening the next race.
+  A false "offline" reading is conservative: it clears on the browser event and
+  is rechecked every second.
 - Mystery Box, daily challenges, stickers, and the season card are read from the
   game's own persisted state where possible. When stickers are enabled, one is
   sent in every race; if the chat is not mounted yet, the next tick retries.
