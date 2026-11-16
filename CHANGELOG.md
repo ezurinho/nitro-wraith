@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.41 — 2026-11-16
+
+- feat: add instant settings filter to TUNE
+
 ## 8.14.40 — 2026-11-16
 
 - feat: show account health and retry failed stats reads
