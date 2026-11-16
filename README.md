@@ -77,9 +77,12 @@ current.
 ## Pace
 
 The first load reads your average, top WPM and full monthly history from the
-account that is signed in. The stats API refreshes them every 30 minutes;
-clicking `auto` or the **refresh** button on the Live Account card forces a
-fresh read, and a new script version triggers one immediately after the update.
+account that is signed in. The stats API refreshes them every 30 minutes, and
+another read is triggered automatically every 25 completed races so a long
+session follows the account without waiting for the clock. Clicking `auto` or
+the **refresh** button on the Live Account card forces a fresh read, and a new
+script version triggers one immediately after the update. A transient monthly
+page failure is retried once before the last complete snapshot is used.
 Calibration is tied to the account ID: if you switch accounts in the same
 browser, the old range is cleared and the new account is read before racing.
 If a read fails, the card shows the retry and the bot tries again after two

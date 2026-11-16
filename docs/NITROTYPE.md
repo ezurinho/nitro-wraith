@@ -32,9 +32,12 @@ does not try to beat the game's limits; it tries to stay inside them.
 - `TUNE` exposes custom WPM (15–119) and custom accuracy (96–100). Empty means
   automatic; a value overrides auto calibration and is persisted with the
   exported configuration.
-- A monthly snapshot is cached for 24 hours. If a page fails after that, the last
-  complete snapshot is reused and marked as stale; a partial page is never used
-  to lower the target.
+- A monthly snapshot is cached for 24 hours. A transient page failure is
+  retried once; if it still fails, the last complete snapshot is reused and
+  marked as stale. A partial page is never used to lower the target.
+- Besides the 30-minute clock, a new account read is requested every 25
+  completed races. The target is still a ratchet, so this can raise a stale
+  objective during a long session but cannot lower it.
 - The calibration diagnostic reports the recent average, the lifetime average,
   the number of monthly rows and API pages, and whether the snapshot is cached
   or stale.

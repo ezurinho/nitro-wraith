@@ -2559,6 +2559,55 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && lifetimeCalibration.report.calibration.lifetime.pages === 1,
     lifetimeCalibration);
 
+  // Una pagina mensual que falla se reintenta una vez: el historico completo
+  // no se pierde por un 503 transitorio y la tarjeta puede decir que esta
+  // sincronizada en vez de quedarse con el perfil corto.
+  const pageRetry = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const realFetch = w.fetch;
+    let monthCalls = 0;
+    w.localStorage.removeItem('autoTyperLifetimeWpm');
+    w.fetch = (url, options) => {
+      if (String(url).includes('/api/v2/stats/summary')) {
+        return Promise.resolve(new w.Response(
+          JSON.stringify({ success: true, data: { stats: {
+            wpm: 57, accuracy: 98.7, highestSpeed: 230, racesPlayed: 49226,
+          } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ));
+      }
+      if (String(url).includes('/api/v2/stats/data/bymonth')) {
+        monthCalls += 1;
+        if (monthCalls === 1) {
+          return Promise.resolve(new w.Response('busy', { status: 503 }));
+        }
+        return Promise.resolve(new w.Response(
+          JSON.stringify({ success: true, data: [
+            { typed: 120000, secs: 12000, races: 49200 },
+          ] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ));
+      }
+      return realFetch(url, options);
+    };
+    try {
+      shadow.querySelector('[data-field="calRow"]').click();
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+      const account = d.autoPace().account;
+      return { monthCalls, lifetime: account && account.lifetime };
+    } finally {
+      w.fetch = realFetch;
+      w.localStorage.removeItem('autoTyperLifetimeWpm');
+    }
+  })()`, true);
+  check('a transient monthly page failure is retried before giving up',
+    pageRetry.monthCalls >= 2 && pageRetry.lifetime
+      && pageRetry.lifetime.rows === 1 && pageRetry.lifetime.pages === 1
+      && pageRetry.lifetime.cached === false,
+    pageRetry);
+
   // Overrides manuales: se aplican al instante, se guardan y al vaciarlos
   // vuelven al objetivo automatico. Se prueban por el mismo `change` que usa
   // el usuario, no llamando al hook interno.
@@ -6593,6 +6642,55 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && calibrationRetry.state === 'warn'
       && /^retry /.test(calibrationRetry.label),
     calibrationRetry);
+
+  // La foto tambien se refresca por uso, no solo por reloj: al cerrar 25
+  // carreras se pide la cuenta otra vez aunque la ultima lectura sea reciente.
+  const raceCalibration = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const realFetch = w.fetch;
+    let summaryCalls = 0;
+    w.fetch = (url, options) => {
+      if (String(url).includes('/api/v2/stats/summary')) {
+        summaryCalls += 1;
+        return Promise.resolve(new w.Response(
+          JSON.stringify({ success: true, data: { stats: {
+            wpm: 100, accuracy: 98, highestSpeed: 200, racesPlayed: 5000,
+          } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ));
+      }
+      if (String(url).includes('/api/v2/stats/data/bymonth')) {
+        return Promise.resolve(new w.Response(JSON.stringify({ success: true, data: [] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+      return realFetch(url, options);
+    };
+    try {
+      const before = d.calibrationHealth().raceMark;
+      d.patchSession({ races: before + 24, typing: false });
+      d.seedRaceCounters({
+        chars: 200, errors: 0, correct: 200, nitroChars: 0, startedAt: Date.now() - 15000,
+      });
+      const recorded = d.countRace();
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      return {
+        recorded,
+        before,
+        after: d.calibrationHealth().raceMark,
+        races: d.session().races,
+        summaryCalls,
+      };
+    } finally {
+      w.fetch = realFetch;
+    }
+  })()`, true);
+  check('closing 25 races automatically asks for a fresh account read',
+    raceCalibration.recorded === true
+      && raceCalibration.after === raceCalibration.before + 25
+      && raceCalibration.races === raceCalibration.after
+      && raceCalibration.summaryCalls >= 1,
+    raceCalibration);
 
   // Cambio de cuenta: la identidad anterior no puede conservar el rango. Se
   // restaura el almacenamiento al terminar para no dejar basura entre pruebas.

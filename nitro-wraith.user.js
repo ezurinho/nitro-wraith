@@ -456,6 +456,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibration: {
       auto: true,
       refreshMs: 1800000,    // 30 min: el ritmo sigue la media mas reciente
+      everyRaces: 25,        // ademas, una lectura nueva cada 25 carreras
       halfWidth: 6,          // ancho maximo del rango; con 43 WPM da 37-49
       minWpm: 15,            // cuentas principiantes tambien son validas
       timeoutMs: 8000,
@@ -1990,6 +1991,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   let calibrationError = '';
   let calibrationFailures = 0;
   let calibrationRetryAt = 0;
+  let calibrationRaceMark = 0;
   // El banco escribe localStorage a mano; la recarga por cambio de cuenta se
   // puede silenciar unos segundos para no cortar una prueba a mitad.
   let accountReloadMutedUntil = 0;
@@ -2039,6 +2041,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibrationError = '';
     calibrationFailures = 0;
     calibrationRetryAt = 0;
+    calibrationRaceMark = 0;
     calibrationReadAt = 0;
     calibrationReadValue = 0;
   }
@@ -2565,13 +2568,25 @@ All of this only aims at believable statistics. It is your call and your risk.
     try {
       const headers = accountHeaders();
       for (let page = 0; page < 12; page++) {
-        const response = await fetch(`/api/v2/stats/data/bymonth?page=${page}&limit=30`, {
-          method: 'GET',
-          credentials: 'include',
-          headers,
-          signal: controller ? controller.signal : undefined,
-        });
-        if (!response.ok) {
+        // Una pagina que falla no invalida todo el historico: se reintenta una
+        // vez antes de rendirse. El reintento tambien cubre un corte breve de
+        // red; la lectura completa sigue siendo la unica que mueve el objetivo.
+        let response = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            response = await fetch(`/api/v2/stats/data/bymonth?page=${page}&limit=30`, {
+              method: 'GET',
+              credentials: 'include',
+              headers,
+              signal: controller ? controller.signal : undefined,
+            });
+            if (response.ok) break;
+          } catch (error) {
+            if (error && error.name === 'AbortError') throw error;
+          }
+          if (attempt === 0) await sleep(250);
+        }
+        if (!response || !response.ok) {
           complete = false;
           break;
         }
@@ -2802,6 +2817,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     disk.set(KEYS.calibrationAt, String(Date.now()));
     calibrationNeedsAccountRead = false;
+    calibrationRaceMark = session ? session.races : 0;
     rememberCalibrationAccount();
     paintCalibration();
     updatePanel();
@@ -3266,6 +3282,16 @@ All of this only aims at believable statistics. It is your call and your risk.
       session.blockRaces++;
       saveCounters();
       updatePanel();   // la fila de carreras no espera al siguiente latido
+
+      // El reloj de 30 minutos no siempre basta: en una tanda rapida la cuenta
+      // puede cambiar antes de la siguiente foto. Cada bloque de carreras pide
+      // una lectura nueva, asi el objetivo sigue a la cuenta sin tocar el raton.
+      const step = Math.max(1, Number(CONFIG.calibration.everyRaces) || 25);
+      if (session.races - calibrationRaceMark >= step) {
+        calibrationRaceMark = session.races;
+        log(`Account refresh: ${step} races since the last calibration; reading the account again.`);
+        maybeCalibrate(true);
+      }
     }
     return counted;
   }
@@ -5646,6 +5672,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // no se corria ninguna.
   function startFreshTanda(reason) {
     session.races = 0;
+    calibrationRaceMark = 0;
     session.sumRaces = 0;
     session.sumWpm = 0;
     // El libro de aportaciones es parte de sumWpm y se vacia con el: aunque
@@ -8907,6 +8934,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     error: calibrationError,
     failures: calibrationFailures,
     retryIn: Math.max(0, calibrationRetryAt - Date.now()),
+    raceMark: calibrationRaceMark,
   });
   window.__ntaDebug.muteAccountReload = (ms = 2000) => {
     accountReloadMutedUntil = Date.now() + Math.max(0, Number(ms) || 0);
@@ -19301,6 +19329,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     log(`v${VERSION} · mode AUTO (always) · pace ${session.pace.toUpperCase()} (${paceProfile}) · target ${profile.targetWPM} WPM / ${profile.accuracyGoal.toFixed(1)}% · hard cap ${CONFIG.wpm.hardCap} WPM`);
     if (resumedCounters) log(`Session resumed: ${session.races} races so far.`);
+    calibrationRaceMark = session.races;
     if (resumedPause) log('It was paused before the reload; press Resume to continue.');
     log('Keys: Alt+A resume, Alt+N stop. Alt+R clears the history, Alt+Shift+C clears the accuracy trend, Alt+H prints closed sessions, Alt+T cycles the theme, Alt+G folds the garage panel, Alt+M cycles the footer HUD, Alt+S or Esc stop (inside a race, at the end). There is no other mode: the bot is always AUTO and the garage queue arms itself.');
 
