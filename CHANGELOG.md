@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.45 — 2026-11-16
+
+- feat: add optional silent AFK keep-alive
+
 ## 8.14.44 — 2026-11-16
 
 - feat: hold races while offline and keep the queue tick alive
