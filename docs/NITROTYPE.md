@@ -57,6 +57,15 @@ does not try to beat the game's limits; it tries to stay inside them.
   switch through localStorage events; with no other gate active, the garage row
   reads `off`, `on` or `on · hidden`, while sign-in, stop, block and active-hours
   gates keep priority.
+- `keepAlive` (AFK keep-alive) is a second, independent opt-in and is off by
+  default. While AFK farming is enabled it creates a local `AudioContext` with
+  a constant source at gain `0.001` (the known silent keep-alive level), so the
+  tab is not a quiet background tab from Chrome's point of view. It downloads
+  nothing and is inaudible. The context needs a user gesture; the TUNE label
+  reports `on`, `ready`, `blocked`, `waiting` or `n/a` instead of claiming it is
+  active when suspended. It is best effort: muted tabs, Energy Saver, browser
+  policies and OS audio suspension can still freeze or discard the tab, so the
+  visible-tab default remains the safe option.
 - The pace ceiling never holds a key more than 5.5 seconds, and a live-race
   watchdog sends one correct key if it sees no accepted key for 7 seconds and
   no key sent for 7 seconds. That stays below the ~12 second DQ window when the

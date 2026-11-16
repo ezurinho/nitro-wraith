@@ -186,8 +186,8 @@ function connect(wsUrl) {
     ws.onopen = () => resolve({
       send,
       consoleLines,
-      async evaluate(expression, awaitPromise = false) {
-        const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise });
+      async evaluate(expression, awaitPromise = false, userGesture = false) {
+        const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise, userGesture });
         if (result.exceptionDetails) {
           throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
         }
@@ -5135,6 +5135,68 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && afkSwitch.imported.on === false && afkSwitch.imported.stored === false
       && afkSwitch.exported === false && afkSwitch.after.on === false,
     afkSwitch);
+
+  // El keep-alive es opcional: no debe existir audio si esta apagado ni si AFK
+  // esta apagado, y al encenderlo usa una fuente constante a 0.001 (sin tono
+  // audible). El estado se publica como on/blocked/ready para no mentir sobre
+  // una pestaña que el navegador puede seguir congelando.
+  const keepAliveSwitch = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const btn = shadow.querySelector('[data-toggle="keepAlive"]');
+    const txt = shadow.querySelector('[data-sw-txt="keepAlive"]');
+    const box = shadow.querySelector('[data-field="cfgText"]');
+    const apply = shadow.querySelector('[data-act="import"]');
+    const copy = shadow.querySelector('[data-act="export"]');
+    if (!btn || !txt || !box || !apply || !copy || !d.keepAlive || !d.setKeepAlive || !d.setBackgroundFarm) return { has: false };
+
+    const prefs = () => {
+      try { return JSON.parse(w.localStorage.getItem('autoTyperPrefs') || '{}'); }
+      catch { return {}; }
+    };
+    const state = () => ({
+      ...d.keepAlive(),
+      label: (txt.textContent || '').trim(),
+      checked: btn.getAttribute('aria-checked'),
+      stored: prefs().keepAlive === true,
+    });
+
+    const before = state();
+    d.setBackgroundFarm(true);
+    btn.click();
+    const on = state();
+    box.value = '{"keepAlive":false}';
+    apply.click();
+    const imported = state();
+    box.value = '';
+    copy.click();
+    let exported = null;
+    try { exported = JSON.parse(box.value).keepAlive; } catch { exported = 'bad json'; }
+    d.setKeepAlive(false);
+    d.setBackgroundFarm(false);
+    return { has: true, before, on, imported, exported, after: state() };
+  })()`, false, true);
+  check('the AFK keep-alive is opt-in, silent and round-trips as a switch',
+    keepAliveSwitch.has
+      && keepAliveSwitch.before.enabled === false
+      && keepAliveSwitch.before.label === 'off'
+      && keepAliveSwitch.before.stored === false
+      && keepAliveSwitch.on.enabled === true
+      && keepAliveSwitch.on.afk === true
+      && keepAliveSwitch.on.checked === 'true'
+      && keepAliveSwitch.on.stored === true
+      && Number.isFinite(keepAliveSwitch.on.gain)
+      && Math.abs(keepAliveSwitch.on.gain - 0.001) < 0.000001
+      && (keepAliveSwitch.on.mode === 'constant' || keepAliveSwitch.on.mode === 'oscillator')
+      && keepAliveSwitch.on.state === 'running'
+      && keepAliveSwitch.on.running === true
+      && keepAliveSwitch.on.label === 'on'
+      && keepAliveSwitch.imported.enabled === false
+      && keepAliveSwitch.imported.stored === false
+      && keepAliveSwitch.exported === false
+      && keepAliveSwitch.after.enabled === false,
+    keepAliveSwitch);
 
   // La estrategia se prueba en la funcion pura y en el selector real: primero
   // elige la palabra mas corta valida, ultima la mas atrasada y la estrategia

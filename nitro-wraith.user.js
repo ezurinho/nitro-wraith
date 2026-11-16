@@ -364,8 +364,12 @@ wins. If you turn it on,
 the typing cadence and every scheduled press (the queue's heartbeat, "Race
 Again", "Race Now", the DQ modal, the re-login and the Mystery Box) run on a
 Worker clock so hidden-tab timer clamping does not slow them down, but the
-freeze risk remains. Brave's "always keep this site active" only stops the tab
-from being discarded, not from being frozen.
+freeze risk remains. The optional AFK keep-alive (CONFIG.queue.keepAlive, also
+off by default) plays a near-silent constant AudioContext signal while AFK is
+on, which can keep Chrome from freezing the tab; it needs a click to unlock
+audio, reports ready/blocked instead of pretending to run, and is not a
+guarantee. Brave's "always keep this site active" only stops the tab from being
+discarded, not from being frozen.
 
 All in one: this file replaces three userscripts that used to fight each other.
 Install it ONCE and uninstall "Auto Redirect Script" and "Auto Stickers".
@@ -528,6 +532,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       // una pestana oculta y una carrera congelada acaba en DQ. Se puede
       // activar en TUNE si aceptas ese riesgo.
       backgroundFarm: false,
+      // Opcional y apagado: una senal de audio casi inaudible mantiene el
+      // documento despierto cuando AFK esta encendido. No sustituye al reloj
+      // Worker ni garantiza que el navegador no congele la pestana.
+      keepAlive: false,
       tickMs: 1000,
       continueDelayMs: [2400, 5200],  // respiro antes de pulsar Continue/Race Again (se sortea)
       continueLongChance: 0.12,       // y de vez en cuando, una pausa mas larga
@@ -2221,6 +2229,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       stickers: flag('stickers'),
       guard: flag('guard'),
       backgroundFarm: saved.backgroundFarm === true,
+      keepAlive: saved.keepAlive === true,
       useNitro: flag('useNitro'),
       nitroStrategy: normalizeNitroStrategy(saved.nitroStrategy),
       challenges: flag('challenges'),
@@ -2239,6 +2248,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       stickers: CONFIG.stickers.enabled !== false,
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
+      keepAlive: CONFIG.queue.keepAlive === true,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       challenges: CONFIG.challenges.enabled !== false,
@@ -2251,7 +2261,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // AFK se cambia en el iframe de la carrera (TUNE) o en el garaje (ventana
   // superior). El objeto de prefs puede tener otros ajustes que esta ventana no
   // conoce; se fusiona solo esta clave para no pisarlos.
-  function saveBackgroundFarmPref(next) {
+  function saveQueuePref(key, next) {
     let saved = {};
     try {
       const raw = JSON.parse(disk.get(KEYS.prefs) || '{}');
@@ -2259,8 +2269,16 @@ All of this only aims at believable statistics. It is your call and your risk.
     } catch {
       saved = {};
     }
-    saved.backgroundFarm = next === true;
+    saved[key] = next === true;
     try { disk.set(KEYS.prefs, JSON.stringify(saved)); } catch { /* modo privado */ }
+  }
+
+  function saveBackgroundFarmPref(next) {
+    saveQueuePref('backgroundFarm', next);
+  }
+
+  function saveKeepAlivePref(next) {
+    saveQueuePref('keepAlive', next);
   }
 
   // Se aplica ANTES de que se sortee la serie de WPM: el rango del perfil entra
@@ -2273,6 +2291,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.stickers.enabled = prefs.stickers;
     CONFIG.guard.enabled = prefs.guard;
     CONFIG.queue.backgroundFarm = prefs.backgroundFarm;
+    CONFIG.queue.keepAlive = prefs.keepAlive;
     CONFIG.useNitro = prefs.useNitro;
     CONFIG.nitroStrategy = prefs.nitroStrategy;
     CONFIG.challenges.enabled = prefs.challenges;
@@ -8103,6 +8122,10 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     try {
       while (!session.stopped) {
+        // Si el navegador suspendio el audio, el propio bucle de la carrera
+        // vuelve a intentar el resume; el keep-alive no depende solo del panel.
+        syncKeepAlive();
+
         // Tras una recarga con AUTO guardado, el tope ya alcanzado no debe
         // abrir una carrera mas. Si la tanda cerro por el tope, la cola ya
         // espero su respiro antes de abrir esta pagina: aqui empieza una tanda
@@ -8280,6 +8303,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       stickers: CONFIG.stickers.enabled !== false,
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
+      keepAlive: CONFIG.queue.keepAlive === true,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       customWpm: customWpm(),
@@ -8302,6 +8326,226 @@ All of this only aims at believable statistics. It is your call and your risk.
     return true;
   }
 
+  // Audio keep-alive opcional para AFK. Chrome exime del congelado profundo a
+  // las pestanas que estan reproduciendo audio; una fuente constante a un
+  // nivel casi inaudible mantiene la pagina despierta sin tono audible. No es
+  // una garantia: el usuario puede silenciar la pestana, el navegador puede
+  // bloquear el AudioContext antes del primer gesto o el sistema puede
+  // suspenderlo. Por eso el ajuste viene apagado y el estado se muestra tal
+  // cual, sin prometer que el freeze desaparece.
+  let keepAliveCtx = null;
+  let keepAliveSource = null;
+  let keepAliveGain = null;
+  let keepAliveMode = '';
+  let keepAliveError = '';
+  let keepAliveResumeAt = 0;
+  let keepAliveGestureBound = false;
+
+  function keepAliveSupported() {
+    return typeof window.AudioContext === 'function'
+      || typeof window.webkitAudioContext === 'function';
+  }
+
+  function keepAliveInfo() {
+    const enabled = CONFIG.queue.keepAlive === true;
+    if (!enabled) {
+      return {
+        enabled: false,
+        label: 'off',
+        title: 'Optional silent audio that can keep a hidden AFK tab awake. It is off by default and only starts after a click, because browsers require a user gesture for audio.',
+      };
+    }
+    if (!backgroundFarm()) {
+      return {
+        enabled: true,
+        label: 'waiting',
+        title: 'On, but AFK farming is off. Turn AFK farming on and the silent keep-alive starts with it.',
+      };
+    }
+    if (!keepAliveSupported()) {
+      return {
+        enabled: true,
+        label: 'n/a',
+        title: 'This browser has no AudioContext, so the silent keep-alive cannot run.',
+      };
+    }
+    if (!keepAliveCtx) {
+      return {
+        enabled: true,
+        label: 'ready',
+        title: 'Ready: click anywhere once to unlock audio. It only runs while AFK farming is on and is near-silent by design.',
+      };
+    }
+    const state = keepAliveCtx.state;
+    if (state === 'running') {
+      return {
+        enabled: true,
+        label: 'on',
+        title: 'On: near-silent audio is playing so Chrome treats this tab as active. Muting the tab or the system can still let it freeze.',
+      };
+    }
+    if (state === 'suspended' || state === 'interrupted') {
+      return {
+        enabled: true,
+        label: 'blocked',
+        title: `Audio is ${state}; click anywhere in the page once to unlock it. The keep-alive cannot promise to prevent a freeze until it reads “on”.`,
+      };
+    }
+    return {
+      enabled: true,
+      label: 'off',
+      title: `AudioContext is ${state || 'closed'}; it will be recreated on the next click if AFK farming is on.`,
+    };
+  }
+
+  function keepAliveDebug() {
+    return {
+      enabled: CONFIG.queue.keepAlive === true,
+      afk: backgroundFarm(),
+      supported: keepAliveSupported(),
+      state: keepAliveCtx ? keepAliveCtx.state : 'none',
+      running: Boolean(keepAliveCtx && keepAliveCtx.state === 'running'),
+      mode: keepAliveMode,
+      gain: keepAliveGain ? keepAliveGain.gain.value : null,
+      error: keepAliveError,
+      label: keepAliveInfo().label,
+    };
+  }
+
+  function bindKeepAliveGesture() {
+    if (keepAliveGestureBound) return;
+    keepAliveGestureBound = true;
+    const unlock = () => {
+      if (CONFIG.queue.keepAlive !== true || !backgroundFarm()) return;
+      primeKeepAlive();
+      syncKeepAlive();
+    };
+    try {
+      addEventListener('pointerdown', unlock, true);
+      addEventListener('keydown', unlock, true);
+      addEventListener('touchstart', unlock, { capture: true, passive: true });
+    } catch { /* navegador sin eventos */ }
+  }
+
+  function primeKeepAlive() {
+    if (!keepAliveSupported()) return false;
+    if (keepAliveCtx && keepAliveCtx.state === 'closed') {
+      keepAliveCtx = null;
+      keepAliveSource = null;
+      keepAliveGain = null;
+      keepAliveMode = '';
+    }
+    if (!keepAliveCtx) {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new Ctx();
+        const gain = ctx.createGain();
+        // El mismo nivel que usan los keep-alive silenciosos conocidos: un DC
+        // constante a 0.001 no produce tono audible, pero el navegador ve
+        // actividad de audio.
+        gain.gain.value = 0.001;
+        let source;
+        if (typeof ctx.createConstantSource === 'function') {
+          source = ctx.createConstantSource();
+          keepAliveMode = 'constant';
+        } else {
+          source = ctx.createOscillator();
+          source.frequency.value = 20;
+          keepAliveMode = 'oscillator';
+        }
+        source.connect(gain);
+        gain.connect(ctx.destination);
+        source.start();
+        keepAliveCtx = ctx;
+        keepAliveSource = source;
+        keepAliveGain = gain;
+        keepAliveError = '';
+        ctx.onstatechange = () => {
+          if (!CONFIG.queue.keepAlive) return;
+          if (ctx.state === 'suspended') keepAliveResumeAt = 0;
+          if (typeof paintConfig === 'function') paintConfig();
+          if (panel.refs && typeof updatePanel === 'function') updatePanel();
+        };
+      } catch (error) {
+        keepAliveError = error && error.message ? error.message : 'AudioContext failed';
+        keepAliveCtx = null;
+        keepAliveSource = null;
+        keepAliveGain = null;
+        keepAliveMode = '';
+        return false;
+      }
+    }
+
+    bindKeepAliveGesture();
+    if (keepAliveCtx.state === 'suspended' || keepAliveCtx.state === 'interrupted') {
+      const now = Date.now();
+      if (now - keepAliveResumeAt > 5000) {
+        keepAliveResumeAt = now;
+        try {
+          const resumed = keepAliveCtx.resume();
+          if (resumed && typeof resumed.then === 'function') {
+            resumed.then(() => {
+              if (typeof paintConfig === 'function') paintConfig();
+            }).catch(() => { /* el proximo gesto lo reintenta */ });
+          }
+        } catch { /* sin gesto valido */ }
+      }
+    }
+    return keepAliveCtx.state === 'running';
+  }
+
+  function stopKeepAlive() {
+    if (keepAliveSource) {
+      try { keepAliveSource.stop(); } catch { /* ya parado */ }
+    }
+    if (keepAliveCtx) {
+      keepAliveCtx.onstatechange = null;
+      try {
+        const closed = keepAliveCtx.close();
+        if (closed && typeof closed.catch === 'function') closed.catch(() => {});
+      } catch { /* ya cerrado */ }
+    }
+    keepAliveCtx = null;
+    keepAliveSource = null;
+    keepAliveGain = null;
+    keepAliveMode = '';
+    keepAliveResumeAt = 0;
+  }
+
+  function syncKeepAlive() {
+    if (CONFIG.queue.keepAlive !== true || !backgroundFarm()) {
+      if (keepAliveCtx) stopKeepAlive();
+      return false;
+    }
+    // No se crea un AudioContext desde un latido: sin gesto quedaria suspendido
+    // y llenaria la consola de avisos. El primer clic lo crea y lo desbloquea.
+    bindKeepAliveGesture();
+    if (!keepAliveCtx) return false;
+    return primeKeepAlive();
+  }
+
+  function setKeepAlive(on, options = {}) {
+    const next = on === true;
+    if (CONFIG.queue.keepAlive === next) return false;
+
+    CONFIG.queue.keepAlive = next;
+    if (options.persist !== false) saveKeepAlivePref(next);
+    if (next) {
+      // El click del interruptor es el gesto que Chrome exige para el audio.
+      // Sin AFK no se crea: la opcion queda guardada y espera a que AFK se
+      // encienda.
+      if (backgroundFarm()) primeKeepAlive();
+      syncKeepAlive();
+    } else {
+      stopKeepAlive();
+    }
+    paintConfig();
+    log(next
+      ? 'AFK keep-alive: on. Near-silent audio can keep a hidden tab awake; browsers may still block or ignore it.'
+      : 'AFK keep-alive: off.');
+    return true;
+  }
+
   // AFK farming es el unico interruptor que puede provocar un DQ sin que el
   // bucle tenga un fallo: una pestana oculta puede congelarse y entonces no hay
   // teclas posibles. Por eso viene apagado y el aviso es explicito.
@@ -8311,6 +8555,11 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     CONFIG.queue.backgroundFarm = next;
     if (options.persist !== false) saveBackgroundFarmPref(next);
+    // El keep-alive solo tiene sentido con AFK: se arranca o se para en el
+    // mismo gesto, sin esperar al siguiente latido. Si el AudioContext estaba
+    // cerrado, el clic de AFK tambien sirve para crearlo.
+    if (next && CONFIG.queue.keepAlive === true) primeKeepAlive();
+    syncKeepAlive();
     paintConfig();
     log(next
       ? 'AFK farming: on. A hidden tab can be frozen by the browser and that race can end in a DQ.'
@@ -8442,24 +8691,45 @@ All of this only aims at believable statistics. It is your call and your risk.
     });
   } catch { /* almacenamiento bloqueado */ }
 
-  // AFK farming se cambia desde TUNE (iframe) o desde el boton del garaje
-  // (ventana superior). Sin este puente, CONFIG.queue.backgroundFarm se quedaba
-  // con el valor del arranque en la otra ventana y el interruptor parecia no
-  // hacer nada hasta recargar. El evento storage llega a la otra ventana y a
-  // otras pestanas del mismo perfil.
+  // AFK farming y su keep-alive se cambian desde TUNE (iframe) o desde el boton
+  // del garaje (ventana superior). Sin este puente, CONFIG.queue.backgroundFarm
+  // se quedaba con el valor del arranque en la otra ventana y el interruptor
+  // parecia no hacer nada hasta recargar. El evento storage llega a la otra
+  // ventana y a otras pestanas del mismo perfil.
   try {
     addEventListener('storage', (event) => {
       if (event.key !== KEYS.prefs || !event.newValue) return;
       let saved = null;
       try { saved = JSON.parse(event.newValue); } catch { return; }
-      if (!saved || typeof saved.backgroundFarm !== 'boolean') return;
-      const next = saved.backgroundFarm === true;
-      if (next === backgroundFarm()) return;
+      if (!saved) return;
 
-      CONFIG.queue.backgroundFarm = next;
-      log(next
-        ? 'AFK farming: on (other panel). Hiding this tab keeps the queue running.'
-        : 'AFK farming: off (other panel). New races only start while this tab is visible.');
+      const hasFarm = typeof saved.backgroundFarm === 'boolean';
+      const hasKeepAlive = typeof saved.keepAlive === 'boolean';
+      if (!hasFarm && !hasKeepAlive) return;
+
+      let changed = false;
+      if (hasFarm) {
+        const next = saved.backgroundFarm === true;
+        if (next !== backgroundFarm()) {
+          CONFIG.queue.backgroundFarm = next;
+          changed = true;
+          log(next
+            ? 'AFK farming: on (other panel). Hiding this tab keeps the queue running.'
+            : 'AFK farming: off (other panel). New races only start while this tab is visible.');
+        }
+      }
+      if (hasKeepAlive) {
+        const next = saved.keepAlive === true;
+        if (next !== (CONFIG.queue.keepAlive === true)) {
+          CONFIG.queue.keepAlive = next;
+          changed = true;
+          log(next
+            ? 'AFK keep-alive: on (other panel).'
+            : 'AFK keep-alive: off (other panel).');
+        }
+      }
+      if (!changed) return;
+      syncKeepAlive();
       if (typeof paintConfig === 'function') paintConfig();
       if (panel.refs) updatePanel();
     });
@@ -8616,9 +8886,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       stickers: CONFIG.stickers.enabled !== false,
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
+      keepAlive: CONFIG.queue.keepAlive === true,
       useNitro: CONFIG.useNitro !== false,
       sound: sfxOn === true,
     };
+    const keepAlive = keepAliveInfo();
 
     for (const button of panel.refs.cfg.querySelectorAll('[data-toggle]')) {
       const key = button.dataset.toggle;
@@ -8629,8 +8901,17 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       const label = panel.refs.cfg.querySelector(`[data-sw-txt="${key}"]`);
       if (label) {
-        setText(label, on ? 'on' : 'off');
+        // El keep-alive tiene estados reales (`ready`, `blocked`): el texto no
+        // puede decir "on" si el audio sigue suspendido.
+        const text = key === 'keepAlive' ? keepAlive.label : (on ? 'on' : 'off');
+        setText(label, text);
         if (label.dataset.on !== value) label.dataset.on = value;
+        if (label.dataset.state !== text) label.dataset.state = text;
+      }
+      if (key === 'keepAlive') {
+        button.title = keepAlive.title;
+        button.dataset.state = keepAlive.label;
+        if (label) label.title = keepAlive.title;
       }
     }
 
@@ -8988,6 +9269,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.setAutoNitro = (on) => setUseNitro(Boolean(on));
   window.__ntaDebug.backgroundFarm = () => backgroundFarm();
   window.__ntaDebug.setBackgroundFarm = (on) => setBackgroundFarm(Boolean(on));
+  window.__ntaDebug.keepAlive = () => keepAliveDebug();
+  window.__ntaDebug.setKeepAlive = (on) => setKeepAlive(Boolean(on));
   window.__ntaDebug.nitroStrategy = () => CONFIG.nitroStrategy;
   window.__ntaDebug.setNitroStrategy = (value) => setNitroStrategy(String(value || ''));
   window.__ntaDebug.useNitro = (app) => useNitro(app);
@@ -9784,6 +10067,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (typeof data.backgroundFarm === 'boolean') {
       setBackgroundFarm(data.backgroundFarm, { persist: false });
       done.push(`AFK farming ${data.backgroundFarm ? 'on' : 'off'}`);
+    }
+
+    if (typeof data.keepAlive === 'boolean') {
+      setKeepAlive(data.keepAlive, { persist: false });
+      done.push(`AFK keep-alive ${data.keepAlive ? 'on' : 'off'}`);
     }
 
     if (typeof data.useNitro === 'boolean') {
@@ -10585,6 +10873,9 @@ All of this only aims at believable statistics. It is your call and your risk.
         .set-val { display: inline-flex; align-items: center; gap: 8px; }
         .set-val b { font: 600 9px/1 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
         .set-val b[data-on="1"] { color: var(--acc); }
+        .set-val b[data-state="blocked"] { color: var(--warn); }
+        .set-val b[data-state="ready"], .set-val b[data-state="waiting"] { color: var(--dim); }
+        .set-val b[data-state="n/a"] { color: var(--warn); }
         .set-val b[data-field="nitroPreview"] { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; color: var(--ink); }
         .set-val b[data-field="nitroPreview"][data-good="1"] { color: var(--acc); }
         .set-val b[data-field="nitroPreview"][data-good="0"] { color: var(--warn); }
@@ -11134,6 +11425,10 @@ All of this only aims at believable statistics. It is your call and your risk.
                   <div class="set-row">
                     <span class="set-lbl">AFK farming<i>race while this tab is hidden</i></span>
                     <span class="set-val"><b data-sw-txt="backgroundFarm" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="backgroundFarm" data-on="0" title="Off by default. Chrome can freeze a hidden tab, and a race with no keys ends in a disqualification. Turn it on only if you accept that risk."></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK keep-alive<i>near-silent audio holds the tab</i></span>
+                    <span class="set-val"><b data-sw-txt="keepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="keepAlive" data-on="0" title="Optional and off by default. Near-silent audio makes Chrome treat this tab as active while AFK farming is on. It needs one click to unlock audio and cannot guarantee that the tab will not freeze. Muting the tab can disable it."></button></span>
                   </div>
                   <div class="set-row">
                     <span class="set-lbl">Auto nitro<i>skips one long word per race</i></span>
@@ -11912,6 +12207,8 @@ All of this only aims at believable statistics. It is your call and your risk.
           setUseNitro(CONFIG.useNitro === false);
         } else if (chip.dataset.toggle === 'backgroundFarm') {
           setBackgroundFarm(CONFIG.queue.backgroundFarm !== true);
+        } else if (chip.dataset.toggle === 'keepAlive') {
+          setKeepAlive(CONFIG.queue.keepAlive !== true);
         } else if (chip.dataset.toggle === 'sound') {
           // El click ya es gesto valido para el audio: al encenderlo suena.
           setSfx(!sfxOn);
@@ -16813,14 +17110,20 @@ All of this only aims at believable statistics. It is your call and your risk.
       const key = event.key;
       if (!key || !event.newValue) return;
       if (key === KEYS.prefs) {
-        // El cambio de AFK llega desde el iframe u otra pestana. El listener
-        // principal ya actualizo CONFIG; aqui se repinta el garaje y, si la
-        // pestana esta oculta, se arranca el latido por Worker sin esperar al
-        // setInterval frenado.
+        // El cambio de AFK/keep-alive llega desde el iframe u otra pestana. El
+        // listener principal ya actualizo CONFIG; aqui se repinta el garaje y,
+        // si la pestana esta oculta, se arranca el latido por Worker sin esperar
+        // al setInterval frenado.
         let saved = null;
         try { saved = JSON.parse(event.newValue); } catch { return; }
-        if (saved && typeof saved.backgroundFarm === 'boolean') {
+        if (saved && (typeof saved.backgroundFarm === 'boolean' || typeof saved.keepAlive === 'boolean')) {
           paintGaragePanel();
+          syncKeepAlive();
+          // La ventana superior sobrevive a las recargas del iframe de carrera:
+          // si ya tenia activacion por un clic anterior, su AudioContext es el
+          // que mantiene la pestana despierta cuando el marco se recarga. Sin
+          // activacion queda suspendido y el siguiente clic lo desbloquea.
+          if (CONFIG.queue.keepAlive === true && backgroundFarm()) primeKeepAlive();
           if (saved.backgroundFarm && document.visibilityState === 'hidden') loop();
         }
         return;
@@ -18417,6 +18720,9 @@ All of this only aims at believable statistics. It is your call and your risk.
         onNavigate();
         syncGaragePanel();
         tick();
+        // Si AFK y el keep-alive estan encendidos, se reintenta el audio
+        // suspendido sin esperar a otro clic; el throttle interno evita spam.
+        syncKeepAlive();
       } catch (error) {
         queueLog('Queue tick failed; retrying on the next beat.', error);
       }
@@ -19466,6 +19772,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     // mitades del script lo necesitan para saber cuantas copias hay y cual manda.
     guardId = INSTANCE_ID;
     guardSince = Date.now();
+
+    // El keep-alive es opt-in: si estaba activado en la sesion anterior, se
+    // intenta arrancar ya. Sin gesto el AudioContext queda suspendido y el
+    // primer clic (capturado por bindKeepAliveGesture) lo desbloquea.
+    syncKeepAlive();
 
     // El turno se renueva tambien por el reloj Worker, no solo por el latido del
     // panel: oculta, la pestaña sigue farmeando y el lease no puede caducar.
