@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.40 — 2026-11-16
+
+- feat: show account health and retry failed stats reads
+
 ## 8.14.39 — 2026-11-16
 
 - fix: read the full account before the first race after a switch
