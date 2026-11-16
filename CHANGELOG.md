@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.44 — 2026-11-16
+
+- feat: hold races while offline and keep the queue tick alive
+
 ## 8.14.43 — 2026-11-16
 
 - feat: sync AFK farming between the race panel and garage
