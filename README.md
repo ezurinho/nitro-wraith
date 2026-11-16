@@ -52,7 +52,7 @@ The panel exists so you can see which reason that is.
 | Area | Behaviour |
 | --- | --- |
 | **Race loop** | Opens the next race from the garage or results screen with a human delay. After a disqualification it goes to Garage, not Try Again. |
-| **Typing** | Reads the account's average and top WPM, anchors to the lifetime average when available, then races around it under a hard 120 WPM ceiling. A 30 WPM account stays near 30; a 43 WPM account stays near 43. Accuracy stays at the 96% reward floor or above. |
+| **Typing** | Reads the account's average and top WPM, anchors to the lifetime average when available, then races around it under a hard 120 WPM ceiling. Automatic calibration only moves the target up, and a collapsed short average uses the account top as a recovery floor instead of dragging the bot down. A 30 WPM account stays near 30; a 43 WPM account stays near 43. Accuracy stays at the 96% reward floor or above. |
 | **Rewards** | Claims the Mystery Box, closes daily challenges and uses stickers when the settings allow it. |
 | **Session care** | Renews the session when needed. Usernames, passwords and CAPTCHAs stay manual. |
 | **Limits** | Session races, time, XP, active hours and daily race/XP budgets. |
@@ -64,7 +64,7 @@ multiple accounts. Those are boundaries, not missing features.
 ## The panel
 
 <p align="center">
-  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: 107.0 WPM, 98.7% accuracy, an AUTO pace badge with 110 average and 230 top, season progress and session controls">
+  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: 107.0 WPM, 98.7% accuracy, an AUTO pace badge with 110 target and 230 top, season progress and session controls">
 </p>
 
 <p align="center"><sub>A browser-harness capture with seeded demo values. The panel sits in the bottom-right corner of the game.</sub></p>
@@ -83,17 +83,30 @@ is still one click away. If the button is absent, the installed copy is current.
 
 The first start reads the average and top WPM already stored on the account;
 the stats API refreshes them every 30 minutes. Auto-calibration stays on, and
-clicking the `auto` row only forces a fresh read. The target is the average,
-not the top, so a 30 WPM account gets a 26–34 WPM range and a 43 WPM account
-gets 37–49. No generic 100+ WPM default.
+clicking the `auto` row only forces a fresh read. The target is the account
+average, not the top, so a 30 WPM account gets a 26–34 WPM range, a 43 WPM
+account gets 37–49, and no generic 100+ WPM default is applied.
 
 The profile average is a short rolling window, so a slow streak can drag it
-down. When the stats API exposes the monthly totals, the script anchors the
-target to the higher lifetime average and never calibrates below it. The recent
-profile average still appears in the panel; it just cannot pull the bot into a
-self-reinforcing slow loop. The calibration report also shows how many monthly
-rows and API pages were used; if a page fails, the last complete snapshot is
-kept so a partial history cannot lower the target.
+down. Two rules stop that from becoming a self-reinforcing slow loop:
+
+- **Automatic calibration only moves up.** A lower average can never replace a
+  higher target that is already saved; only the custom override can lower it.
+- **The top acts as a recovery floor.** If the short average collapses while the
+  account top is still much higher, the target uses `min(110, round(top × 0.48))`.
+  A 30 WPM average with a 230 top therefore recovers to about 110 WPM instead of
+  racing at 30; a beginner with a 50 top is left alone.
+
+When the stats API exposes the monthly totals, the script anchors the target to
+the higher lifetime average as well. The recent profile average still appears
+in the panel; it just cannot pull the bot down. The calibration report also
+shows how many monthly rows and API pages were used; if a page fails, the last
+complete snapshot is kept so a partial history cannot lower the target.
+
+`TUNE` also has optional **custom WPM** and **custom accuracy** fields. Leave
+them empty for automatic calibration, or set a number to override it: WPM
+15–119 and accuracy 96–100. The override is saved, exported and imported with
+the rest of the configuration.
 
 ### Six themes
 

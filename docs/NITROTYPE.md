@@ -11,6 +11,17 @@ does not try to beat the game's limits; it tries to stay inside them.
 - The stats API's monthly totals cover a much longer history. The script uses the
   higher lifetime average as an anchor when those totals are available; this
   keeps its own low races from dragging the target downward.
+- Automatic calibration is a ratchet: a new average can raise the target but can
+  never lower one that is already saved. Only the custom WPM override may lower
+  it. This prevents a slow streak from becoming a permanent slow profile.
+- When the short average collapses relative to the account top, the recovery
+  floor is `min(110, round(top × 0.48))`, provided the top is at least 80 WPM
+  and at least 1.8× the average. A 38 WPM / 230 top account recovers around
+  110 WPM instead of staying at 38. Beginner accounts with a low top do not
+  trigger the floor.
+- `TUNE` exposes custom WPM (15–119) and custom accuracy (96–100). Empty means
+  automatic; a value overrides auto calibration and is persisted with the
+  exported configuration.
 - A monthly snapshot is cached for 24 hours. If a page fails after that, the last
   complete snapshot is reused and marked as stale; a partial page is never used
   to lower the target.

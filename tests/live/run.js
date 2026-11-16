@@ -2476,7 +2476,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('auto pace cannot be switched off from the panel',
     calibration.auto === true && calibration.autoText === 'on', calibration);
   check('Live shows the auto pace and the account top WPM',
-    calibration.paceSource === 'auto · 112 avg · 230 top', calibration.paceSource);
+    calibration.paceSource === 'auto · 112 target · 230 top', calibration.paceSource);
 
   // La media corta del perfil puede caer porque las propias carreras del bot
   // son lentas. La media mensual de toda la cuenta tiene que mandar cuando es
@@ -2527,7 +2527,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('the lifetime average prevents a low recent profile from dragging the target down',
     lifetimeCalibration.range === '113-120'
       && lifetimeCalibration.account === '120.0 WPM · 98.7%'
-      && lifetimeCalibration.paceSource === 'auto · 120 avg · 230 top'
+      && lifetimeCalibration.paceSource === 'auto · 120 target · 230 top'
       && lifetimeCalibration.stored && lifetimeCalibration.stored.min === 113
       && lifetimeCalibration.stored.max === 120
       && lifetimeCalibration.accountInfo && lifetimeCalibration.accountInfo.lifetime
@@ -2539,6 +2539,56 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && lifetimeCalibration.report.calibration.lifetime.months === 1
       && lifetimeCalibration.report.calibration.lifetime.pages === 1,
     lifetimeCalibration);
+
+  // Overrides manuales: se aplican al instante, se guardan y al vaciarlos
+  // vuelven al objetivo automatico. Se prueban por el mismo `change` que usa
+  // el usuario, no llamando al hook interno.
+  const customPace = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const wpmInput = shadow.querySelector('[data-field="customWpm"]');
+    const accInput = shadow.querySelector('[data-field="customAcc"]');
+    const set = (input, value) => {
+      input.value = value;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const read = () => ({
+      range: shadow.querySelector('[data-field="calWpm"]').textContent,
+      acc: shadow.querySelector('[data-field="calAcc"]').textContent,
+      paceSource: shadow.querySelector('[data-field="paceSource"]').textContent,
+      auto: w.__ntaDebug.autoPace(),
+      stored: JSON.parse(w.localStorage.getItem('autoTyperPrefs') || '{}'),
+    });
+    set(wpmInput, '118');
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const wpm = read();
+    set(accInput, '100');
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const both = read();
+    set(wpmInput, '');
+    set(accInput, '');
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const cleared = read();
+    return { wpm, both, cleared, values: { wpm: wpmInput.value, acc: accInput.value } };
+  })()`, true);
+  check('custom WPM overrides the automatic target and persists',
+    customPace.wpm.range === '112-120'
+      && customPace.wpm.auto.custom.wpm === 118
+      && customPace.wpm.stored.customWpm === 118
+      && /manual · 118 wpm/.test(customPace.wpm.paceSource),
+    customPace.wpm);
+  check('custom accuracy overrides the automatic range and persists',
+    customPace.both.acc === '99-100%'
+      && customPace.both.auto.custom.accuracy === 100
+      && customPace.both.stored.customAccuracy === 100,
+    customPace.both);
+  check('clearing both custom values returns to automatic calibration',
+    customPace.cleared.range === '113-120'
+      && customPace.cleared.acc === '98-99%'
+      && customPace.cleared.auto.custom.wpm === 0
+      && customPace.cleared.auto.custom.accuracy === 0
+      && customPace.values.wpm === '' && customPace.values.acc === '',
+    customPace.cleared);
 
   // Si el historico falla despues de 24 h, la ultima foto buena sigue siendo
   // valida: el objetivo no puede volver a la media corta y empezar a bajar.
@@ -2603,9 +2653,31 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('the target range still wraps a 112 WPM account',
     paceMath.high && paceMath.high.min === 106 && paceMath.high.max === 118, paceMath.high);
 
-  // Respaldo: si el API responde 200 sin medias (solo contadores), la media
-  // sale de `persist:nt`, que es lo que el garaje pinta en el perfil. La fila
-  // auto solo adelanta la lectura; no cambia el modo.
+  // La media corta puede estar en 38 mientras el top sigue en 230. El suelo de
+  // recuperacion usa el top solo cuando la diferencia es grande y creible; una
+  // cuenta principiante con top 50 no se dispara.
+  const recoveryPace = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    return {
+      collapsed: d.paceCenter({ wpm: 38, currentWpm: 38, bestWpm: 230 }),
+      beginner: d.paceCenter({ wpm: 30, bestWpm: 50 }),
+      normal: d.paceCenter({ wpm: 110, bestWpm: 230 }),
+    };
+  })()`);
+  check('the top sets a recovery floor when the short average collapses',
+    recoveryPace.collapsed.center === 110 && recoveryPace.collapsed.floor === 110,
+    recoveryPace.collapsed);
+  check('a beginner top does not trigger the recovery floor',
+    recoveryPace.beginner.center === 30 && recoveryPace.beginner.floor === 0,
+    recoveryPace.beginner);
+  check('a healthy average already above the floor is unchanged',
+    recoveryPace.normal.center === 110 && recoveryPace.normal.floor === 110,
+    recoveryPace.normal);
+
+  // Respaldo y trinquete: si el API responde 200 sin medias (solo contadores),
+  // la media sale de `persist:nt`, pero una media corta de 108.2 no puede bajar
+  // el objetivo que ya estaba en 113-120. La fila auto solo adelanta la lectura;
+  // no cambia el modo.
   const persisted = await cdp.evaluate(`(async () => {
     const w = document.querySelector('iframe').contentWindow;
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
@@ -2638,21 +2710,28 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       w.localStorage.removeItem('persist:nt');
     }
   })()`, true);
-  check('calibration falls back to persist:nt when the API has no averages',
-    persisted.range === '102-114' && persisted.acc === '96-98%'
-      && persisted.stored && persisted.stored.min === 102 && persisted.stored.max === 114
-      && persisted.storedAcc && persisted.storedAcc.min === 96 && persisted.storedAcc.max === 98,
+  check('a lower profile average cannot pull an established target down',
+    persisted.range === '113-120' && persisted.acc === '98-99%'
+      && persisted.stored && persisted.stored.min === 113 && persisted.stored.max === 120
+      && persisted.storedAcc && persisted.storedAcc.min === 98 && persisted.storedAcc.max === 99,
     persisted);
 
   const accuracy = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     const series = JSON.parse(w.localStorage.getItem('dynamicAccuracies') || '[]');
-    return series.length ? { min: Math.min(...series), max: Math.max(...series) } : { min: null, max: null };
+    const range = JSON.parse(w.localStorage.getItem('autoTyperCalibratedAccuracy') || 'null');
+    return {
+      min: series.length ? Math.min(...series) : null,
+      max: series.length ? Math.max(...series) : null,
+      range,
+    };
   })()`);
-  // La serie se muestrea dentro del rango: pedir que toque los dos extremos
-  // exactos hacia fallar cuando la muestra caia toda en 96-97.
+  // La serie se muestrea dentro del rango activo; el rango puede haber subido
+  // por el trinquete, asi que la prueba lee el rango guardado en vez de fijar
+  // el 96-98 viejo.
   check('accuracy series stays inside the calibrated range',
-    accuracy.min >= 96 && accuracy.max <= 98, accuracy);
+    accuracy.range && accuracy.min >= accuracy.range.min && accuracy.max <= accuracy.range.max,
+    accuracy);
 
   // Progreso de challenges: se siembra persist:nt y NTGLOBALS como los deja el
   // juego y se espera a que expire la cache de 5 s.
@@ -2760,9 +2839,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
 
   // Aviso de calibracion a mitad de sesion: se restaura una tanda de 14
   // carreras y se fuerza una calibracion que mueve el rango (120 -> 113-120).
-  // El aviso tiene que quedar en el anillo de LOG, que es donde se ve.
+  // El aviso tiene que quedar en el anillo de LOG, que es donde se ve. Se parte
+  // de un rango mas bajo para que el trinquete no bloquee el movimiento.
   await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
+    w.localStorage.setItem('autoTyperCalibratedRange', JSON.stringify({ min: 100, max: 112, center: 106 }));
+    w.localStorage.setItem('autoTyperCalibratedAccuracy', JSON.stringify({ min: 96, max: 96, center: 96 }));
     w.localStorage.setItem('autoTyperSessionCounters', JSON.stringify({
       races: 14,
       sumRaces: 14,

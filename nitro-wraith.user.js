@@ -461,6 +461,15 @@ All of this only aims at believable statistics. It is your call and your risk.
       halfWidth: 6,          // ancho maximo del rango; con 43 WPM da 37-49
       minWpm: 15,            // cuentas principiantes tambien son validas
       timeoutMs: 8000,
+      // Un override manual manda sobre la media. 0 = automatico.
+      customWpm: 0,
+      customAccuracy: 0,
+      // Si la media se hundio pero el top sigue alto, el objetivo no se queda
+      // en la media hundida: se usa un suelo de recuperacion proporcional al
+      // top. Solo entra cuando hay una diferencia grande y creible.
+      recoveryTopRatio: 0.48,
+      recoveryTopMin: 80,
+      recoveryTopCap: 110,
     },
 
     // Popup de Daily Challenge completado: si nadie lo cierra se queda encima
@@ -1946,7 +1955,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     try {
       const raw = JSON.parse(disk.get(KEYS.calibratedRange, 'null'));
       if (raw && Number.isFinite(raw.min) && Number.isFinite(raw.max)) {
-        return { min: Math.round(raw.min), max: Math.round(raw.max) };
+        const min = Math.round(raw.min);
+        const max = Math.round(raw.max);
+        const center = Number(raw.center);
+        return {
+          min,
+          max,
+          center: Number.isFinite(center) ? Math.round(center) : Math.round((min + max) / 2),
+        };
       }
     } catch { /* preferencia corrupta: se ignora */ }
     return null;
@@ -1960,7 +1976,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     try {
       const raw = JSON.parse(disk.get(KEYS.calibratedAccuracy, 'null'));
       if (raw && Number.isFinite(raw.min) && Number.isFinite(raw.max)) {
-        return { min: Math.round(raw.min), max: Math.round(raw.max) };
+        const min = Math.round(raw.min);
+        const max = Math.round(raw.max);
+        const center = Number(raw.center);
+        return {
+          min,
+          max,
+          center: Number.isFinite(center) ? Math.round(center) : Math.round((min + max) / 2),
+        };
       }
     } catch { /* preferencia corrupta: se ignora */ }
     return null;
@@ -1985,7 +2008,85 @@ All of this only aims at believable statistics. It is your call and your risk.
       min = clamp(Math.floor(middle - 3), floor, cap);
       max = clamp(min + 6, floor, cap);
     }
-    return { min, max };
+    return { min, max, center };
+  }
+
+  // El `avgSpeed` del perfil es una ventana corta. Cuando el bot ha corrido
+  // por debajo, esa ventana se queda en 30-40 aunque el top siga en 230. Un
+  // objetivo que solo mire esa media se retroalimenta: cada carrera baja la
+  // media y la media baja el objetivo. Este suelo compara ambos numeros y solo
+  // entra cuando el top demuestra una capacidad muy superior a la media.
+  function recoveryPaceFloor(average, top) {
+    const avg = Number(average);
+    const best = Number(top);
+    const minTop = Number(CONFIG.calibration.recoveryTopMin) || 80;
+    if (!Number.isFinite(avg) || avg <= 0 || !Number.isFinite(best) || best < minTop) return 0;
+    if (best < avg * 1.8) return 0;
+    const ratio = Number(CONFIG.calibration.recoveryTopRatio) || 0.48;
+    const cap = Number(CONFIG.calibration.recoveryTopCap) || 110;
+    return Math.min(cap, Math.round(best * ratio));
+  }
+
+  // La media que de verdad puede sostener el bot: reciente e historica, con
+  // el suelo de recuperacion del top. No incluye el override manual; ese se
+  // aplica antes y no se mezcla con la calibracion automatica.
+  function effectivePaceCenter(stats) {
+    const values = [
+      stats && stats.wpm,
+      stats && stats.currentWpm,
+      stats && stats.lifetimeWpm,
+    ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
+    const average = values.length ? Math.max(...values) : 0;
+    const floor = recoveryPaceFloor(average, stats && stats.bestWpm);
+    return { average, center: Math.max(average, floor), floor };
+  }
+
+  // El suelo del top solo puede subir el objetivo. Para bajarlo esta el custom
+  // o el reset explicito: asi una media corta nunca arrastra la calibracion.
+  function applyCalibratedRange(value, options = {}) {
+    const range = wpmRangeFor(value);
+    if (!range) return { applied: false, range: calibratedRange, blocked: false };
+    const previous = calibratedRange && Number.isFinite(calibratedRange.center)
+      ? calibratedRange.center : null;
+    if (options.allowLower !== true && previous !== null && range.center < previous - 0.5) {
+      return { applied: false, range: calibratedRange, blocked: true };
+    }
+    calibratedRange = range;
+    disk.set(KEYS.calibratedRange, JSON.stringify(range));
+    return { applied: true, range, blocked: false };
+  }
+
+  function accuracyRangeFor(value, maxCenter = 100) {
+    const raw = Number(value);
+    if (!Number.isFinite(raw) || raw < 96) return null;
+    const top = clamp(Math.round(maxCenter), 96, 100);
+    const center = clamp(Math.round(raw), 96, top);
+    return { min: Math.max(96, center - 1), max: Math.min(top, center + 1), center };
+  }
+
+  function applyCalibratedAccuracy(value, options = {}) {
+    const range = accuracyRangeFor(value, options.maxCenter);
+    if (!range) return { applied: false, range: calibratedAccuracy, blocked: false };
+    const previous = calibratedAccuracy && Number.isFinite(calibratedAccuracy.center)
+      ? calibratedAccuracy.center : null;
+    if (options.allowLower !== true && previous !== null && range.center < previous - 0.5) {
+      return { applied: false, range: calibratedAccuracy, blocked: true };
+    }
+    calibratedAccuracy = range;
+    CONFIG.accuracy.min = range.min;
+    CONFIG.accuracy.max = range.max;
+    disk.set(KEYS.calibratedAccuracy, JSON.stringify(range));
+    return { applied: true, range, blocked: false };
+  }
+
+  function customWpm() {
+    const value = Number(CONFIG.calibration.customWpm);
+    return Number.isFinite(value) && value >= 15 ? clamp(Math.round(value), 15, 119) : 0;
+  }
+
+  function customAccuracy() {
+    const value = Number(CONFIG.calibration.customAccuracy);
+    return Number.isFinite(value) && value >= 96 ? clamp(Math.round(value), 96, 100) : 0;
   }
 
   function paceRange(name = paceProfile) {
@@ -2033,6 +2134,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       nitroStrategy: normalizeNitroStrategy(saved.nitroStrategy),
       challenges: flag('challenges'),
       calibration: true,
+      customWpm: Number.isFinite(Number(saved.customWpm)) && Number(saved.customWpm) >= 15
+        ? clamp(Math.round(Number(saved.customWpm)), 15, 119) : 0,
+      customAccuracy: Number.isFinite(Number(saved.customAccuracy)) && Number(saved.customAccuracy) >= 96
+        ? clamp(Math.round(Number(saved.customAccuracy)), 96, 100) : 0,
     };
   }
 
@@ -2046,6 +2151,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       challenges: CONFIG.challenges.enabled !== false,
       calibration: CONFIG.calibration.auto !== false,
+      customWpm: customWpm(),
+      customAccuracy: customAccuracy(),
     }));
   }
 
@@ -2064,28 +2171,27 @@ All of this only aims at believable statistics. It is your call and your risk.
     // de las estadisticas de la cuenta. Se ignora cualquier `false` viejo y se
     // conserva el interruptor guardado solo por compatibilidad.
     CONFIG.calibration.auto = true;
+    CONFIG.calibration.customWpm = prefs.customWpm;
+    CONFIG.calibration.customAccuracy = prefs.customAccuracy;
     CONFIG.challenges.selector = disk.get(KEYS.challengeSelector, '') || '';
 
     // Primera foto SIN esperar al fetch: el garaje ya dejo avgSpeed y
-    // highestSpeed en persist:nt. Asi el primer objetivo de una instalacion
-    // nueva ya sale de la media del jugador y nunca del 104-117 de respaldo.
+    // highestSpeed en persist:nt. El override manual manda; si no hay, la
+    // media corta solo puede subir el rango, nunca pisar uno mas alto. Antes
+    // esta linea sobreescribia 110-116 con un avgSpeed de 38 en cada recarga.
     if (CONFIG.calibration.auto) {
       const persisted = readPersistedUser();
-      const range = wpmRangeFor(persisted && persisted.wpm);
-      if (range) {
-        const savedCenter = calibratedRange
-          ? (calibratedRange.min + calibratedRange.max) / 2 : null;
-        // Si la media guardada se alejo de la cuenta (otra cuenta, o el
-        // jugador mejoro), se corrige ya; no se espera al refresco del API.
-        // Medio WPM basta: el rango se redondea a enteros y no queremos que una
-        // mejora real se quede congelada por una diferencia pequena.
-        if (!calibratedRange || Math.abs(savedCenter - persisted.wpm) >= 0.5) {
-          calibratedRange = range;
-          disk.set(KEYS.calibratedRange, JSON.stringify(range));
-        }
-        if (!accountStats) accountStats = persisted;
+      const manual = customWpm();
+      if (manual) {
+        applyCalibratedRange(manual, { allowLower: true });
+      } else if (persisted) {
+        const center = effectivePaceCenter(persisted).center;
+        if (center) applyCalibratedRange(center);
+        if (!accountStats) accountStats = { ...persisted, targetWpm: center || persisted.wpm };
       }
     }
+    const manualAccuracy = customAccuracy();
+    if (manualAccuracy) applyCalibratedAccuracy(manualAccuracy, { allowLower: true });
 
     const range = paceRange();
     CONFIG.wpm.min = range.min;
@@ -2137,7 +2243,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       return this.accuracy[this.accSession - 1];
     },
     get accuracyGoal() {
-      return this.targetAccuracy + CONFIG.accuracyBuffers[this.bufferSession - 1];
+      // Un custom de 100% no puede terminar en 100.7 por el buffer: el juego no
+      // permite pasar de 100 y el objetivo quedaria inalcanzable.
+      return Math.min(100, this.targetAccuracy + CONFIG.accuracyBuffers[this.bufferSession - 1]);
     },
   };
 
@@ -2186,6 +2294,63 @@ All of this only aims at believable statistics. It is your call and your risk.
       paintConfig();
       updatePanel();
     }
+    return true;
+  }
+
+  // Overrides manuales: 0/empty vuelve a automatico. Un valor manual si puede
+  // bajar el objetivo; la calibracion automatica no, para que una media corta
+  // no arrastre el ritmo hacia abajo.
+  function setCustomWpm(value, options = {}) {
+    const raw = Number(value);
+    const next = !Number.isFinite(raw) || raw <= 0 ? 0 : clamp(Math.round(raw), 15, 119);
+    if (next === customWpm()) return false;
+
+    CONFIG.calibration.customWpm = next;
+    if (options.persist !== false) savePrefs();
+    if (next) {
+      applyCalibratedRange(next, { allowLower: true });
+      setPaceProfile(paceProfile, { force: true });
+      log(`Custom WPM: ${next} target, range ${CONFIG.wpm.min}-${CONFIG.wpm.max}. Automatic calibration is overridden until you clear it.`);
+    } else {
+      const source = accountStats || readPersistedUser();
+      const center = effectivePaceCenter(source || {}).center;
+      if (center && applyCalibratedRange(center, { allowLower: true }).applied) {
+        setPaceProfile(paceProfile, { force: true });
+        log(`Custom WPM cleared; automatic target ${CONFIG.wpm.min}-${CONFIG.wpm.max} WPM.`);
+      } else {
+        log('Custom WPM cleared; keeping the current automatic range.');
+      }
+    }
+    paintConfig();
+    paintCalibration();
+    updatePanel();
+    return true;
+  }
+
+  function setCustomAccuracy(value, options = {}) {
+    const raw = Number(value);
+    const next = !Number.isFinite(raw) || raw <= 0 ? 0 : clamp(Math.round(raw), 96, 100);
+    if (next === customAccuracy()) return false;
+
+    CONFIG.calibration.customAccuracy = next;
+    if (options.persist !== false) savePrefs();
+    if (next) {
+      applyCalibratedAccuracy(next, { allowLower: true });
+      log(`Custom accuracy: ${next}% target, range ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%. Automatic calibration is overridden until you clear it.`);
+    } else {
+      const source = accountStats || readPersistedUser();
+      const accuracy = Number(source && source.accuracy);
+      if (Number.isFinite(accuracy) && accuracy >= 96) {
+        applyCalibratedAccuracy(accuracy, { allowLower: true, maxCenter: 99 });
+        log(`Custom accuracy cleared; automatic range ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
+      } else {
+        log('Custom accuracy cleared; keeping the current automatic range.');
+      }
+    }
+    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+    paintConfig();
+    paintCalibration();
+    updatePanel();
     return true;
   }
 
@@ -2400,16 +2565,37 @@ All of this only aims at believable statistics. It is your call and your risk.
       const wpm = Number(currentWpm) > 0 || Number(lifetimeWpm) > 0
         ? Math.max(Number(currentWpm) || 0, Number(lifetimeWpm) || 0)
         : null;
+      const pace = effectivePaceCenter({ wpm, currentWpm, lifetimeWpm, bestWpm });
+      const targetWpm = pace.center || wpm;
+      const recovery = {
+        average: pace.average || wpm || null,
+        top: Number(bestWpm) > 0 ? Number(bestWpm) : null,
+        floor: pace.floor || null,
+      };
 
-      if (wpm || accuracy) {
-        accountStats = { wpm, currentWpm, lifetimeWpm, lifetime, accuracy, bestWpm, races, source: 'api' };
-        return { wpm, currentWpm, lifetimeWpm, lifetime, accuracy, bestWpm, races, reason: null };
+      if (wpm || targetWpm || accuracy) {
+        accountStats = {
+          wpm, targetWpm, recovery, currentWpm, lifetimeWpm, lifetime,
+          accuracy, bestWpm, races, source: 'api',
+        };
+        return { ...accountStats, reason: null };
       }
 
       if (persisted && (persisted.wpm || persisted.accuracy)) {
+        const persistedCenter = effectivePaceCenter({
+          ...persisted,
+          currentWpm: persisted.wpm,
+          lifetimeWpm,
+        });
         accountStats = {
           ...persisted,
           wpm: Number(lifetimeWpm) > Number(persisted.wpm) ? lifetimeWpm : persisted.wpm,
+          targetWpm: persistedCenter.center || persisted.wpm,
+          recovery: {
+            average: persistedCenter.average || persisted.wpm || null,
+            top: persisted.bestWpm || null,
+            floor: persistedCenter.floor || null,
+          },
           currentWpm: persisted.wpm,
           lifetimeWpm,
           lifetime,
@@ -2417,7 +2603,18 @@ All of this only aims at believable statistics. It is your call and your risk.
         return { ...accountStats, reason: null };
       }
       if (lifetimeWpm) {
-        accountStats = { wpm: lifetimeWpm, currentWpm: null, lifetimeWpm, lifetime, accuracy: null, bestWpm, races, source: 'monthly' };
+        accountStats = {
+          wpm: lifetimeWpm,
+          targetWpm: lifetimeWpm,
+          recovery: { average: lifetimeWpm, top: Number(bestWpm) || null, floor: null },
+          currentWpm: null,
+          lifetimeWpm,
+          lifetime,
+          accuracy: null,
+          bestWpm,
+          races,
+          source: 'monthly',
+        };
         return { ...accountStats, reason: null };
       }
       return failed(response.ok ? 'no average in the response' : `HTTP ${response.status}`);
@@ -2429,48 +2626,66 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   // Coloca el centro del rango balanced en la media real de la cuenta. El
-  // ancho lo decide wpmRangeFor; el techo duro se aplica alli.
+  // ancho lo decide wpmRangeFor; el techo duro se aplica alli. La calibracion
+  // automatica solo sube: una media corta no puede borrar un objetivo alto.
   function applyCalibration(stats) {
     const beforeWpm = { min: CONFIG.wpm.min, max: CONFIG.wpm.max };
     const beforeAcc = { min: CONFIG.accuracy.min, max: CONFIG.accuracy.max };
+    const manualWpm = customWpm();
+    const manualAcc = customAccuracy();
+    const pace = effectivePaceCenter(stats || {});
+    const target = manualWpm || Number(stats && stats.targetWpm) || pace.center;
 
-    if (stats.wpm) {
-      const range = wpmRangeFor(stats.wpm);
-      if (range) {
-        calibratedRange = range;
-        disk.set(KEYS.calibratedRange, JSON.stringify(calibratedRange));
-        const top = Number(stats.bestWpm) > 0 ? ` (top ${Number(stats.bestWpm).toFixed(0)} WPM)` : '';
-        const recent = Number(stats.currentWpm);
-        const lifetime = Number(stats.lifetimeWpm);
-        const info = stats.lifetime;
-        const provenance = info && info.rows
-          ? `; ${info.rows} month${info.rows === 1 ? '' : 's'} / ${info.pages} page${info.pages === 1 ? '' : 's'}${info.stale ? ' cached' : ''}`
-          : '';
-        const source = lifetime > 0 && recent > 0 && lifetime > recent + 0.5
-          ? ` (lifetime ${lifetime.toFixed(1)}; recent profile ${recent.toFixed(1)}${provenance})`
-          : provenance ? ` (${provenance.slice(2)})` : '';
-        const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
-        log(`Pace auto-calibrated: account average ${Number(stats.wpm).toFixed(1)} WPM${source}${top}${count} -> ${range.min}-${range.max}.`);
+    if (target) {
+      const applied = applyCalibratedRange(target, { allowLower: manualWpm > 0 });
+      if (applied.range) {
+        const range = applied.range;
+        if (applied.applied) {
+          const top = Number(stats.bestWpm) > 0 ? `; top ${Number(stats.bestWpm).toFixed(0)} WPM` : '';
+          const recent = Number(stats.currentWpm) || 0;
+          const lifetime = Number(stats.lifetimeWpm) || 0;
+          const profileAverage = Number(stats.wpm) || Math.max(recent, lifetime) || 0;
+          const floor = Number(stats.recovery && stats.recovery.floor) || 0;
+          const info = stats.lifetime;
+          const provenance = info && info.rows
+            ? `; ${info.rows} month${info.rows === 1 ? '' : 's'} / ${info.pages} page${info.pages === 1 ? '' : 's'}${info.stale ? ' cached' : ''}`
+            : '';
+          const source = manualWpm
+            ? 'manual override'
+            : floor > profileAverage + 0.5
+              ? `recovery floor from the ${Number(stats.bestWpm).toFixed(0)} WPM top (short average ${profileAverage.toFixed(1)})`
+              : lifetime > recent + 0.5
+                ? `lifetime ${lifetime.toFixed(1)}; short profile ${recent.toFixed(1)}`
+                : 'account average';
+          const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
+          log(`Pace auto-calibrated: ${target.toFixed(1)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max}.`);
+        } else if (applied.blocked) {
+          log(`Pace kept at ${range.min}-${range.max}: the latest data would lower it to ${target.toFixed(1)} WPM. Use custom WPM or clear the override to reset it.`);
+        }
         setPaceProfile(paceProfile, { force: true });
       }
     }
 
-    if (stats.accuracy) {
+    if (manualAcc) {
+      const applied = applyCalibratedAccuracy(manualAcc, { allowLower: true });
+      if (applied.applied) {
+        profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+        log(`Accuracy set manually: ${manualAcc}% -> ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
+      }
+    } else if (stats.accuracy) {
       // 96% es el acantilado de la recompensa: por debajo se cobra $0. Se deja
       // un punto arriba y otro abajo de la media, sin llegar nunca al 100% (que
       // canta en una cuenta normal) ni bajar del suelo.
       if (stats.accuracy < 96) {
         log(`Accuracy calibration skipped: account average ${stats.accuracy.toFixed(1)}% is under the 96% reward floor; keeping ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
       } else {
-        const center = clamp(Math.round(stats.accuracy), 96, 99);
-        const min = Math.max(96, center - 1);
-        const max = Math.min(99, center + 1);
-        calibratedAccuracy = { min, max };
-        CONFIG.accuracy.min = min;
-        CONFIG.accuracy.max = max;
-        disk.set(KEYS.calibratedAccuracy, JSON.stringify(calibratedAccuracy));
-        profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, min, max);
-        log(`Accuracy auto-calibrated: account average ${stats.accuracy.toFixed(1)}% -> ${min}-${max}%.`);
+        const applied = applyCalibratedAccuracy(stats.accuracy, { maxCenter: 99 });
+        if (applied.applied) {
+          profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+          log(`Accuracy auto-calibrated: account average ${stats.accuracy.toFixed(1)}% -> ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
+        } else if (applied.blocked) {
+          log(`Accuracy kept at ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}: the latest average would lower it.`);
+        }
       }
     }
 
@@ -2558,30 +2773,41 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.calAccount, accountText);
 
     // La chapa de la vista Live: el usuario ve de donde sale su objetivo sin
-    // abrir TUNE. La media manda; el top se ensena como referencia.
+    // abrir TUNE. Se muestra el target, no la media corta que puede estar
+    // hundida; el tooltip explica ambos numeros y el suelo de recuperacion.
     if (panel.refs.paceSource) {
-      const average = accountStats && Number(accountStats.wpm) > 0
-        ? Math.round(Number(accountStats.wpm)) : null;
+      const manualWpm = customWpm();
+      const average = !manualWpm && accountStats && Number(accountStats.targetWpm) > 0
+        ? Math.round(Number(accountStats.targetWpm)) : null;
       const top = accountStats && Number(accountStats.bestWpm) > 0
         ? Math.round(Number(accountStats.bestWpm)) : null;
-      const label = average
-        ? `auto · ${average} avg${top ? ` · ${top} top` : ''}`
-        : calibratedRange
-          ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm`
-          : 'auto · reading account';
+      const label = manualWpm
+        ? `manual · ${manualWpm} wpm${customAccuracy() ? ` · ${customAccuracy()}% acc` : ''}`
+        : average
+          ? `auto · ${average} target${top ? ` · ${top} top` : ''}`
+          : calibratedRange
+            ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm`
+            : 'auto · reading account';
       setText(panel.refs.paceSource, label);
       const recent = accountStats && Number(accountStats.currentWpm) > 0
         ? Math.round(Number(accountStats.currentWpm)) : null;
       const lifetime = accountStats && Number(accountStats.lifetimeWpm) > 0
         ? Math.round(Number(accountStats.lifetimeWpm)) : null;
+      const profileAverage = accountStats && Number(accountStats.wpm) > 0
+        ? Math.round(Number(accountStats.wpm)) : null;
       const lifetimeInfo = accountStats && accountStats.lifetime;
       const provenance = lifetimeInfo && lifetimeInfo.rows
         ? ` ${lifetimeInfo.rows} month${lifetimeInfo.rows === 1 ? '' : 's'} across ${lifetimeInfo.pages} page${lifetimeInfo.pages === 1 ? '' : 's'}${lifetimeInfo.stale ? ' (cached fallback)' : ''}.`
         : '';
-      const source = lifetime && recent && lifetime > recent
-        ? ` The target is anchored to the lifetime monthly average${recent ? ` (${lifetime} WPM); the short profile window is ${recent} WPM` : ''}.${provenance}`
-        : provenance;
-      panel.refs.paceSource.title = `Pace target ${wpmText} WPM, centred on this account's average${top ? `; account top ${top} WPM` : ''}. Read automatically from the site profile and the stats API.${source}`;
+      const recovery = accountStats && accountStats.recovery;
+      const source = manualWpm
+        ? ' Custom WPM is active; clear it to return to automatic calibration.'
+        : recovery && recovery.floor && average && profileAverage && average > profileAverage
+          ? ` The short profile average is ${profileAverage} WPM, but the ${top} WPM top sets a ${average} WPM recovery floor.${provenance}`
+          : lifetime && recent && lifetime > recent
+            ? ` The target is anchored to the lifetime monthly average${recent ? ` (${lifetime} WPM); the short profile window is ${recent} WPM` : ''}.${provenance}`
+            : provenance;
+      panel.refs.paceSource.title = `Pace target ${wpmText} WPM${top ? `; account top ${top} WPM` : ''}. Automatic calibration only raises the target; a short average cannot lower it. Use custom WPM or custom accuracy in TUNE to override it.${source}`;
     }
 
     // La tarjeta de la vista LOG: cuando se leyo y que rango dejo. Se pinta
@@ -7703,6 +7929,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       guard: CONFIG.guard.enabled !== false,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
+      customWpm: customWpm(),
+      customAccuracy: customAccuracy(),
     };
   }
 
@@ -7963,6 +8191,18 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.tuneCap, Number.isFinite(CONFIG.wpm.hardCap) ? `≤ ${CONFIG.wpm.hardCap} wpm` : 'no cap');
     setText(panel.refs.tuneRange, `${tier.min}-${tier.max}`);
     setText(panel.refs.infoCap, String(CONFIG.wpm.hardCap));
+
+    // Los overrides manuales no se pisan mientras el usuario esta escribiendo.
+    const setNumberValue = (el, value) => {
+      if (!el || (el.ownerDocument && el.ownerDocument.activeElement === el)) return;
+      const next = Number(value) > 0 ? String(Math.round(Number(value))) : '';
+      if (el.value !== next) el.value = next;
+      el.title = next
+        ? `Manual override active: ${next}. Empty or 0 returns to automatic calibration.`
+        : 'Empty/auto: calibration comes from the account average, lifetime history and the top-based recovery floor.';
+    };
+    setNumberValue(panel.refs.customWpm, CONFIG.calibration.customWpm);
+    setNumberValue(panel.refs.customAcc, CONFIG.calibration.customAccuracy);
 
     if (panel.refs.nitroStrategy) {
       const strategy = normalizeNitroStrategy(CONFIG.nitroStrategy);
@@ -8273,7 +8513,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     range: paceRange(),
     account: accountStats ? { ...accountStats } : null,
     calibrated: calibratedRange ? { ...calibratedRange } : null,
+    accuracy: calibratedAccuracy ? { ...calibratedAccuracy } : null,
+    custom: { wpm: customWpm(), accuracy: customAccuracy() },
   });
+  window.__ntaDebug.setCustomWpm = (value) => setCustomWpm(value);
+  window.__ntaDebug.setCustomAccuracy = (value) => setCustomAccuracy(value);
+  window.__ntaDebug.paceCenter = (stats) => effectivePaceCenter(stats || {});
   window.__ntaDebug.progressWpm = (progress) => progressWpm(progress);
   window.__ntaDebug.lastProgress = () => session.lastProgress || null;
   window.__ntaDebug.liveCompareCsv = () => {
@@ -9012,6 +9257,15 @@ All of this only aims at believable statistics. It is your call and your risk.
       done.push(`pace ${importedPace}`);
     }
 
+    if (data.customWpm !== undefined) {
+      setCustomWpm(data.customWpm, { persist: false });
+      done.push(customWpm() ? `custom wpm ${customWpm()}` : 'custom wpm auto');
+    }
+    if (data.customAccuracy !== undefined) {
+      setCustomAccuracy(data.customAccuracy, { persist: false });
+      done.push(customAccuracy() ? `custom acc ${customAccuracy()}%` : 'custom acc auto');
+    }
+
     if (Number.isFinite(Number(data.raceLimit))) {
       setRaceLimit(clamp(Math.round(Number(data.raceLimit)), 0, 500));
       done.push(session.raceLimit ? `limit ${session.raceLimit}` : 'limit free');
@@ -9104,14 +9358,17 @@ All of this only aims at believable statistics. It is your call and your risk.
         target: calibratedRange ? `${calibratedRange.min}-${calibratedRange.max} WPM` : null,
         accuracy: calibratedAccuracy ? `${calibratedAccuracy.min}-${calibratedAccuracy.max}%` : null,
         at: calibrationStamp() ? new Date(calibrationStamp()).toISOString() : null,
+        manual: { wpm: customWpm() || null, accuracy: customAccuracy() || null },
         account: accountStats
           ? {
             wpm: accountStats.wpm || null,
+            target: accountStats.targetWpm || null,
             recent: accountStats.currentWpm || null,
             lifetime: accountStats.lifetimeWpm || null,
             accuracy: accountStats.accuracy || null,
             races: accountStats.races || null,
             source: accountStats.source || null,
+            recovery: accountStats.recovery || null,
           }
           : null,
         lifetime: accountStats && accountStats.lifetime
@@ -9749,6 +10006,10 @@ All of this only aims at believable statistics. It is your call and your risk.
         .row b { font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink-2); }
         .row b[data-good="1"] { color: var(--acc); }
         .row b[data-good="0"] { color: var(--warn); }
+        .row .num { width: 58px; flex: none; padding: 2px 5px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0, 0, 0, .24); color: var(--ink-2); font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; text-align: right; color-scheme: dark; }
+        .row .num:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; border-color: var(--acc); }
+        .row .num::placeholder { color: var(--dim-2); }
+        .row .num::-webkit-inner-spin-button, .row .num::-webkit-outer-spin-button { opacity: .35; }
         .row .cmp-select { flex: 1 1 auto; min-width: 0; max-width: 100%; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); color: var(--acc-2); font: 600 9.5px/1.4 ui-monospace, monospace; letter-spacing: 0; text-transform: none; color-scheme: dark; cursor: pointer; }
         .row .cmp-select:focus-visible { outline: 2px solid color-mix(in srgb, var(--acc) 70%, transparent); outline-offset: 1px; }
         .row .cmp-select option { background: #0b0f0d; color: var(--ink); }
@@ -10237,6 +10498,9 @@ All of this only aims at believable statistics. It is your call and your risk.
                     <div class="row"><span>calibrated</span><b data-field="calWpm">—</b></div>
                     <div class="row"><span>accuracy</span><b data-field="calAcc">—</b></div>
                     <div class="row"><span>account</span><b data-field="calAccount">—</b></div>
+                    <div class="row custom-row" title="Manual WPM target. Leave empty or 0 for automatic calibration. A manual value overrides the account average and the top-based recovery floor."><span>custom wpm</span><input class="num" type="number" inputmode="numeric" min="15" max="119" step="1" placeholder="auto" data-field="customWpm" aria-label="Custom WPM target; empty or 0 uses automatic calibration"></div>
+                    <div class="row custom-row" title="Manual accuracy target from 96% to 100%. Leave empty or 0 for automatic calibration. Below 96% the game pays no accuracy bonus."><span>custom acc</span><input class="num" type="number" inputmode="numeric" min="96" max="100" step="1" placeholder="auto" data-field="customAcc" aria-label="Custom accuracy target; empty or 0 uses automatic calibration"></div>
+                    <div class="cfg-note">Custom values override auto. Empty or 0 returns to automatic.</div>
                   </div>
                 </div>
               </div>
@@ -10634,6 +10898,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       calWpm: pick('[data-field="calWpm"]'),
       calAcc: pick('[data-field="calAcc"]'),
       calAccount: pick('[data-field="calAccount"]'),
+      customWpm: pick('[data-field="customWpm"]'),
+      customAcc: pick('[data-field="customAcc"]'),
       calDelta: pick('[data-field="calDelta"]'),
       accSpark: pick('[data-field="accSpark"]'),
       accSparkLine: pick('[data-field="accSparkLine"]'),
@@ -10919,6 +11185,31 @@ All of this only aims at believable statistics. It is your call and your risk.
       panel.refs.calRow.addEventListener('click', (event) => {
         event.stopPropagation();
         refreshCalibration();
+      });
+    }
+
+    // Overrides manuales de WPM y precision. `change` evita aplicar cada tecla
+    // a medias; Enter confirma sin tener que pulsar fuera del campo.
+    if (panel.refs.customWpm) {
+      panel.refs.customWpm.addEventListener('change', (event) => {
+        event.stopPropagation();
+        setCustomWpm(panel.refs.customWpm.value);
+      });
+      panel.refs.customWpm.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        panel.refs.customWpm.blur();
+      });
+    }
+    if (panel.refs.customAcc) {
+      panel.refs.customAcc.addEventListener('change', (event) => {
+        event.stopPropagation();
+        setCustomAccuracy(panel.refs.customAcc.value);
+      });
+      panel.refs.customAcc.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        panel.refs.customAcc.blur();
       });
     }
 
