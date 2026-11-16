@@ -607,8 +607,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     .filter((name) => fs.existsSync(path.join(sourceDir, name)))
     .map((name) => fs.readFileSync(path.join(sourceDir, name), 'utf8').replace(/\r\n?/g, '\n'))
     .join('');
+  const renderedSource = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n?/g, '\n');
   check('the userscript is rebuilt from the ordered internal modules',
-    sourceText.length > 0 && sourceText === fs.readFileSync(SCRIPT, 'utf8'),
+    sourceText.length > 0 && sourceText === renderedSource,
     { modules: sourceOrder.length, bytes: sourceText.length });
 
   // Auto-update barato: el @updateURL apunta al meta pequeno del Gist y el

@@ -36,10 +36,14 @@ const MODULES = [
   '97-boot.js',
 ];
 
+function normalize(text) {
+  // Windows puede guardar los fragmentos o el checkout en CRLF. El artefacto se
+  // publica con LF y la comprobacion compara contenido, no finales de linea.
+  return text.replace(/\r\n?/g, '\n');
+}
+
 function readModule(name) {
-  // Windows puede guardar los fragmentos en CRLF. El artefacto se publica con
-  // LF para que el diff del repositorio no cambie 20k lineas por el checkout.
-  return fs.readFileSync(path.join(ROOT, 'src', name), 'utf8').replace(/\r\n?/g, '\n');
+  return normalize(fs.readFileSync(path.join(ROOT, 'src', name), 'utf8'));
 }
 
 function bundle() {
@@ -57,8 +61,8 @@ function metaHeader(text) {
 function write() {
   const next = bundle();
   const meta = metaHeader(next);
-  const old = fs.existsSync(SCRIPT) ? fs.readFileSync(SCRIPT, 'utf8') : '';
-  const oldMeta = fs.existsSync(META) ? fs.readFileSync(META, 'utf8') : '';
+  const old = fs.existsSync(SCRIPT) ? normalize(fs.readFileSync(SCRIPT, 'utf8')) : '';
+  const oldMeta = fs.existsSync(META) ? normalize(fs.readFileSync(META, 'utf8')) : '';
 
   if (next !== old) fs.writeFileSync(SCRIPT, next);
   if (meta !== oldMeta) fs.writeFileSync(META, meta);
@@ -68,8 +72,8 @@ function write() {
 function check() {
   const next = bundle();
   const meta = metaHeader(next);
-  const old = fs.existsSync(SCRIPT) ? fs.readFileSync(SCRIPT, 'utf8') : '';
-  const oldMeta = fs.existsSync(META) ? fs.readFileSync(META, 'utf8') : '';
+  const old = fs.existsSync(SCRIPT) ? normalize(fs.readFileSync(SCRIPT, 'utf8')) : '';
+  const oldMeta = fs.existsSync(META) ? normalize(fs.readFileSync(META, 'utf8')) : '';
 
   if (next !== old) {
     throw new Error('nitro-wraith.user.js is stale; run npm run build.');
