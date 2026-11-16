@@ -26,6 +26,8 @@ const FILES = {
   pkg: 'package.json',
   readme: 'README.md',
   changelog: 'CHANGELOG.md',
+  headerSource: 'src/00-header.js',
+  configSource: 'src/10-config.js',
 };
 
 function read(relative) {
@@ -56,6 +58,8 @@ function firstMatch(text, pattern, label) {
 function versions() {
   const script = read(FILES.script);
   const meta = read(FILES.meta);
+  const headerSource = read(FILES.headerSource);
+  const configSource = read(FILES.configSource);
   const pkg = JSON.parse(read(FILES.pkg));
   const readme = read(FILES.readme);
 
@@ -63,6 +67,8 @@ function versions() {
     script: firstMatch(script, /^\/\/ @version\s+(\S+)/m, 'script @version'),
     constant: firstMatch(script, /const VERSION = '([^']+)';/, 'VERSION constant'),
     meta: firstMatch(meta, /^\/\/ @version\s+(\S+)/m, 'meta @version'),
+    sourceHeader: firstMatch(headerSource, /^\/\/ @version\s+(\S+)/m, 'source header @version'),
+    sourceConfig: firstMatch(configSource, /const VERSION = '([^']+)';/, 'source VERSION constant'),
     package: String(pkg.version || ''),
     readmeBadge: firstMatch(readme, /version-(\d+\.\d+\.\d+)-/, 'README version badge'),
     readmeRelease: firstMatch(readme, /releases\/tag\/v(\d+\.\d+\.\d+)/, 'README release link'),
@@ -118,19 +124,25 @@ function releaseBullets(tag) {
 }
 
 function setVersion(next) {
-  const script = read(FILES.script)
-    .replace(/^\/\/ @version\s+\S+/m, `// @version      ${next}`)
+  // The generated userscript is not the source of truth any more: bump the
+  // header and the VERSION constant in src/, then rebuild one installable file.
+  const header = read(FILES.headerSource)
+    .replace(/^\/\/ @version\s+\S+/m, `// @version      ${next}`);
+  const config = read(FILES.configSource)
     .replace(/const VERSION = '[^']+';/, `const VERSION = '${next}';`);
-  const meta = read(FILES.meta).replace(/^\/\/ @version\s+\S+/m, `// @version      ${next}`);
   const pkg = read(FILES.pkg).replace(/("version":\s*")[^"]+(")/, `$1${next}$2`);
   const readme = read(FILES.readme)
     .replace(/version-\d+\.\d+\.\d+-/, `version-${next}-`)
     .replace(/releases\/tag\/v\d+\.\d+\.\d+/, `releases/tag/v${next}`);
 
-  write(FILES.script, script);
-  write(FILES.meta, meta);
+  write(FILES.headerSource, header);
+  write(FILES.configSource, config);
   write(FILES.pkg, pkg);
   write(FILES.readme, readme);
+  execFileSync(process.execPath, [path.join(ROOT, 'tools/build.js')], {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
 }
 
 function addChangelog(version, bullets) {

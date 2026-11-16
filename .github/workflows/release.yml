@@ -54,8 +54,10 @@ jobs:
       - name: Verify release helper and versions
         if: steps.current.outputs.skip != '1'
         run: |
+          node --check tools/build.js
           node --check tools/release.js
           node --check tools/readme.js
+          node tools/build.js --check
           node tools/readme.js check
           node tools/release.js check
 
@@ -113,7 +115,7 @@ jobs:
           node --check tools/readme.js
           node tools/readme.js check
           node tools/release.js check
-          git add nitro-wraith.user.js nitro-wraith.meta.js package.json README.md CHANGELOG.md
+          git add src nitro-wraith.user.js nitro-wraith.meta.js package.json README.md CHANGELOG.md
           git commit -m "release: ${{ steps.prepare.outputs.VERSION }} [skip ci]"
           git push origin HEAD:main
           git fetch origin main

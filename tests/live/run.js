@@ -595,6 +595,22 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && constVersion === scriptVersion && readmeVersion === scriptVersion,
     { package: pkgVersion, header: scriptVersion, constant: constVersion, readme: readmeVersion });
 
+  // El artefacto instalable se genera desde fragmentos ordenados; esta prueba
+  // compara el contenido completo para que un build olvidado no llegue al Gist.
+  const sourceOrder = [
+    '00-header.js', '10-config.js', '20-utils.js', '30-profile.js', '32-history.js',
+    '40-dom.js', '50-state.js', '60-pacing.js', '70-session.js', '72-results.js',
+    '80-panel.js', '90-queue.js', '95-stickers.js', '96-guard.js', '97-boot.js',
+  ];
+  const sourceDir = path.join(ROOT, 'src');
+  const sourceText = sourceOrder
+    .filter((name) => fs.existsSync(path.join(sourceDir, name)))
+    .map((name) => fs.readFileSync(path.join(sourceDir, name), 'utf8').replace(/\r\n?/g, '\n'))
+    .join('');
+  check('the userscript is rebuilt from the ordered internal modules',
+    sourceText.length > 0 && sourceText === fs.readFileSync(SCRIPT, 'utf8'),
+    { modules: sourceOrder.length, bytes: sourceText.length });
+
   // Auto-update barato: el @updateURL apunta al meta pequeno del Gist y el
   // @downloadURL al script completo. Sin SHA en la URL, para que no se congele.
   const scriptText = fs.readFileSync(SCRIPT, 'utf8');
@@ -650,6 +666,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     const key = 'nta:update';
     const row = w.document.getElementById('nt-autotyper-panel').shadowRoot
       .querySelector('[data-field="up"]');
+    const checkButton = w.document.getElementById('nt-autotyper-panel').shadowRoot
+      .querySelector('[data-act="updateCheck"]');
     const saved = w.localStorage.getItem(key);
     const oldFetch = w.fetch;
     const oldSetTimeout = w.setTimeout;
@@ -691,7 +709,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const final = await d.checkForUpdate(true);
       const finalState = d.updateState();
       return {
-        has: true, rejected, failed, failedRow, failedTitle, failedDiagnostic,
+        has: true, checkButton: Boolean(checkButton),
+        rejected, failed, failedRow, failedTitle, failedDiagnostic,
         accepted, recovered, recoveredRow, recoveredTitle,
         timedOut, timeoutState, timeoutRow, timeoutTitle, final, finalState,
       };
@@ -704,6 +723,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   })()`, true);
   check('a failed update check is stored, visible and clears after recovery',
     updateHealth.has === true && !updateHealth.busy
+      && updateHealth.checkButton === true
       && updateHealth.rejected === false
       && updateHealth.failed && updateHealth.failed.status === 404
       && updateHealth.failed.error === 'HTTP 404'
@@ -5198,6 +5218,38 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && keepAliveSwitch.after.enabled === false,
     keepAliveSwitch);
 
+  // La salud de AFK no es un adorno: dice si la pestana esta visible, si el
+  // keep-alive esta realmente activo y cuantos freezes ha visto el navegador.
+  const afkHealth = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const row = shadow.querySelector('[data-field="afkHealth"]');
+    if (!row || !d.setBackgroundFarm || !d.afkFreeze) return { has: false };
+
+    const before = (row.textContent || '').trim();
+    d.setBackgroundFarm(true);
+    const on = (row.textContent || '').trim();
+    const onTitle = row.title;
+    d.setBackgroundFarm(false);
+
+    d.resetAfkFreeze();
+    w.document.dispatchEvent(new w.Event('freeze'));
+    w.document.dispatchEvent(new w.Event('resume'));
+    const freeze = d.afkFreeze();
+    d.resetAfkFreeze();
+    return { has: true, before, on, onTitle, freeze };
+  })()`, false, true);
+  check('TUNE reports real AFK health and Page Lifecycle freezes',
+    afkHealth.has
+      && afkHealth.before === 'off · visible-only'
+      && /^visible · keep-alive /.test(afkHealth.on)
+      && /AFK is on, but this tab is visible/.test(afkHealth.onTitle)
+      && afkHealth.freeze.count === 1
+      && afkHealth.freeze.lastDurationMs >= 0
+      && afkHealth.freeze.totalMs >= 0,
+    afkHealth);
+
   // La estrategia se prueba en la funcion pura y en el selector real: primero
   // elige la palabra mas corta valida, ultima la mas atrasada y la estrategia
   // desconocida cae en longest para no apagar el nitro de una config vieja.
@@ -6538,10 +6590,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const root = host && host.shadowRoot;
       const afkRow = root && root.querySelector('[data-f="afkRow"]');
       const afk = root && root.querySelector('[data-f="afk"]');
+      const keepAliveRow = root && root.querySelector('[data-f="keepAliveRow"]');
+      const keepAlive = root && root.querySelector('[data-f="keepAlive"]');
       const state = root && root.querySelector('[data-f="state"]');
       const retryRow = root && root.querySelector('[data-f="retryRow"]');
       const d = window.__ntaDebug;
-      if (!afkRow || !afk || !state || !retryRow || !d || !d.garagePaint || !d.setBackgroundFarm) return { hasRow: false };
+      if (!afkRow || !afk || !keepAliveRow || !keepAlive || !state || !retryRow || !d || !d.garagePaint || !d.setBackgroundFarm) return { hasRow: false };
 
       d.loginRetryCancel();
       localStorage.setItem('player_token', 'live-afk-token');
@@ -6567,6 +6621,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         hasRow: true,
         text: (afk.textContent || '').trim(),
         title: afkRow.title,
+        keepAlive: (keepAlive.textContent || '').trim(),
+        keepAliveTitle: keepAliveRow.title,
         retryHidden: retryRow.hidden,
         offline,
       };
@@ -6582,6 +6638,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('the AFK indicator reads on with a live session and no gate',
     garageActive.hasRow && /^on\b/.test(garageActive.text)
       && /AFK cycle active/.test(garageActive.title)
+      && /^(off|on|blocked|ready|waiting)$/.test(garageActive.keepAlive)
+      && /AFK keep-alive/.test(garageActive.keepAliveTitle)
       && garageActive.retryHidden === true,
     garageActive);
   check('the garage announces an offline hold instead of pressing Race Now',

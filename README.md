@@ -65,8 +65,8 @@ stats, and shows why it is waiting.
 <p align="center"><sub>A harness capture with demo values. The real panel sits in the bottom-right corner of the game.</sub></p>
 
 - **Live:** WPM, accuracy, the AUTO pace badge, target range, race count, session average, result and the game HUD. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
-- **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops. The same panel has the **AFK off/on** control and shows whether the queue is visible, hidden or blocked by another gate.
-- **Tune:** pace profile, limits, breaks, stickers, sound, AFK farming (off by default), the optional AFK keep-alive and the safety guard. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
+- **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops. The same panel has the **AFK off/on** control, the keep-alive state and whether the queue is visible, hidden or blocked by another gate.
+- **Tune:** pace profile, limits, breaks, stickers, sound, AFK farming (off by default), the optional AFK keep-alive, a live **AFK health** row (visible/hidden, keep-alive and freeze count) and the safety guard. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
 The update badge only appears when the Gist has a newer version. The script
@@ -205,13 +205,22 @@ The userscript has no runtime dependencies. The harness needs Node 22+ and
 Chrome.
 
 ```bash
+npm run build       # concatenate src/ into nitro-wraith.user.js and .meta.js
 npm run live:test   # CLI checks without opening Chrome
-npm run check       # syntax, release/README checks and the browser harness
+npm run check       # synced build, syntax, release/README checks and harness
 npm test            # browser harness only
 ```
 
-The main configuration lives in `CONFIG` at the top of `nitro-wraith.user.js`.
-Daily settings live in `TUNE` and are stored in `localStorage`.
+The source lives in [`src/`](src/README.md): 15 ordered fragments concatenated
+inside one IIFE. `nitro-wraith.user.js` is still the only installable file and
+**is not edited by hand**; edit `src/`, run `npm run build` and verify with
+`npm run check`. `build:check` prevents testing or publishing an artifact that
+does not match `src/`.
+
+The main configuration lives in `CONFIG` (`src/10-config.js`) and daily settings
+in `TUNE`, stored in `localStorage`. The **Updates** card checks the Gist on
+open, every 5 minutes, when the network returns and when the tab becomes active;
+it also has **check now** and the garage badge for installing the new version.
 
 README release notes are generated between the `release:start` and
 `release:end` markers. Run `npm run readme:sync` after editing the changelog.

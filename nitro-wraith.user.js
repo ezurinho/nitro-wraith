@@ -437,6 +437,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 (function () {
   'use strict';
 
+
   /* ==========================================================================
    * 1. CONFIGURATION
    * ========================================================================== */
@@ -841,7 +842,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       return {
         text: 'not checked',
         good: null,
-        title: 'Update check: not run yet. It runs when the panel opens and every hour.',
+        title: 'Update check: not run yet. It runs when the panel opens, every 5 minutes and when the page comes back online.',
       };
     }
 
@@ -870,7 +871,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       text: `ok · ${age}`,
       good: true,
       title: `Update check ok ${age}; the latest meta says ${summary}`
-        + ' It runs again in one hour.',
+        + ' It runs again in 5 minutes.',
     };
   }
 
@@ -1500,6 +1501,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // visita nueva, pero uno de esta misma pagina si (no se insiste en caliente).
   const PAGE_AT = Date.now();
 
+
   /* ==========================================================================
    * 2. UTILITIES
    * ========================================================================== */
@@ -1770,6 +1772,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (noticeRing.length > NOTICE_RING) noticeRing.shift();
     if (statusEl) setText(statusEl, text);
   };
+
 
   /* ==========================================================================
    * 3. PROFILE: WPM AND ACCURACY PER SESSION
@@ -3205,6 +3208,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     paintChallenges();
   }
 
+
   /* ==========================================================================
    * 3b. HISTORIAL DE CARRERAS
    * ========================================================================== */
@@ -4049,6 +4053,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
+
   /* ==========================================================================
    * 4. FINDING THE TYPING COMPONENT (REACT)
    * ========================================================================== */
@@ -4432,6 +4437,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     } catch { /* aviso corrupto: se ignora */ }
   }
 
+
   /* ==========================================================================
    * 5. STATE
    * ========================================================================== */
@@ -4539,6 +4545,57 @@ All of this only aims at believable statistics. It is your call and your risk.
     cycleCount: 0,       // cuantos ciclos entran en esa media
     breaksTaken: 0,      // descansos tomados en la tanda (para estimar los que faltan)
   };
+
+  // AFK observability: a freeze is the event the keep-alive is trying to avoid,
+  // so keep a small browser-level count. It survives reloads and is shown in
+  // TUNE/garage; no account data is involved.
+  const AFK_FREEZE_KEY = 'nta:afkFreeze';
+  function loadAfkFreezeStats() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(AFK_FREEZE_KEY) || 'null');
+      return {
+        count: Math.max(0, Number(saved && saved.count) || 0),
+        lastAt: Math.max(0, Number(saved && saved.lastAt) || 0),
+        lastDurationMs: Math.max(0, Number(saved && saved.lastDurationMs) || 0),
+        totalMs: Math.max(0, Number(saved && saved.totalMs) || 0),
+      };
+    } catch {
+      return { count: 0, lastAt: 0, lastDurationMs: 0, totalMs: 0 };
+    }
+  }
+  let afkFreezeStats = loadAfkFreezeStats();
+  function saveAfkFreezeStats() {
+    try { localStorage.setItem(AFK_FREEZE_KEY, JSON.stringify(afkFreezeStats)); } catch { /* modo privado */ }
+  }
+  function noteAfkFreeze() {
+    afkFreezeStats.count += 1;
+    afkFreezeStats.lastAt = Date.now();
+    saveAfkFreezeStats();
+  }
+  function noteAfkResume(durationMs) {
+    const ms = Math.max(0, Number(durationMs) || 0);
+    afkFreezeStats.lastDurationMs = ms;
+    afkFreezeStats.totalMs += ms;
+    saveAfkFreezeStats();
+  }
+  // El freeze ocurre en el iframe de la carrera, pero el garaje vive en la
+  // ventana de arriba. Sin esta relectura, el contador del garaje se quedaba
+  // congelado en el valor del arranque hasta recargar la pagina.
+  function refreshAfkFreezeStats() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(AFK_FREEZE_KEY) || 'null');
+      if (!saved) return afkFreezeStats;
+      const count = Math.max(0, Number(saved.count) || 0);
+      const lastAt = Math.max(0, Number(saved.lastAt) || 0);
+      const totalMs = Math.max(0, Number(saved.totalMs) || 0);
+      if (count !== afkFreezeStats.count
+        || lastAt !== afkFreezeStats.lastAt
+        || totalMs !== afkFreezeStats.totalMs) {
+        afkFreezeStats = loadAfkFreezeStats();
+      }
+    } catch { /* modo privado */ }
+    return afkFreezeStats;
+  }
 
   // Session limit: only measured races count towards it, never a DQ. The time
   // limit is checked between races, never mid-race: the loop asks before it
@@ -5199,6 +5256,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     return clamp(dueAt - Date.now(), 0, maxHold);
   }
 
+
   /* ==========================================================================
    * 6. PACE
    * ========================================================================== */
@@ -5604,6 +5662,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (!wpm) return;
     log(`WPM ${wpm.toFixed(1)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}% · ${session.chars} keys`);
   }
+
 
   /* ==========================================================================
    * 10. SESSION CONTROL
@@ -7170,6 +7229,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     updatePanel();
   }
 
+
   /* ==========================================================================
    * 8.B RESULTADO DE LA CARRERA (puesto y premio)
    * ========================================================================== */
@@ -8241,6 +8301,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     log(sfxOn ? 'Sound alerts on.' : 'Sound alerts off.');
   }
 
+
   /* ==========================================================================
    * 12. FLOATING PANEL
    * ========================================================================== */
@@ -8340,6 +8401,55 @@ All of this only aims at believable statistics. It is your call and your risk.
   let keepAliveError = '';
   let keepAliveResumeAt = 0;
   let keepAliveGestureBound = false;
+  const KEEPALIVE_SHARED_KEY = 'nta:keepAliveState';
+  const KEEPALIVE_SHARED_TTL = 60000;
+  let keepAliveReportAt = 0;
+
+  // El audio vive en la ventana que recibio el gesto (el iframe o el garaje).
+  // Este latido comparte solo el estado para que TUNE y el garaje no digan
+  // «blocked» cuando otra ventana ya tiene el contexto en `running`.
+  function keepAliveShared() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEEPALIVE_SHARED_KEY) || 'null');
+      if (!saved || !Number.isFinite(Number(saved.at))) return null;
+      if (Date.now() - Number(saved.at) > KEEPALIVE_SHARED_TTL) return null;
+      return {
+        owner: String(saved.owner || ''),
+        state: String(saved.state || ''),
+        at: Number(saved.at),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function reportKeepAlive(state) {
+    let shared = null;
+    try {
+      const raw = JSON.parse(localStorage.getItem(KEEPALIVE_SHARED_KEY) || 'null');
+      if (raw && Date.now() - Number(raw.at) < KEEPALIVE_SHARED_TTL) shared = raw;
+    } catch { /* modo privado */ }
+    const now = Date.now();
+    try {
+      if (state === 'none') {
+        if (!shared || shared.owner === INSTANCE_ID || now - Number(shared.at) > KEEPALIVE_SHARED_TTL) {
+          localStorage.removeItem(KEEPALIVE_SHARED_KEY);
+        }
+        return;
+      }
+      if (state !== 'running' && shared && shared.state === 'running' && shared.owner !== INSTANCE_ID) {
+        // Otra ventana ya mantiene la pestana despierta: no se degrada el aviso.
+        return;
+      }
+      if (now - keepAliveReportAt < 5000 && shared && shared.owner === INSTANCE_ID && shared.state === state) return;
+      keepAliveReportAt = now;
+      localStorage.setItem(KEEPALIVE_SHARED_KEY, JSON.stringify({
+        owner: INSTANCE_ID,
+        state,
+        at: now,
+      }));
+    } catch { /* modo privado */ }
+  }
 
   function keepAliveSupported() {
     return typeof window.AudioContext === 'function'
@@ -8352,28 +8462,36 @@ All of this only aims at believable statistics. It is your call and your risk.
       return {
         enabled: false,
         label: 'off',
-        title: 'Optional silent audio that can keep a hidden AFK tab awake. It is off by default and only starts after a click, because browsers require a user gesture for audio.',
+        title: 'AFK keep-alive: off. Optional silent audio that can keep a hidden AFK tab awake. It is off by default and only starts after a click, because browsers require a user gesture for audio.',
       };
     }
     if (!backgroundFarm()) {
       return {
         enabled: true,
         label: 'waiting',
-        title: 'On, but AFK farming is off. Turn AFK farming on and the silent keep-alive starts with it.',
+        title: 'AFK keep-alive: waiting. On, but AFK farming is off. Turn AFK farming on and the silent keep-alive starts with it.',
       };
     }
     if (!keepAliveSupported()) {
       return {
         enabled: true,
         label: 'n/a',
-        title: 'This browser has no AudioContext, so the silent keep-alive cannot run.',
+        title: 'AFK keep-alive: n/a. This browser has no AudioContext, so the silent keep-alive cannot run.',
       };
     }
+    const shared = keepAliveShared();
     if (!keepAliveCtx) {
+      if (shared && shared.state === 'running') {
+        return {
+          enabled: true,
+          label: 'on',
+          title: 'AFK keep-alive: on in another window. That AudioContext keeps the tab active; this window has no local context.',
+        };
+      }
       return {
         enabled: true,
         label: 'ready',
-        title: 'Ready: click anywhere once to unlock audio. It only runs while AFK farming is on and is near-silent by design.',
+        title: 'AFK keep-alive: ready. Click anywhere once to unlock audio. It only runs while AFK farming is on and is near-silent by design.',
       };
     }
     const state = keepAliveCtx.state;
@@ -8381,20 +8499,28 @@ All of this only aims at believable statistics. It is your call and your risk.
       return {
         enabled: true,
         label: 'on',
-        title: 'On: near-silent audio is playing so Chrome treats this tab as active. Muting the tab or the system can still let it freeze.',
+        title: 'AFK keep-alive: on. Near-silent audio is playing so Chrome treats this tab as active. Muting the tab or the system can still let it freeze.',
+      };
+    }
+    if ((state === 'suspended' || state === 'interrupted')
+      && shared && shared.state === 'running' && shared.owner !== INSTANCE_ID) {
+      return {
+        enabled: true,
+        label: 'on',
+        title: 'AFK keep-alive: on in another window. That AudioContext keeps the tab active; this window is suspended but does not need its own context.',
       };
     }
     if (state === 'suspended' || state === 'interrupted') {
       return {
         enabled: true,
         label: 'blocked',
-        title: `Audio is ${state}; click anywhere in the page once to unlock it. The keep-alive cannot promise to prevent a freeze until it reads “on”.`,
+        title: `AFK keep-alive: blocked. Audio is ${state}; click anywhere in the page once to unlock it. The keep-alive cannot promise to prevent a freeze until it reads “on”.`,
       };
     }
     return {
       enabled: true,
       label: 'off',
-      title: `AudioContext is ${state || 'closed'}; it will be recreated on the next click if AFK farming is on.`,
+      title: `AFK keep-alive: off. AudioContext is ${state || 'closed'}; it will be recreated on the next click if AFK farming is on.`,
     };
   }
 
@@ -8408,7 +8534,48 @@ All of this only aims at believable statistics. It is your call and your risk.
       mode: keepAliveMode,
       gain: keepAliveGain ? keepAliveGain.gain.value : null,
       error: keepAliveError,
+      shared: keepAliveShared(),
       label: keepAliveInfo().label,
+    };
+  }
+
+  // Resumen corto para TUNE: no promete que una pestana oculta este a salvo si
+  // el keep-alive esta apagado, bloqueado o pendiente de gesto. Los freezes se
+  // cuentan con el evento Page Lifecycle y se guardan en este navegador.
+  function afkHealthInfo() {
+    const keep = keepAliveInfo();
+    const freeze = refreshAfkFreezeStats();
+    const count = Math.max(0, Number(freeze.count) || 0);
+    const last = freeze.lastAt
+      ? ` Last freeze ${clockSpan(Math.max(0, Date.now() - freeze.lastAt))} ago`
+        + (freeze.lastDurationMs ? ` (${Math.max(1, Math.round(freeze.lastDurationMs / 1000))}s paused).` : '.')
+      : ' No freeze events recorded.';
+
+    if (!backgroundFarm()) {
+      return {
+        text: 'off · visible-only',
+        state: 'off',
+        title: `AFK farming is off: races wait for a visible tab.${last}`,
+      };
+    }
+
+    const hidden = pageHidden();
+    if (!hidden) {
+      return {
+        text: `visible · keep-alive ${keep.label}`,
+        state: keep.label === 'on' ? 'on' : 'ready',
+        title: `AFK is on, but this tab is visible. Hiding it starts the AFK cycle. Keep-alive: ${keep.label}.${last}`,
+      };
+    }
+
+    const safe = keep.label === 'on';
+    return {
+      text: `hidden · keep-alive ${keep.label} · freeze ${count}`,
+      state: safe ? 'on' : (keep.label === 'ready' ? 'ready' : 'blocked'),
+      title: `${safe
+        ? 'Hidden AFK with the keep-alive running; Chrome is less likely to freeze this tab.'
+        : 'Hidden AFK without a running keep-alive; the tab can still be frozen and the race lost.'}
+        Freeze events seen: ${count}.${last}`,
     };
   }
 
@@ -8419,6 +8586,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (CONFIG.queue.keepAlive !== true || !backgroundFarm()) return;
       primeKeepAlive();
       syncKeepAlive();
+      // El primer gesto puede pasar el audio de `ready` a `on`: el resumen AFK
+      // debe reflejarlo en el mismo clic, no en el siguiente repintado.
+      if (typeof paintConfig === 'function') paintConfig();
+      if (typeof paintGaragePanel === 'function') paintGaragePanel();
     };
     try {
       addEventListener('pointerdown', unlock, true);
@@ -8460,8 +8631,10 @@ All of this only aims at believable statistics. It is your call and your risk.
         keepAliveSource = source;
         keepAliveGain = gain;
         keepAliveError = '';
+        reportKeepAlive(ctx.state);
         ctx.onstatechange = () => {
           if (!CONFIG.queue.keepAlive) return;
+          reportKeepAlive(ctx.state);
           if (ctx.state === 'suspended') keepAliveResumeAt = 0;
           if (typeof paintConfig === 'function') paintConfig();
           if (panel.refs && typeof updatePanel === 'function') updatePanel();
@@ -8485,12 +8658,14 @@ All of this only aims at believable statistics. It is your call and your risk.
           const resumed = keepAliveCtx.resume();
           if (resumed && typeof resumed.then === 'function') {
             resumed.then(() => {
+              reportKeepAlive('running');
               if (typeof paintConfig === 'function') paintConfig();
             }).catch(() => { /* el proximo gesto lo reintenta */ });
           }
         } catch { /* sin gesto valido */ }
       }
     }
+    if (keepAliveCtx.state === 'running') reportKeepAlive('running');
     return keepAliveCtx.state === 'running';
   }
 
@@ -8510,6 +8685,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     keepAliveGain = null;
     keepAliveMode = '';
     keepAliveResumeAt = 0;
+    reportKeepAlive('none');
   }
 
   function syncKeepAlive() {
@@ -8891,6 +9067,13 @@ All of this only aims at believable statistics. It is your call and your risk.
       sound: sfxOn === true,
     };
     const keepAlive = keepAliveInfo();
+    const afkHealth = afkHealthInfo();
+    const afkHealthNode = panel.refs.cfg.querySelector('[data-field="afkHealth"]');
+    if (afkHealthNode) {
+      setText(afkHealthNode, afkHealth.text);
+      if (afkHealthNode.dataset.state !== afkHealth.state) afkHealthNode.dataset.state = afkHealth.state;
+      if (afkHealthNode.title !== afkHealth.title) afkHealthNode.title = afkHealth.title;
+    }
 
     for (const button of panel.refs.cfg.querySelectorAll('[data-toggle]')) {
       const key = button.dataset.toggle;
@@ -9271,6 +9454,12 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.setBackgroundFarm = (on) => setBackgroundFarm(Boolean(on));
   window.__ntaDebug.keepAlive = () => keepAliveDebug();
   window.__ntaDebug.setKeepAlive = (on) => setKeepAlive(Boolean(on));
+  window.__ntaDebug.afkFreeze = () => ({ ...afkFreezeStats });
+  window.__ntaDebug.resetAfkFreeze = () => {
+    afkFreezeStats = { count: 0, lastAt: 0, lastDurationMs: 0, totalMs: 0 };
+    saveAfkFreezeStats();
+    return { ...afkFreezeStats };
+  };
   window.__ntaDebug.nitroStrategy = () => CONFIG.nitroStrategy;
   window.__ntaDebug.setNitroStrategy = (value) => setNitroStrategy(String(value || ''));
   window.__ntaDebug.useNitro = (app) => useNitro(app);
@@ -10873,9 +11062,12 @@ All of this only aims at believable statistics. It is your call and your risk.
         .set-val { display: inline-flex; align-items: center; gap: 8px; }
         .set-val b { font: 600 9px/1 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
         .set-val b[data-on="1"] { color: var(--acc); }
+        .set-val b[data-state="on"] { color: var(--acc); }
         .set-val b[data-state="blocked"] { color: var(--warn); }
         .set-val b[data-state="ready"], .set-val b[data-state="waiting"] { color: var(--dim); }
         .set-val b[data-state="n/a"] { color: var(--warn); }
+        .set-row.afk-health-row .set-val { min-width: 0; max-width: 58%; }
+        .set-row.afk-health-row .set-val b { white-space: normal; text-align: right; line-height: 1.35; }
         .set-val b[data-field="nitroPreview"] { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; color: var(--ink); }
         .set-val b[data-field="nitroPreview"][data-good="1"] { color: var(--acc); }
         .set-val b[data-field="nitroPreview"][data-good="0"] { color: var(--warn); }
@@ -11430,6 +11622,10 @@ All of this only aims at believable statistics. It is your call and your risk.
                     <span class="set-lbl">AFK keep-alive<i>near-silent audio holds the tab</i></span>
                     <span class="set-val"><b data-sw-txt="keepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="keepAlive" data-on="0" title="Optional and off by default. Near-silent audio makes Chrome treat this tab as active while AFK farming is on. It needs one click to unlock audio and cannot guarantee that the tab will not freeze. Muting the tab can disable it."></button></span>
                   </div>
+                  <div class="set-row afk-health-row" title="Live AFK state, keep-alive state and freeze events recorded by this browser">
+                    <span class="set-lbl">AFK health<i>hidden state · freeze count</i></span>
+                    <span class="set-val"><b data-field="afkHealth" data-state="off" role="status" aria-live="polite">off · visible-only</b></span>
+                  </div>
                   <div class="set-row">
                     <span class="set-lbl">Auto nitro<i>skips one long word per race</i></span>
                     <span class="set-val"><b data-sw-txt="useNitro" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="useNitro" data-on="1" title="Auto nitro: press Enter once per race to skip one word chosen by the nitro strategy. It does not raise WPM; the saved time is paid back over the rest of the lesson"></button></span>
@@ -11559,8 +11755,9 @@ All of this only aims at believable statistics. It is your call and your risk.
                 </div>
                 <div class="season-actions">
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
+                  <button class="act" type="button" data-act="updateCheck" title="Check the public Gist for a newer version now">check now</button>
                 </div>
-                <div class="cfg-note">The Gist meta is checked every 5 minutes and when you return to the tab; the installed copy changes only when you download a release.</div>
+                <div class="cfg-note">The Gist meta is checked every 5 minutes, when you return to the tab and when the connection comes back; the installed copy changes only when you download a release.</div>
               </div>
               <div class="card">
                 <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>
@@ -11800,6 +11997,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       cfgNote: pick('[data-field="cfgNote"]'),
       up: pick('[data-field="up"]'),
       upInfo: pick('[data-field="upInfo"]'),
+      updateCheck: pick('[data-act="updateCheck"]'),
       nitroStrategy: pick('[data-field="nitroStrategy"]'),
       nitroPreview: pick('[data-field="nitroPreview"]'),
       foot: pick('[data-field="foot"]'),
@@ -11877,6 +12075,24 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     // La tarjeta Season no adivina: abre la pagina oficial y deja que su propia
     // pestana escriba la foto que este panel leera al volver.
+    if (panel.refs.updateCheck) {
+      panel.refs.updateCheck.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const button = panel.refs.updateCheck;
+        if (button.disabled) return;
+        button.disabled = true;
+        setText(button, 'checking…');
+        const ok = await checkForUpdate(true);
+        setText(button, ok ? 'check now' : 'retry');
+        paintUpdateHealth(true);
+        setTimeout(() => {
+          if (!button.isConnected) return;
+          setText(button, 'check now');
+          button.disabled = false;
+        }, 1400);
+      });
+    }
+
     if (panel.refs.seasonOpen) {
       panel.refs.seasonOpen.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -13868,6 +14084,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
     }
   }
+
 
   /* ==========================================================================
    * 14. QUEUE AND RECOVERY (TOP WINDOW ONLY)
@@ -16169,6 +16386,7 @@ All of this only aims at believable statistics. It is your call and your risk.
             <div class="r social" data-f="socialUpdatedRow" hidden><span>updated</span><b data-f="socialUpdated">—</b></div>
             <div class="r"><span>state</span><b data-f="state">—</b></div>
             <div class="r" data-f="afkRow"><span>afk</span><b data-f="afk">—</b></div>
+            <div class="r" data-f="keepAliveRow"><span>keep-alive</span><b data-f="keepAlive">—</b></div>
             <div class="r" data-f="retryRow" hidden><span>login retry</span><b data-f="loginRetry">—</b></div>
             <div class="r"><span>login</span><b data-f="login">—</b></div>
             <div class="r"><span>mystery box</span><b data-f="box">—</b></div>
@@ -16224,6 +16442,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         state: root.querySelector('[data-f="state"]'),
         afkRow: root.querySelector('[data-f="afkRow"]'),
         afk: root.querySelector('[data-f="afk"]'),
+        keepAliveRow: root.querySelector('[data-f="keepAliveRow"]'),
+        keepAlive: root.querySelector('[data-f="keepAlive"]'),
         retryRow: root.querySelector('[data-f="retryRow"]'),
         loginRetry: root.querySelector('[data-f="loginRetry"]'),
         login: root.querySelector('[data-f="login"]'),
@@ -16807,12 +17027,24 @@ All of this only aims at believable statistics. It is your call and your risk.
       const afk = afkStatus();
       qpanel.afk.textContent = afk.text;
       qpanel.afk.dataset.warn = String(afk.warn);
-      qpanel.afkRow.title = afk.title;
+      const freeze = refreshAfkFreezeStats();
+      const freezeNote = freeze.count
+        ? ` This browser froze the tab ${freeze.count} time${freeze.count === 1 ? '' : 's'} in the recorded history.`
+        : ' No Page Lifecycle freeze has been recorded in this browser.';
+      qpanel.afkRow.title = `${afk.title}${freezeNote}`;
+      const keepAlive = keepAliveInfo();
+      const keepAliveLabel = keepAlive.enabled ? keepAlive.label : 'off';
+      qpanel.keepAlive.textContent = keepAliveLabel;
+      qpanel.keepAlive.dataset.warn = keepAliveLabel === 'blocked'
+        ? '2'
+        : (keepAliveLabel === 'ready' || keepAliveLabel === 'waiting' ? '1' : '0');
+      qpanel.keepAliveRow.title = keepAlive.title;
       if (qpanel.afkBtn) {
         qpanel.afkBtn.textContent = backgroundFarm() ? 'AFK on' : 'AFK off';
-        qpanel.afkBtn.title = backgroundFarm()
+        qpanel.afkBtn.title = (backgroundFarm()
           ? 'AFK farming is on: hiding this tab keeps the queue running. Turn it off to stop starting races in the background.'
-          : 'AFK farming is off: races only start while this tab is visible. Turn it on to keep the queue running hidden; a frozen tab can still end a race in a DQ.';
+          : 'AFK farming is off: races only start while this tab is visible. Turn it on to keep the queue running hidden; a frozen tab can still end a race in a DQ.')
+          + ` Keep-alive: ${keepAliveLabel}.`;
       }
       const retryLeft = Math.max(0, loginRetryAt - Date.now());
       const hasRetry = Boolean(loginRetryAt);
@@ -18844,6 +19076,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     setInterval(loop, CONFIG.queue.tickMs);
   }
 
+
   /* ==========================================================================
    * 15. STICKERS (INSIDE THE RACE)
    * ========================================================================== */
@@ -19004,6 +19237,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       });
     }, 700);
   }
+
 
   /* ==========================================================================
    * 12.B GUARDIA: WPM IMPOSIBLE E INSTANCIAS DUPLICADAS
@@ -19764,6 +19998,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
+
   /* ==========================================================================
    * 13. BOOT
    * ========================================================================== */
@@ -19777,6 +20012,17 @@ All of this only aims at believable statistics. It is your call and your risk.
     // intenta arrancar ya. Sin gesto el AudioContext queda suspendido y el
     // primer clic (capturado por bindKeepAliveGesture) lo desbloquea.
     syncKeepAlive();
+
+    // Auto-update: una comprobacion al arrancar, otra al recuperar red y otra
+    // al volver a la pestana. La comprobacion periodica sigue en el panel.
+    if (!window.__ntaDryProbe && window.top === window) {
+      checkForUpdate();
+      addEventListener('online', () => checkForUpdate(true));
+      addEventListener('focus', () => checkForUpdate());
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) checkForUpdate();
+      });
+    }
 
     // El turno se renueva tambien por el reloj Worker, no solo por el latido del
     // panel: oculta, la pestaña sigue farmeando y el lease no puede caducar.
@@ -19832,6 +20078,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         updatePanel(true);
+        // El resumen AFK cambia justo al volver (visible -> hidden y el estado
+        // real del keep-alive); TUNE solo se repinta al abrirse si no se fuerza.
+        if (typeof paintConfig === 'function') paintConfig();
         checkForUpdate();
         // Si el API fallo, al volver a la pestana se reintenta sin esperar al
         // latido ni a la ventana normal de 30 minutos.
@@ -19968,18 +20217,25 @@ All of this only aims at believable statistics. It is your call and your risk.
     // mandar una tecla; si la carrera ya murio, el DQ modal la cierra.
     document.addEventListener('freeze', () => {
       frozenAt = Date.now();
+      noteAfkFreeze();
       releaseTypingLock();
       if (session.liveRound && !session.stopped) {
         log('Browser froze this tab; the typing lock was released.');
       }
+      if (typeof paintConfig === 'function') paintConfig();
+      if (typeof paintGaragePanel === 'function') paintGaragePanel();
     });
 
     document.addEventListener('resume', () => {
       if (!frozenAt) return;
       const frozenFor = Math.max(0, Date.now() - frozenAt);
       frozenAt = 0;
+      noteAfkResume(frozenFor);
       log(`Browser resumed after ${(frozenFor / 1000).toFixed(1)} s frozen; rechecking the race.`);
+      syncKeepAlive();
       updatePanel();
+      if (typeof paintConfig === 'function') paintConfig();
+      if (typeof paintGaragePanel === 'function') paintGaragePanel();
     });
 
     window.addEventListener('pageshow', (event) => {
