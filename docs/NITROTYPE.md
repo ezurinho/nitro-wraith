@@ -52,7 +52,11 @@ does not try to beat the game's limits; it tries to stay inside them.
 - Five DQs in a row can block racing for a while.
 - A hidden tab can be frozen by Chrome (Energy Saver, memory pressure or
   bfcache). A frozen page cannot type, so `backgroundFarm` is off by default;
-  it can be enabled in `TUNE` only if that freeze risk is accepted.
+  it can be enabled in `TUNE` or with the garage's **AFK off/on** button only if
+  that freeze risk is accepted. Both panels and every open tab receive the
+  switch through localStorage events; with no other gate active, the garage row
+  reads `off`, `on` or `on · hidden`, while sign-in, stop, block and active-hours
+  gates keep priority.
 - The pace ceiling never holds a key more than 5.5 seconds, and a live-race
   watchdog sends one correct key if it sees no accepted key for 7 seconds and
   no key sent for 7 seconds. That stays below the ~12 second DQ window when the

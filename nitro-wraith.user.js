@@ -357,11 +357,15 @@ AFK farming (CONFIG.queue.backgroundFarm, off by default): with it off, the bot
 only starts a race while this tab is visible. Chrome can freeze a hidden tab
 (Energy Saver, memory pressure, bfcache); a frozen race cannot send keys and
 ends in a disqualification, and no userscript can type from a frozen page. The
-switch is in TUNE. If you turn it on, the typing cadence and every scheduled
-press (the queue's heartbeat, "Race Again", "Race Now", the DQ modal, the
-re-login and the Mystery Box) run on a Worker clock so hidden-tab timer clamping
-does not slow them down, but the freeze risk remains. Brave's "always keep this
-site active" only stops the tab from being discarded, not from being frozen.
+switch is in TUNE and in the garage (AFK off/on); both windows and other tabs
+receive the change live. With no other gate active, the garage `afk` row says
+`off`, `on` or `on · hidden`; a sign-in, stop, block or active-hours gate still
+wins. If you turn it on,
+the typing cadence and every scheduled press (the queue's heartbeat, "Race
+Again", "Race Now", the DQ modal, the re-login and the Mystery Box) run on a
+Worker clock so hidden-tab timer clamping does not slow them down, but the
+freeze risk remains. Brave's "always keep this site active" only stops the tab
+from being discarded, not from being frozen.
 
 All in one: this file replaces three userscripts that used to fight each other.
 Install it ONCE and uninstall "Auto Redirect Script" and "Auto Stickers".
@@ -2242,6 +2246,21 @@ All of this only aims at believable statistics. It is your call and your risk.
       customWpm: customWpm(),
       customAccuracy: customAccuracy(),
     }));
+  }
+
+  // AFK se cambia en el iframe de la carrera (TUNE) o en el garaje (ventana
+  // superior). El objeto de prefs puede tener otros ajustes que esta ventana no
+  // conoce; se fusiona solo esta clave para no pisarlos.
+  function saveBackgroundFarmPref(next) {
+    let saved = {};
+    try {
+      const raw = JSON.parse(disk.get(KEYS.prefs) || '{}');
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) saved = raw;
+    } catch {
+      saved = {};
+    }
+    saved.backgroundFarm = next === true;
+    try { disk.set(KEYS.prefs, JSON.stringify(saved)); } catch { /* modo privado */ }
   }
 
   // Se aplica ANTES de que se sortee la serie de WPM: el rango del perfil entra
@@ -8264,7 +8283,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (CONFIG.queue.backgroundFarm === next) return false;
 
     CONFIG.queue.backgroundFarm = next;
-    if (options.persist !== false) savePrefs();
+    if (options.persist !== false) saveBackgroundFarmPref(next);
     paintConfig();
     log(next
       ? 'AFK farming: on. A hidden tab can be frozen by the browser and that race can end in a DQ.'
@@ -8393,6 +8412,29 @@ All of this only aims at believable statistics. It is your call and your risk.
       panelTheme = event.newValue;
       paintTheme();
       log(`Theme: ${THEME_LABELS[panelTheme]} (other tab).`);
+    });
+  } catch { /* almacenamiento bloqueado */ }
+
+  // AFK farming se cambia desde TUNE (iframe) o desde el boton del garaje
+  // (ventana superior). Sin este puente, CONFIG.queue.backgroundFarm se quedaba
+  // con el valor del arranque en la otra ventana y el interruptor parecia no
+  // hacer nada hasta recargar. El evento storage llega a la otra ventana y a
+  // otras pestanas del mismo perfil.
+  try {
+    addEventListener('storage', (event) => {
+      if (event.key !== KEYS.prefs || !event.newValue) return;
+      let saved = null;
+      try { saved = JSON.parse(event.newValue); } catch { return; }
+      if (!saved || typeof saved.backgroundFarm !== 'boolean') return;
+      const next = saved.backgroundFarm === true;
+      if (next === backgroundFarm()) return;
+
+      CONFIG.queue.backgroundFarm = next;
+      log(next
+        ? 'AFK farming: on (other panel). Hiding this tab keeps the queue running.'
+        : 'AFK farming: off (other panel). New races only start while this tab is visible.');
+      if (typeof paintConfig === 'function') paintConfig();
+      if (panel.refs) updatePanel();
     });
   } catch { /* almacenamiento bloqueado */ }
 
@@ -8917,7 +8959,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.shouldUseNitro = (content, index) => shouldUseNitro(String(content || ''), Number(index));
   window.__ntaDebug.autoNitro = () => CONFIG.useNitro !== false;
   window.__ntaDebug.setAutoNitro = (on) => setUseNitro(Boolean(on));
-  window.__ntaDebug.backgroundFarm = () => CONFIG.queue.backgroundFarm === true;
+  window.__ntaDebug.backgroundFarm = () => backgroundFarm();
   window.__ntaDebug.setBackgroundFarm = (on) => setBackgroundFarm(Boolean(on));
   window.__ntaDebug.nitroStrategy = () => CONFIG.nitroStrategy;
   window.__ntaDebug.setNitroStrategy = (value) => setNitroStrategy(String(value || ''));
@@ -15821,6 +15863,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           <div class="season" data-f="seasonRow" hidden><b data-f="seasonAlert">—</b></div>
           <div class="why" data-f="whyRow" hidden><b data-f="why">—</b></div>
           <div class="acts">
+            <button class="act ghost" type="button" data-act="afk" data-f="afkBtn" title="AFK farming is off: races only start while this tab is visible. Turn it on to keep the queue running hidden; a frozen tab can still end a race in a DQ.">AFK off</button>
             <button class="act" type="button" data-act="box">Claim box</button>
             <button class="act ghost" type="button" data-act="race">Race now</button>
             <button class="act danger" type="button" data-act="stop" title="Stop the bot; mid-race it waits for the current race to end (same as Alt+S)">Stop</button>
@@ -15891,6 +15934,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         why: root.querySelector('[data-f="why"]'),
         boxBtn: root.querySelector('[data-act="box"]'),
         raceBtn: root.querySelector('[data-act="race"]'),
+        afkBtn: root.querySelector('[data-act="afk"]'),
         stopBtn: root.querySelector('[data-act="stop"]'),
         resumeBtn: root.querySelector('[data-act="resume"]'),
         retryBtn: root.querySelector('[data-act="retry"]'),
@@ -15972,6 +16016,22 @@ All of this only aims at believable statistics. It is your call and your risk.
         }
         paintGaragePanel();
       });
+
+      // AFK se puede cambiar sin entrar a una carrera. El cambio se guarda y el
+      // evento storage lo lleva al iframe y a las demas pestanas; la cola de
+      // arriba ya lo tiene en su propio CONFIG.
+      if (refs.afkBtn) {
+        refs.afkBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const next = !backgroundFarm();
+          setBackgroundFarm(next);
+          queueWhy(next
+            ? 'AFK farming: on from the garage; a hidden tab keeps racing.'
+            : 'AFK farming: off from the garage; new races wait for a visible tab.');
+          paintGaragePanel();
+          if (next && document.visibilityState === 'hidden') loop();
+        });
+      }
 
       // El boton abre carrera ya: si habia una cuenta atras en marcha se borra
       // antes de pulsar, para que no quede un segundo clic programado sobre un
@@ -16314,17 +16374,33 @@ All of this only aims at believable statistics. It is your call and your risk.
           title: '«Race Now» is not sticking; the queue is waiting for the site to recover.',
         };
       }
-      if (isArmed()) {
+      // La fila `afk` dice el modo, no solo que la cola este armada. Antes
+      // decia «on» incluso con AFK apagado, que es justo lo contrario de lo que
+      // el usuario acaba de configurar. Cuando esta encendido, `hidden` avisa
+      // de que la cola sigue sin depender de que la pestana se vea.
+      if (!backgroundFarm()) {
         return {
-          text: 'on',
+          text: 'off',
+          warn: isArmed() ? 1 : 0,
+          title: isArmed()
+            ? 'AFK farming is off: races only start while this tab is visible. Turn it on from the garage button or TUNE.'
+            : 'AFK farming is off; the queue is waiting and re-arms by itself when it can.',
+        };
+      }
+      if (isArmed()) {
+        const hidden = pageHidden();
+        return {
+          text: hidden ? 'on · hidden' : 'on',
           warn: 0,
-          title: 'AFK cycle active: signed in, armed and cycling races by itself.',
+          title: hidden
+            ? 'AFK cycle active: farming is on and this tab is hidden; the queue keeps racing on the Worker clock.'
+            : 'AFK cycle active: farming is on; hiding this tab keeps the queue racing, and the background clock checks itself before opening a race.',
         };
       }
       return {
-        text: 'waiting',
+        text: 'on · waiting',
         warn: 1,
-        title: 'Signed in; the garage queue arms itself again automatically.',
+        title: 'AFK farming is on; the queue is waiting and starts again by itself.',
       };
     }
 
@@ -16388,6 +16464,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       qpanel.afk.textContent = afk.text;
       qpanel.afk.dataset.warn = String(afk.warn);
       qpanel.afkRow.title = afk.title;
+      if (qpanel.afkBtn) {
+        qpanel.afkBtn.textContent = backgroundFarm() ? 'AFK on' : 'AFK off';
+        qpanel.afkBtn.title = backgroundFarm()
+          ? 'AFK farming is on: hiding this tab keeps the queue running. Turn it off to stop starting races in the background.'
+          : 'AFK farming is off: races only start while this tab is visible. Turn it on to keep the queue running hidden; a frozen tab can still end a race in a DQ.';
+      }
       const retryLeft = Math.max(0, loginRetryAt - Date.now());
       const hasRetry = Boolean(loginRetryAt);
       qpanel.retryRow.hidden = !hasRetry;
@@ -16683,6 +16765,19 @@ All of this only aims at believable statistics. It is your call and your risk.
     addEventListener('storage', (event) => {
       const key = event.key;
       if (!key || !event.newValue) return;
+      if (key === KEYS.prefs) {
+        // El cambio de AFK llega desde el iframe u otra pestana. El listener
+        // principal ya actualizo CONFIG; aqui se repinta el garaje y, si la
+        // pestana esta oculta, se arranca el latido por Worker sin esperar al
+        // setInterval frenado.
+        let saved = null;
+        try { saved = JSON.parse(event.newValue); } catch { return; }
+        if (saved && typeof saved.backgroundFarm === 'boolean') {
+          paintGaragePanel();
+          if (saved.backgroundFarm && document.visibilityState === 'hidden') loop();
+        }
+        return;
+      }
       if (key === KEYS.dailyRaceLimit || key === KEYS.dailyXpLimit) invalidateTodayCache();
       const value = Number(event.newValue);
       let changed = false;

@@ -65,7 +65,7 @@ stats, and shows why it is waiting.
 <p align="center"><sub>A harness capture with demo values. The real panel sits in the bottom-right corner of the game.</sub></p>
 
 - **Live:** WPM, accuracy, the AUTO pace badge, target range, race count, session average, result and the game HUD. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
-- **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops.
+- **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops. The same panel has the **AFK off/on** control and shows whether the queue is visible, hidden or blocked by another gate.
 - **Tune:** pace profile, limits, breaks, stickers, sound, AFK farming (off by default) and the safety guard. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
@@ -111,7 +111,12 @@ average, the effective target and the top together, for example
 fields. Leave them empty or at 0 for automatic calibration. The values are saved
 with the rest of the configuration and included in exports. **AFK farming** is
 off by default: with it off, no new race starts while the tab is hidden, which
-removes the hidden-tab freeze DQ risk. Turn it on only if you accept that risk.
+removes the hidden-tab freeze DQ risk. It can be switched from `TUNE` or from
+the garage's **AFK off/on** button; the change reaches the race frame, the
+garage queue and other tabs at once, without a reload. With no other gate
+active, the `afk` row reads `off`, `on` or `on · hidden`; a sign-in, stop,
+block or active-hours gate still takes priority. Turn it on only if you accept
+that risk.
 
 ## Themes
 
@@ -160,9 +165,10 @@ In the garage, **Resume** does the same as <kbd>Alt</kbd> + <kbd>A</kbd>.
 The script never types credentials and never attempts a CAPTCHA. If the site
 reports a permanent ban, it stops and does not try the account again. Chrome can
 freeze a hidden tab, so keep the race tab visible for long unattended runs; AFK
-farming is off by default for the same reason. The race loop also recovers a
-Web Lock left by a frozen tab and sends a watchdog key if a live race goes too
-long without an accepted character.
+farming is off by default for the same reason. Its garage button makes the
+choice explicit, and the row tells you whether the hidden mode is actually on.
+The race loop also recovers a Web Lock left by a frozen tab and sends a
+watchdog key if a live race goes too long without an accepted character.
 
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never

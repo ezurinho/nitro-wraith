@@ -4035,6 +4035,51 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageAfk.cleared.stored === null,
       garageAfk);
 
+    // AFK tiene que cruzar las dos ventanas: TUNE vive en el iframe y la cola
+    // que abre carreras ocultas vive arriba. Antes el cambio solo se aplicaba al
+    // recargar, asi que el interruptor parecia no hacer nada.
+    const afkSync = await cdp.evaluate(`(async () => {
+      const root = document.getElementById('nt-queue-panel').shadowRoot;
+      const btn = root.querySelector('[data-act="afk"]');
+      const status = root.querySelector('[data-f="afk"]');
+      const d = window.__ntaDebug;
+      const frame = document.querySelector('iframe');
+      const fd = frame && frame.contentWindow.__ntaDebug;
+      if (!btn || !d || !fd || !d.backgroundFarm || !fd.backgroundFarm || !fd.setBackgroundFarm) {
+        return { hasRow: false };
+      }
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      d.setBackgroundFarm(false);
+      await wait(80);
+      d.garagePaint();
+      const read = () => ({
+        top: d.backgroundFarm(),
+        frame: fd.backgroundFarm(),
+        label: (btn.textContent || '').trim(),
+        status: (status.textContent || '').trim(),
+        stored: Boolean(JSON.parse(localStorage.getItem('autoTyperPrefs') || '{}').backgroundFarm),
+      });
+      const off = read();
+      btn.click();
+      await wait(120);
+      d.garagePaint();
+      const on = read();
+      fd.setBackgroundFarm(false);
+      await wait(120);
+      d.garagePaint();
+      const back = read();
+      return { hasRow: true, off, on, back };
+    })()`, true);
+    check('the garage AFK button and both windows share one live switch',
+      afkSync.hasRow
+        && afkSync.off.top === false && afkSync.off.frame === false
+        && afkSync.off.label === 'AFK off'
+        && afkSync.on.top === true && afkSync.on.frame === true
+        && afkSync.on.label === 'AFK on' && afkSync.on.stored === true
+        && afkSync.back.top === false && afkSync.back.frame === false
+        && afkSync.back.label === 'AFK off',
+      afkSync);
+
     // El boton aparece solo con una cita y la adelanta. Con una sesion viva no
     // navega: retira la cita, que es el caso seguro para probar el clic real.
     const garageRetryNow = await cdp.evaluate(`(() => {
@@ -6433,7 +6478,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const afk = root && root.querySelector('[data-f="afk"]');
       const retryRow = root && root.querySelector('[data-f="retryRow"]');
       const d = window.__ntaDebug;
-      if (!afkRow || !afk || !retryRow || !d || !d.garagePaint) return { hasRow: false };
+      if (!afkRow || !afk || !retryRow || !d || !d.garagePaint || !d.setBackgroundFarm) return { hasRow: false };
 
       d.loginRetryCancel();
       localStorage.setItem('player_token', 'live-afk-token');
@@ -6443,14 +6488,16 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       sessionStorage.setItem('ntQueue:armedAt', JSON.stringify(Date.now()));
       sessionStorage.removeItem('ntQueue:raceNowBounces');
       sessionStorage.removeItem('ntQueue:raceNowBounceAt');
+      d.setBackgroundFarm(true);
       d.garagePaint();
-
-      return {
+      const active = {
         hasRow: true,
         text: (afk.textContent || '').trim(),
         title: afkRow.title,
         retryHidden: retryRow.hidden,
       };
+      d.setBackgroundFarm(false);
+      return active;
     })()`);
   } finally {
     if (afkTab) {
@@ -6459,7 +6506,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     }
   }
   check('the AFK indicator reads on with a live session and no gate',
-    garageActive.hasRow && garageActive.text === 'on'
+    garageActive.hasRow && /^on\b/.test(garageActive.text)
       && /AFK cycle active/.test(garageActive.title)
       && garageActive.retryHidden === true,
     garageActive);
