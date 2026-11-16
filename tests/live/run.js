@@ -6518,6 +6518,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         calibrated: state.calibrated,
         accuracy: state.accuracy,
         identity: d.accountIdentity(),
+        needsRead: d.needsAccountRead(),
       };
     } finally {
       for (const key of keys) {
@@ -6530,7 +6531,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     accountReset.changed === true
       && accountReset.storedAccount === '555111'
       && accountReset.calibrated === null && accountReset.accuracy === null
-      && accountReset.identity === '555111',
+      && accountReset.identity === '555111' && accountReset.needsRead === true,
     accountReset);
 
   return results;

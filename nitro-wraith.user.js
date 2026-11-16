@@ -1981,6 +1981,10 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Media de precision leida del API. `null` = nunca se ha leido y manda el
   // 96-98 escrito a mano.
   let accountStats = null;
+  // Una cuenta nueva debe leer su historico completo antes de la primera
+  // carrera; applyPrefs puede dejar un rango con la media corta de persist:nt,
+  // pero el mensual es el que demuestra si la cuenta es de 100 o de 50.
+  let calibrationNeedsAccountRead = false;
 
   let calibratedAccuracy = (() => {
     try {
@@ -2035,8 +2039,16 @@ All of this only aims at believable statistics. It is your call and your risk.
     const id = readAccountIdentity();
     if (!id) return false;
     const stored = disk.get(KEYS.calibrationAccount, '');
-    if (stored === id) return false;
+    if (stored === id) {
+      // Tras actualizar el userscript se vuelve a leer el historico completo
+      // antes de la siguiente carrera, no solo la media corta del perfil.
+      if (calibratedRange && disk.get(KEYS.calibrationVersion, '') !== VERSION) {
+        calibrationNeedsAccountRead = true;
+      }
+      return false;
+    }
     clearAccountCalibration();
+    calibrationNeedsAccountRead = true;
     disk.set(KEYS.calibrationAccount, id);
     return true;
   }
@@ -2774,6 +2786,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     disk.set(KEYS.calibrationAt, String(Date.now()));
+    calibrationNeedsAccountRead = false;
     rememberCalibrationAccount();
     paintCalibration();
     updatePanel();
@@ -7554,9 +7567,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     // persist:nt: se lee la cuenta antes de abrir, en vez de arrancar con el
     // rango de respaldo 104-117. Si el API falla, el bucle sigue con lo que
     // haya y nunca deja la cola parada por esto.
-    if (!customWpm() && !calibratedRange && !(accountStats && accountStats.wpm)) {
-      log('No account pace yet: reading the signed-in account before the first race.');
+    if (calibrationNeedsAccountRead
+      || (!customWpm() && !calibratedRange && !(accountStats && accountStats.wpm))) {
+      log('Reading the signed-in account before the first race.');
       await maybeCalibrate(true);
+      calibrationNeedsAccountRead = false;
     }
 
     // Si se recargo la pagina en mitad de un descanso, se termina antes de
@@ -8728,6 +8743,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.accountIdentity = () => readAccountIdentity();
   window.__ntaDebug.calibrationAccount = () => disk.get(KEYS.calibrationAccount, '');
   window.__ntaDebug.ensureCalibrationAccount = () => ensureCalibrationAccount();
+  window.__ntaDebug.needsAccountRead = () => calibrationNeedsAccountRead;
   window.__ntaDebug.stickerChance = () => CONFIG.stickers.chance;
   window.__ntaDebug.progressWpm = (progress) => progressWpm(progress);
   window.__ntaDebug.lastProgress = () => session.lastProgress || null;
