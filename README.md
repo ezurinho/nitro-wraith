@@ -10,8 +10,8 @@
 
 <p align="center">
   <strong>Nitro Type, at your pace.</strong><br>
-  A Tampermonkey userscript that queues races, types within your own stats, and
-  pauses when something needs a human.
+  A Tampermonkey userscript that queues races, types at a pace based on your own
+  stats, and pauses when something needs a human.
 </p>
 
 <p align="center">
