@@ -2459,6 +2459,17 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         storedAcc: JSON.parse(w.localStorage.getItem('autoTyperCalibratedAccuracy') || 'null'),
         logWpm: shadow.querySelector('[data-field="calLogWpm"]').textContent,
         logWhen: shadow.querySelector('[data-field="calLogWhen"]').textContent,
+        acct: {
+          state: shadow.querySelector('[data-field="acctState"]').textContent,
+          stateAttr: shadow.querySelector('[data-field="acctState"]').dataset.state,
+          avg: shadow.querySelector('[data-field="acctAvg"]').textContent,
+          target: shadow.querySelector('[data-field="acctTarget"]').textContent,
+          top: shadow.querySelector('[data-field="acctTop"]').textContent,
+          history: shadow.querySelector('[data-field="acctHistory"]').textContent,
+          range: shadow.querySelector('[data-field="acctRange"]').textContent,
+          read: shadow.querySelector('[data-field="acctRead"]').textContent,
+          refreshDisabled: shadow.querySelector('[data-field="acctRefresh"]').disabled,
+        },
       };
     } finally {
       w.fetch = realFetch;
@@ -2478,6 +2489,13 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     calibration.auto === true && calibration.autoText === 'on', calibration);
   check('Live shows the auto pace and the account top WPM',
     calibration.paceSource === 'auto · 112 target · 230 top', calibration.paceSource);
+  check('the Live account card shows the read stats and its refresh control',
+    calibration.acct.state === 'profile only' && calibration.acct.stateAttr === 'ready'
+      && calibration.acct.avg === '112.4' && calibration.acct.target === '112'
+      && calibration.acct.top === '230' && calibration.acct.history === 'profile only'
+      && calibration.acct.range === '106-118 wpm' && calibration.acct.read !== 'never'
+      && calibration.acct.refreshDisabled === false,
+    calibration.acct);
 
   // La media corta del perfil puede caer porque las propias carreras del bot
   // son lentas. La media mensual de toda la cuenta tiene que mandar cuando es
@@ -6464,6 +6482,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   const accountIdentity = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     const d = w.__ntaDebug;
+    d.muteAccountReload(3000);
     const old = w.localStorage.getItem('persist:nt');
     try {
       w.localStorage.setItem('persist:nt', JSON.stringify({
@@ -6487,6 +6506,43 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     accountIdentity);
 
   if (SHOT_DIR) await capturePanelThemes(cdp, appUrl);
+
+  // Un fallo del API no puede dejar la cuenta sin reintento hasta media hora:
+  // el backoff corto se ve en el estado de la tarjeta y en el reloj expuesto.
+  const calibrationRetry = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const realFetch = w.fetch;
+    w.fetch = (url, options) => {
+      if (String(url).includes('/api/v2/stats/summary')) {
+        return Promise.resolve(new w.Response('nope', { status: 503 }));
+      }
+      return realFetch(url, options);
+    };
+    try {
+      d.refreshCalibration();
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      return {
+        health: typeof d.calibrationHealth === 'function' ? d.calibrationHealth() : null,
+        hasHealth: typeof d.calibrationHealth,
+        state: shadow && shadow.querySelector('[data-field="acctState"]')
+          ? shadow.querySelector('[data-field="acctState"]').dataset.state : null,
+        label: shadow && shadow.querySelector('[data-field="acctState"]')
+          ? shadow.querySelector('[data-field="acctState"]').textContent : null,
+      };
+    } finally {
+      w.fetch = realFetch;
+    }
+  })()`, true);
+  check('a failed account read retries soon and says so on the Live card',
+    Boolean(calibrationRetry.health)
+      && calibrationRetry.health.failures >= 1
+      && calibrationRetry.health.retryIn > 0
+      && /503|HTTP/i.test(calibrationRetry.health.error)
+      && calibrationRetry.state === 'warn'
+      && /^retry /.test(calibrationRetry.label),
+    calibrationRetry);
 
   // Cambio de cuenta: la identidad anterior no puede conservar el rango. Se
   // restaura el almacenamiento al terminar para no dejar basura entre pruebas.

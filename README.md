@@ -64,7 +64,7 @@ stats, and shows why it is waiting.
 
 <p align="center"><sub>A harness capture with demo values. The real panel sits in the bottom-right corner of the game.</sub></p>
 
-- **Live:** WPM, accuracy, the AUTO pace badge, target range, race count, session average, result and the game HUD.
+- **Live:** WPM, accuracy, the AUTO pace badge, target range, race count, session average, result and the game HUD. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
 - **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops.
 - **Tune:** pace profile, limits, breaks, stickers, sound, AFK farming (off by default) and the safety guard.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
@@ -78,10 +78,13 @@ current.
 
 The first load reads your average, top WPM and full monthly history from the
 account that is signed in. The stats API refreshes them every 30 minutes;
-clicking `auto` forces a fresh read, and a new script version triggers one fresh
-read immediately after the update. Calibration is tied to the account ID: if you
-switch accounts in the same browser, the old range is cleared and the new
-account is read before racing.
+clicking `auto` or the **refresh** button on the Live Account card forces a
+fresh read, and a new script version triggers one immediately after the update.
+Calibration is tied to the account ID: if you switch accounts in the same
+browser, the old range is cleared and the new account is read before racing.
+If a read fails, the card shows the retry and the bot tries again after two
+minutes, then after fifteen minutes while the API stays down; coming back
+online or returning to the tab also asks again.
 
 Automatic calibration has two rules:
 

@@ -1985,6 +1985,14 @@ All of this only aims at believable statistics. It is your call and your risk.
   // carrera; applyPrefs puede dejar un rango con la media corta de persist:nt,
   // pero el mensual es el que demuestra si la cuenta es de 100 o de 50.
   let calibrationNeedsAccountRead = false;
+  // Estado de la ultima lectura de cuenta. Vive aqui, antes de applyPrefs:
+  // ensureCalibrationAccount puede limpiar el rango en el arranque.
+  let calibrationError = '';
+  let calibrationFailures = 0;
+  let calibrationRetryAt = 0;
+  // El banco escribe localStorage a mano; la recarga por cambio de cuenta se
+  // puede silenciar unos segundos para no cortar una prueba a mitad.
+  let accountReloadMutedUntil = 0;
 
   let calibratedAccuracy = (() => {
     try {
@@ -2028,6 +2036,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibratedRange = null;
     calibratedAccuracy = null;
     accountStats = null;
+    calibrationError = '';
+    calibrationFailures = 0;
+    calibrationRetryAt = 0;
     calibrationReadAt = 0;
     calibrationReadValue = 0;
   }
@@ -2711,6 +2722,10 @@ All of this only aims at believable statistics. It is your call and your risk.
   // ancho lo decide wpmRangeFor; el techo duro se aplica alli. La calibracion
   // automatica solo sube: una media corta no puede borrar un objetivo alto.
   function applyCalibration(stats) {
+    // Una lectura completa borra el error anterior y el backoff de reintento.
+    calibrationError = '';
+    calibrationFailures = 0;
+    calibrationRetryAt = 0;
     const beforeWpm = { min: CONFIG.wpm.min, max: CONFIG.wpm.max };
     const beforeAcc = { min: CONFIG.accuracy.min, max: CONFIG.accuracy.max };
     const manualWpm = customWpm();
@@ -2810,12 +2825,16 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     // Al cambiar de version se vuelve a leer aunque la foto anterior sea
     // reciente: asi una release nueva no sigue usando un rango viejo durante
-    // media hora. Si el fetch falla, se marca igual y se reintenta a los 30 min.
+    // media hora. Tras un fallo, el reintento corto salta antes del refresco
+    // normal; solo se espera la ventana de 30 min cuando la lectura fue bien.
     const versionChanged = disk.get(KEYS.calibrationVersion, '') !== VERSION;
+    const retryDue = calibrationRetryAt > 0 && now >= calibrationRetryAt;
     const last = calibrationStamp();
-    if (!force && !versionChanged && now - last < CONFIG.calibration.refreshMs) return;
+    if (!force && !versionChanged && !retryDue && now - last < CONFIG.calibration.refreshMs) return;
+    if (retryDue) calibrationRetryAt = 0;
 
     calibrating = true;
+    paintCalibration();
     try {
       const result = await fetchAccountStats();
       if (result.wpm || result.accuracy) {
@@ -2823,12 +2842,21 @@ All of this only aims at believable statistics. It is your call and your risk.
         return;
       }
       // Un fallo tambien marca la hora: si no, el latido reintentaria cada
-      // 500 ms contra un API que no contesta.
+      // 500 ms contra un API que no contesta. El backoff es corto las dos
+      // primeras veces y se relaja si el API sigue caido.
+      const reason = result.reason || 'no data';
+      calibrationError = reason;
+      calibrationFailures += 1;
+      const retryMs = calibrationFailures >= 3 ? 15 * 60 * 1000 : 2 * 60 * 1000;
+      calibrationRetryAt = Date.now() + retryMs;
       disk.set(KEYS.calibrationAt, String(Date.now()));
-      if (force) log(`Pace calibration: ${result.reason || 'no data'}; keeping ${CONFIG.wpm.min}-${CONFIG.wpm.max} WPM / ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
+      if (force || calibrationFailures === 1) {
+        log(`Pace calibration: ${reason}; keeping ${CONFIG.wpm.min}-${CONFIG.wpm.max} WPM / ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%. Retrying in ${Math.round(retryMs / 60000)} min.`);
+      }
     } finally {
       disk.set(KEYS.calibrationVersion, VERSION);
       calibrating = false;
+      paintCalibration();
     }
   }
 
@@ -2866,7 +2894,26 @@ All of this only aims at believable statistics. It is your call and your risk.
     const wpmText = calibratedRange ? `${calibratedRange.min}-${calibratedRange.max}` : '—';
     const accText = calibratedAccuracy ? `${calibratedAccuracy.min}-${calibratedAccuracy.max}%` : '—';
     const at = calibrationStamp();
-    const calSig = [wpmText, accText, accountText, at,
+    const accountId = disk.get(KEYS.calibrationAccount, '') || readAccountIdentity() || '';
+    const lifetimeInfo = accountStats && accountStats.lifetime;
+    const retryMinutes = calibrationRetryAt > Date.now()
+      ? Math.max(1, Math.ceil((calibrationRetryAt - Date.now()) / 60000)) : 0;
+    const acctState = calibrating ? 'reading'
+      : calibrationError ? 'warn'
+        : accountStats ? 'ready' : 'idle';
+    const acctLabel = calibrating ? 'reading…'
+      : calibrationError ? (retryMinutes ? `retry ${retryMinutes}m` : 'retry soon')
+        : !accountStats ? 'waiting'
+          : lifetimeInfo && lifetimeInfo.stale ? 'cached fallback'
+            : lifetimeInfo && lifetimeInfo.cached ? 'cached 24h'
+              : lifetimeInfo && lifetimeInfo.rows ? 'synced'
+                : 'profile only';
+    const acctHistory = lifetimeInfo && lifetimeInfo.rows
+      ? `${lifetimeInfo.rows} mo · ${lifetimeInfo.pages} pg${lifetimeInfo.stale ? ' · stale' : lifetimeInfo.cached ? ' · cached' : ''}`
+      : accountStats ? 'profile only' : '—';
+    const acctRead = at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'never';
+    const calSig = [wpmText, accText, accountText, at, accountId, acctState, acctLabel,
+      acctHistory, acctRead, calibrating, calibrationError, calibrationRetryAt,
       Number(accountStats && accountStats.targetWpm) || 0,
       Number(accountStats && accountStats.bestWpm) || 0,
       Number(accountStats && accountStats.races) || 0].join('|');
@@ -2880,6 +2927,46 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.calWpm, wpmText);
     setText(panel.refs.calAcc, accText);
     setText(panel.refs.calAccount, accountText);
+
+    // Tarjeta de cuenta de la vista Live: dice de donde salen el objetivo y el
+    // historico, no solo el numero final. El boton fuerza una lectura nueva sin
+    // tener que abrir TUNE.
+    setText(panel.refs.acctId, accountId ? `#${accountId}` : 'not signed in');
+    setText(panel.refs.acctAvg, accountStats && Number(accountStats.wpm) > 0
+      ? Number(accountStats.wpm).toFixed(1) : '—');
+    setText(panel.refs.acctTarget, accountStats && Number(accountStats.targetWpm) > 0
+      ? String(Math.round(Number(accountStats.targetWpm))) : '—');
+    setText(panel.refs.acctTop, accountStats && Number(accountStats.bestWpm) > 0
+      ? String(Math.round(Number(accountStats.bestWpm))) : '—');
+    setText(panel.refs.acctHistory, acctHistory);
+    setText(panel.refs.acctRange, wpmText === '—' ? '—' : `${wpmText} wpm`);
+    setText(panel.refs.acctRead, acctRead);
+    if (panel.refs.acctState) {
+      setText(panel.refs.acctState, acctLabel);
+      if (panel.refs.acctState.dataset.state !== acctState) {
+        panel.refs.acctState.dataset.state = acctState;
+      }
+    }
+    if (panel.refs.acctHistory) {
+      panel.refs.acctHistory.title = lifetimeInfo && lifetimeInfo.rows
+        ? `${lifetimeInfo.rows} monthly rows across ${lifetimeInfo.pages} API pages${lifetimeInfo.cached ? '; cached' : ''}${lifetimeInfo.stale ? '; using the last complete fallback' : ''}.`
+        : 'The short profile has average and top; the monthly history adds the lifetime average.';
+    }
+    if (panel.refs.acctRead) {
+      panel.refs.acctRead.title = at
+        ? `Last full account read: ${new Date(at).toLocaleString()}.`
+        : 'The account has not been read yet.';
+    }
+    if (panel.refs.acctRefresh) {
+      const busy = Boolean(calibrating);
+      if (panel.refs.acctRefresh.disabled !== busy) panel.refs.acctRefresh.disabled = busy;
+      if (panel.refs.acctRefresh.getAttribute('aria-busy') !== String(busy)) {
+        panel.refs.acctRefresh.setAttribute('aria-busy', String(busy));
+      }
+      panel.refs.acctRefresh.title = busy
+        ? 'Reading the signed-in account now…'
+        : 'Read the account again now: profile and full monthly history.';
+    }
 
     // La chapa de la vista Live: el usuario ve de donde sale su objetivo sin
     // abrir TUNE. Se muestra el target, no la media corta que puede estar
@@ -8345,7 +8432,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (key === 'persist:nt' || key === 'player_token') {
         const id = readAccountIdentity();
         const stored = disk.get(KEYS.calibrationAccount, '');
-        if (id && stored && id !== stored) {
+        if (Date.now() >= accountReloadMutedUntil && id && stored && id !== stored) {
           location.reload();
           return;
         }
@@ -8771,6 +8858,16 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.checkForUpdate = (force) => checkForUpdate(Boolean(force));
   window.__ntaDebug.live = () => liveSituation();
   window.__ntaDebug.calibrationAuto = () => CONFIG.calibration.auto === true;
+  window.__ntaDebug.calibrationHealth = () => ({
+    calibrating,
+    error: calibrationError,
+    failures: calibrationFailures,
+    retryIn: Math.max(0, calibrationRetryAt - Date.now()),
+  });
+  window.__ntaDebug.muteAccountReload = (ms = 2000) => {
+    accountReloadMutedUntil = Date.now() + Math.max(0, Number(ms) || 0);
+    return accountReloadMutedUntil;
+  };
   window.__ntaDebug.refreshCalibration = () => refreshCalibration();
 
   // El banco detiene esta copia sin tocar el teclado: el guardia debe soltar el
@@ -10498,6 +10595,23 @@ All of this only aims at believable statistics. It is your call and your risk.
         .v-stats .live-card .rows .result-row { grid-column: 1 / -1; }
         .v-stats .season-card .rows .row b { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .v-stats .live-card .rows .row.secondary { display: none; }
+
+        /* ---------- cuenta ------------------------------------------------- */
+        /* La vista Live ya no solo dice el target: ensena la cuenta que se leyo,
+           el historico usado y cuando fue la ultima lectura. */
+        .account-card .acct-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin: -1px 0 6px; }
+        .account-card .acct-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--acc-2); }
+        .account-card .acct-refresh { flex: 0 0 auto; padding: 4px 8px; font-size: 8px; }
+        .account-card .acct-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
+        .account-card .acct-metrics > div { min-width: 0; padding: 6px 7px; background: rgba(0, 0, 0, .16); }
+        .account-card .acct-metrics b { display: block; font: 700 15px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink); }
+        .account-card .acct-metrics span { display: block; margin-top: 2px; font: 700 7px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--dim-2); }
+        .account-card .rows { margin-top: 7px; }
+        .account-card .acct-state { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .account-card .acct-state[data-state="ready"] { color: var(--acc); }
+        .account-card .acct-state[data-state="reading"] { color: var(--info); }
+        .account-card .acct-state[data-state="warn"] { color: var(--warn); }
+        .account-card .acct-state[data-state="idle"] { color: var(--dim-2); }
         .season-card .season-name { margin: 1px 0 7px; font-size: 13px; }
         .season-card .season-actions { margin-top: 7px; }
         .season-card .season-actions .act { font-size: 8px; padding: 5px 9px; }
@@ -10688,6 +10802,24 @@ All of this only aims at believable statistics. It is your call and your risk.
                   <div class="row box-row" style="display:none" title="Daily Mystery Box in the garage"><span>box</span><b data-field="box">—</b></div>
                   <div class="row break-row secondary"><span>break</span><b data-field="break">—</b></div>
                   <div class="row dq-row" style="display:none"><span>dq streak</span><b data-field="dq">×0</b></div>
+                </div>
+              </div>
+              <div class="card account-card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0M4 4h3M4 4v3M20 4h-3M20 4v3"/></svg></span>
+                <div class="card-h"><span class="card-t">Account</span><span class="card-s acct-state" data-field="acctState" data-state="idle" role="status" aria-live="polite">waiting</span></div>
+                <div class="acct-top">
+                  <b class="acct-id" data-field="acctId">—</b>
+                  <button class="act acct-refresh" type="button" data-field="acctRefresh" title="Read the signed-in account now: profile and full monthly history">refresh</button>
+                </div>
+                <div class="acct-metrics">
+                  <div><b data-field="acctAvg">—</b><span>avg</span></div>
+                  <div><b data-field="acctTarget">—</b><span>target</span></div>
+                  <div><b data-field="acctTop">—</b><span>top</span></div>
+                </div>
+                <div class="rows">
+                  <div class="row"><span>history</span><b data-field="acctHistory">—</b></div>
+                  <div class="row"><span>range</span><b data-field="acctRange">—</b></div>
+                  <div class="row"><span>read</span><b data-field="acctRead">never</b></div>
                 </div>
               </div>
               <div class="card season-card" data-field="seasonCard">
@@ -10967,7 +11099,7 @@ All of this only aims at believable statistics. It is your call and your risk.
                 <div class="season-actions">
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
                 </div>
-                <div class="cfg-note">The Gist meta is checked once an hour; the installed copy changes only when you download a release.</div>
+                <div class="cfg-note">The Gist meta is checked every 5 minutes and when you return to the tab; the installed copy changes only when you download a release.</div>
               </div>
               <div class="card">
                 <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>
@@ -11150,6 +11282,15 @@ All of this only aims at believable statistics. It is your call and your risk.
       calWpm: pick('[data-field="calWpm"]'),
       calAcc: pick('[data-field="calAcc"]'),
       calAccount: pick('[data-field="calAccount"]'),
+      acctId: pick('[data-field="acctId"]'),
+      acctState: pick('[data-field="acctState"]'),
+      acctAvg: pick('[data-field="acctAvg"]'),
+      acctTarget: pick('[data-field="acctTarget"]'),
+      acctTop: pick('[data-field="acctTop"]'),
+      acctHistory: pick('[data-field="acctHistory"]'),
+      acctRange: pick('[data-field="acctRange"]'),
+      acctRead: pick('[data-field="acctRead"]'),
+      acctRefresh: pick('[data-field="acctRefresh"]'),
       customWpm: pick('[data-field="customWpm"]'),
       customAcc: pick('[data-field="customAcc"]'),
       calDelta: pick('[data-field="calDelta"]'),
@@ -11437,6 +11578,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       panel.refs.calRow.addEventListener('click', (event) => {
         event.stopPropagation();
         refreshCalibration();
+      });
+    }
+
+    if (panel.refs.acctRefresh) {
+      panel.refs.acctRefresh.addEventListener('click', (event) => {
+        event.stopPropagation();
+        refreshCalibration();
+        panel.refs.acctRefresh.blur();
       });
     }
 
@@ -19073,9 +19222,18 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (!document.hidden) {
         updatePanel(true);
         checkForUpdate();
+        // Si el API fallo, al volver a la pestana se reintenta sin esperar al
+        // latido ni a la ventana normal de 30 minutos.
+        maybeCalibrate();
       }
     });
     window.addEventListener('focus', () => checkForUpdate());
+    window.addEventListener('online', () => {
+      // Volver la conexion no debe dejar el objetivo con la foto vieja hasta
+      // media hora: se pide la cuenta en cuanto el navegador esta online, pero
+      // sin saltarse la sonda de un minuto ni el backoff de un fallo reciente.
+      maybeCalibrate();
+    });
 
     // Un latido no puede llevarse por delante a los demas. Si `watchRaceResults`
     // tropieza con un DOM a medio montar (React remontando la carrera), sin esto

@@ -24,6 +24,11 @@ does not try to beat the game's limits; it tries to stay inside them.
   range, lifetime cache and calibration timestamp, then reads the signed-in
   account before applying a target. A 50 WPM account cannot inherit the 110 WPM
   range of another account in the same browser.
+- The Live **Account** card shows the signed-in ID, effective average, target,
+  top, monthly rows/pages, last read and a refresh button. A failed account read
+  keeps the last usable range, retries after two minutes, then relaxes to
+  fifteen minutes while the API stays down. Coming online or returning to the
+  tab also triggers a read.
 - `TUNE` exposes custom WPM (15–119) and custom accuracy (96–100). Empty means
   automatic; a value overrides auto calibration and is persisted with the
   exported configuration.
