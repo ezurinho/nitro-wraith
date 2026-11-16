@@ -50,7 +50,7 @@ stats, and shows why it is waiting.
 | Area | Behaviour |
 | --- | --- |
 | **Race loop** | Opens the next race after a short human delay. After a DQ it returns to the garage instead of pressing Try Again. |
-| **Typing** | Builds a WPM range from your average and top, capped at 120. A slow streak cannot lower it; if your average falls but your top is still high, it recovers toward 110. Accuracy stays at 96% or above. |
+| **Typing** | Builds a WPM range from your average and top, capped at 120. A slow streak cannot lower it; if your average falls but your top is still high, it recovers toward 110. The panel shows the real `avg · target · top` so a collapsed short average cannot look like the target. Accuracy stays at 96% or above. |
 | **Rewards** | Claims the Mystery Box, closes daily challenges and uses stickers when the settings allow it. |
 | **Session care** | Renews the session when needed. Passwords and CAPTCHAs stay manual. |
 | **Limits** | Session races, time, XP, active hours and daily race/XP budgets. |
@@ -66,16 +66,19 @@ stats, and shows why it is waiting.
 
 - **Live:** WPM, accuracy, the AUTO pace badge, target range, race count, session average, result and the game HUD.
 - **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops.
-- **Tune:** pace profile, limits, breaks, stickers, sound and the safety guard.
+- **Tune:** pace profile, limits, breaks, stickers, sound, AFK farming (off by default) and the safety guard.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
-The update badge only appears when the Gist has a newer version. If you do not
-see it, your copy is current.
+The update badge only appears when the Gist has a newer version. The script
+checks every 5 minutes and again whenever you return to the tab, so a new
+release shows up without waiting an hour. If you do not see it, your copy is
+current.
 
 ## Pace
 
 The first load reads your average and top WPM from your profile. The stats API
-refreshes them every 30 minutes; clicking `auto` forces a fresh read.
+refreshes them every 30 minutes; clicking `auto` forces a fresh read, and a new
+script version triggers one fresh read immediately after the update.
 
 Automatic calibration has two rules:
 
@@ -88,11 +91,16 @@ Automatic calibration has two rules:
 
 When the API exposes monthly totals, the target also anchors to the higher
 lifetime average. The report shows how many rows and pages were used; if a page
-fails, the last complete snapshot is kept.
+fails, the last complete snapshot is kept. The account row shows the short
+average, the effective target and the top together, for example
+`38.0 avg · 117 target · 230 top`; the target is the middle of the range being
+typed, not the short average.
 
 `TUNE` has optional **custom WPM** (15–119) and **custom accuracy** (96–100)
 fields. Leave them empty or at 0 for automatic calibration. The values are saved
-with the rest of the configuration and included in exports.
+with the rest of the configuration and included in exports. **AFK farming** is
+off by default: with it off, no new race starts while the tab is hidden, which
+removes the hidden-tab freeze DQ risk. Turn it on only if you accept that risk.
 
 ## Themes
 
@@ -140,7 +148,10 @@ In the garage, **Resume** does the same as <kbd>Alt</kbd> + <kbd>A</kbd>.
 
 The script never types credentials and never attempts a CAPTCHA. If the site
 reports a permanent ban, it stops and does not try the account again. Chrome can
-freeze a hidden tab, so keep the race tab visible for long unattended runs.
+freeze a hidden tab, so keep the race tab visible for long unattended runs; AFK
+farming is off by default for the same reason. The race loop also recovers a
+Web Lock left by a frozen tab and sends a watchdog key if a live race goes too
+long without an accepted character.
 
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never

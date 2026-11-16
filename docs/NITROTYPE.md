@@ -37,6 +37,13 @@ does not try to beat the game's limits; it tries to stay inside them.
 - Nitro Type fills empty seats with bots and sizes race text for roughly 25 seconds.
 - A race with no typing for 12 seconds can trigger an inactivity DQ.
 - Five DQs in a row can block racing for a while.
+- A hidden tab can be frozen by Chrome (Energy Saver, memory pressure or
+  bfcache). A frozen page cannot type, so `backgroundFarm` is off by default;
+  it can be enabled in `TUNE` only if that freeze risk is accepted.
+- The pace ceiling never holds a key more than 5.5 seconds, and a live-race
+  watchdog sends one correct key if it sees no accepted key for 7 seconds and
+  no key sent for 7 seconds. That stays below the ~12 second DQ window when the
+  main loop is stuck behind a lock or an unexpected wait.
 - The queue adds human delays, occasional long breaks, and session or daily limits.
 - Mystery Box, daily challenges, stickers, and the season card are read from the
   game's own persisted state where possible.

@@ -2653,6 +2653,21 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('the target range still wraps a 112 WPM account',
     paceMath.high && paceMath.high.min === 106 && paceMath.high.max === 118, paceMath.high);
 
+  // El gobernador del techo no puede retener 15 s: el servidor DQ por
+  // inactividad a los ~12 s. Aunque la deuda de ritmo sea mayor, se corta en
+  // 5.5 s y se manda la tecla.
+  const capWaitLimit = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    return {
+      long: d.paceCapWaitFor(Date.now(), 150),
+      short: d.paceCapWaitFor(Date.now(), 1),
+    };
+  })()`);
+  check('the pace ceiling never holds a key long enough for an inactivity DQ',
+    capWaitLimit.long > 0 && capWaitLimit.long <= 5500
+      && capWaitLimit.short >= 0 && capWaitLimit.short <= 5500,
+    capWaitLimit);
+
   // La media corta puede estar en 38 mientras el top sigue en 230. El suelo de
   // recuperacion usa el top solo cuando la diferencia es grande y creible; una
   // cuenta principiante con top 50 no se dispara.
@@ -2673,6 +2688,52 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('a healthy average already above the floor is unchanged',
     recoveryPace.normal.center === 110 && recoveryPace.normal.floor === 110,
     recoveryPace.normal);
+
+  // Cuando el trinquete conserva un rango mas alto, la fila no puede seguir
+  // enseñando la media corta como si fuera el objetivo: avg, target y top van
+  // juntos y el target es el centro del rango que de verdad se teclea.
+  const collapsedAccount = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const realFetch = w.fetch;
+    w.localStorage.removeItem('autoTyperLifetimeWpm');
+    w.fetch = (url, options) => {
+      if (String(url).includes('/api/v2/stats/summary')) {
+        return Promise.resolve(new w.Response(
+          JSON.stringify({ success: true, data: { stats: {
+            wpm: 38, accuracy: 98.7, highestSpeed: 230, racesPlayed: 49226,
+          } } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ));
+      }
+      if (String(url).includes('/api/v2/stats/data/bymonth')) {
+        return Promise.resolve(new w.Response('', { status: 503 }));
+      }
+      return realFetch(url, options);
+    };
+    try {
+      const row = shadow.querySelector('[data-field="calRow"]');
+      row.click();
+      row.click();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return {
+        account: shadow.querySelector('[data-field="calAccount"]').textContent,
+        paceSource: shadow.querySelector('[data-field="paceSource"]').textContent,
+        range: shadow.querySelector('[data-field="calWpm"]').textContent,
+        calVersion: w.localStorage.getItem('autoTyperCalibrationVersion'),
+      };
+    } finally {
+      w.fetch = realFetch;
+      w.localStorage.removeItem('autoTyperLifetimeWpm');
+    }
+  })()`, true);
+  check('a collapsed short average shows avg, target and top together',
+    collapsedAccount.range === '113-120'
+      && collapsedAccount.account === '38.0 avg · 117 target · 230 top · 98.7%'
+      && collapsedAccount.paceSource === 'auto · 117 target · 230 top',
+    collapsedAccount);
+  check('calibration records the script version that produced the range',
+    Boolean(collapsedAccount.calVersion), collapsedAccount);
 
   // Respaldo y trinquete: si el API responde 200 sin medias (solo contadores),
   // la media sale de `persist:nt`, pero una media corta de 108.2 no puede bajar
@@ -4855,6 +4916,53 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && autoNitro.imported.on === true && autoNitro.imported.armed === true
       && autoNitro.imported.stored === true && autoNitro.exported === true,
     autoNitro);
+
+  // AFK farming viene apagado: una pestana oculta puede congelarse y esa
+  // carrera acaba en DQ. El interruptor debe existir, persistir e importarse.
+  const afkSwitch = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const btn = shadow.querySelector('[data-toggle="backgroundFarm"]');
+    const txt = shadow.querySelector('[data-sw-txt="backgroundFarm"]');
+    const box = shadow.querySelector('[data-field="cfgText"]');
+    const apply = shadow.querySelector('[data-act="import"]');
+    const copy = shadow.querySelector('[data-act="export"]');
+    if (!btn || !txt || !box || !apply || !copy || !d.backgroundFarm) return { has: false };
+
+    const prefs = () => {
+      try { return JSON.parse(w.localStorage.getItem('autoTyperPrefs') || '{}'); }
+      catch { return {}; }
+    };
+    const state = () => ({
+      on: d.backgroundFarm(),
+      checked: btn.getAttribute('aria-checked'),
+      label: (txt.textContent || '').trim(),
+      stored: prefs().backgroundFarm,
+    });
+
+    const before = state();
+    btn.click();
+    const on = state();
+    box.value = '{"backgroundFarm":false}';
+    apply.click();
+    const imported = state();
+    box.value = '';
+    copy.click();
+    let exported = null;
+    try { exported = JSON.parse(box.value).backgroundFarm; } catch { exported = 'bad json'; }
+    d.setBackgroundFarm(false);
+    return { has: true, before, on, imported, exported, after: state() };
+  })()`);
+  check('AFK farming is off by default and round-trips as a visible switch',
+    afkSwitch.has && afkSwitch.before.on === false
+      && afkSwitch.before.checked === 'false' && afkSwitch.before.label === 'off'
+      && afkSwitch.before.stored === false
+      && afkSwitch.on.on === true && afkSwitch.on.checked === 'true'
+      && afkSwitch.on.label === 'on' && afkSwitch.on.stored === true
+      && afkSwitch.imported.on === false && afkSwitch.imported.stored === false
+      && afkSwitch.exported === false && afkSwitch.after.on === false,
+    afkSwitch);
 
   // La estrategia se prueba en la funcion pura y en el selector real: primero
   // elige la palabra mas corta valida, ultima la mas atrasada y la estrategia

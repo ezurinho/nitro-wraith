@@ -351,19 +351,15 @@ pressing "Race Again", and 15% of the time the break is 3-10 min. The panel show
 the countdown. Chaining hundreds of races with no pause is a louder pattern than
 any interval between keys. Turn it off with CONFIG.breaks.enabled = false.
 
-AFK farming (CONFIG.queue.backgroundFarm, on by default): the bot keeps racing
-with the tab hidden or minimised. A hidden tab has its page timers clamped to
-~1/s (and 1/min after five minutes), and a race typed at that pace is
-disqualified for inactivity, so the typing cadence and every scheduled press
-(the queue's heartbeat, "Race Again", "Race Now", the DQ modal, the re-login and
-the Mystery Box) run on a Worker clock, which is not subject to that clamp. The
-queue also keeps clicking in the background instead of waiting for the tab to be
-visible. The only cases where it still waits are a browser without Workers (the
-panel then shows the "clock" row and the console says why) and backgroundFarm
-turned off by hand. Brave's
-"always keep this site active" only stops the tab from being discarded; it does
-not stop timer throttling, so the Worker clock is what matters. The old skew
-check is still there as a second guard, using a plain timer on purpose.
+AFK farming (CONFIG.queue.backgroundFarm, off by default): with it off, the bot
+only starts a race while this tab is visible. Chrome can freeze a hidden tab
+(Energy Saver, memory pressure, bfcache); a frozen race cannot send keys and
+ends in a disqualification, and no userscript can type from a frozen page. The
+switch is in TUNE. If you turn it on, the typing cadence and every scheduled
+press (the queue's heartbeat, "Race Again", "Race Now", the DQ modal, the
+re-login and the Mystery Box) run on a Worker clock so hidden-tab timer clamping
+does not slow them down, but the freeze risk remains. Brave's "always keep this
+site active" only stops the tab from being discarded, not from being frozen.
 
 All in one: this file replaces three userscripts that used to fight each other.
 Install it ONCE and uninstall "Auto Redirect Script" and "Auto Stickers".
@@ -518,7 +514,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     // Queue and navigation. This lives in the TOP window, not in the race frame.
     queue: {
       enabled: true,
-      backgroundFarm: true,   // abrir y escribir con la pestana oculta (reloj Worker)
+      // Por defecto solo corre con la pestana visible: Chrome puede congelar
+      // una pestana oculta y una carrera congelada acaba en DQ. Se puede
+      // activar en TUNE si aceptas ese riesgo.
+      backgroundFarm: false,
       tickMs: 1000,
       continueDelayMs: [2400, 5200],  // respiro antes de pulsar Continue/Race Again (se sortea)
       continueLongChance: 0.12,       // y de vez en cuando, una pausa mas larga
@@ -713,6 +712,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     // so the pause cuts itself at dqGuardMs. Two DQ in a row stop the bot: at five
     // Nitro Type blocks the account for a while.
     dqGuardMs: 6000,
+    // Red de seguridad si el bucle se queda sin mandar teclas con la carrera
+    // viva (lock de otra pestana, pausa o espera inesperada). El servidor
+    // descalifica tras ~12 s sin caracteres; a los 7 s se manda una tecla
+    // correcta y se vuelve a mirar. No sustituye al bucle: solo lo despierta.
+    inactivityRescueMs: 7000,
+    inactivityNudgeMs: 7000,
     // Un CAPTCHA a mitad de carrera bloquea las teclas y es lo que el bucle
     // confundia con "la carrera dejo de aceptar entrada". No se abandona: se
     // espera a que lo resuelvas, con tope para no quedarse mirando.
@@ -742,16 +747,16 @@ All of this only aims at believable statistics. It is your call and your risk.
   const VERSION = '8.14.36';
 
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
-  // asi que se puede leer sin token. Se guarda el ultimo resultado y se
-  // consulta como mucho cada seis horas; si falla, se reintenta a los 30 min.
-  // Un fallo de red no borra un aviso anterior ni bloquea la partida.
+  // asi que se puede leer sin token. Se consulta cada 5 min y al volver a la
+  // pestana; si falla, se reintenta a los 5 min. Un fallo de red no borra un
+  // aviso anterior ni bloquea la partida.
   const UPDATE_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
   const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
   const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
   const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
   const UPDATE_KEY = 'nta:update';
-  const UPDATE_RECHECK_MS = 3600000;
-  const UPDATE_RETRY_MS = 30 * 60000;
+  const UPDATE_RECHECK_MS = 5 * 60000;
+  const UPDATE_RETRY_MS = 5 * 60000;
   const UPDATE_FETCH_TIMEOUT_MS = 8000;
   let updateChecking = false;
   // El panel del garaje vive en otro bloque lexico; se guarda aqui el boton
@@ -902,7 +907,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       paintUpdateBadge(garageUpdateNode, true);
       paintUpdateBadge(garageCompactUpdateNode, false, true);
       if (!previous || previous.error !== error) {
-        log(`Update check failed: ${error} (retrying in 30 min).`);
+        log(`Update check failed: ${error} (retrying in 5 min).`);
       }
       return false;
     };
@@ -997,6 +1002,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibratedRange: 'autoTyperCalibratedRange',
     calibratedAccuracy: 'autoTyperCalibratedAccuracy',
     calibrationAt: 'autoTyperCalibrationAt',
+    calibrationVersion: 'autoTyperCalibrationVersion',
     lifetimeWpm: 'autoTyperLifetimeWpm',
     challengeSelector: 'autoTyperChallengeSelector',
     trim: 'autoTyperTrim',
@@ -2130,6 +2136,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       mysteryBox: flag('mysteryBox'),
       stickers: flag('stickers'),
       guard: flag('guard'),
+      backgroundFarm: saved.backgroundFarm === true,
       useNitro: flag('useNitro'),
       nitroStrategy: normalizeNitroStrategy(saved.nitroStrategy),
       challenges: flag('challenges'),
@@ -2147,6 +2154,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       mysteryBox: CONFIG.mysteryBox.enabled !== false,
       stickers: CONFIG.stickers.enabled !== false,
       guard: CONFIG.guard.enabled !== false,
+      backgroundFarm: CONFIG.queue.backgroundFarm === true,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       challenges: CONFIG.challenges.enabled !== false,
@@ -2164,6 +2172,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.mysteryBox.enabled = prefs.mysteryBox;
     CONFIG.stickers.enabled = prefs.stickers;
     CONFIG.guard.enabled = prefs.guard;
+    CONFIG.queue.backgroundFarm = prefs.backgroundFarm;
     CONFIG.useNitro = prefs.useNitro;
     CONFIG.nitroStrategy = prefs.nitroStrategy;
     CONFIG.challenges.enabled = prefs.challenges;
@@ -2188,6 +2197,12 @@ All of this only aims at believable statistics. It is your call and your risk.
         const center = effectivePaceCenter(persisted).center;
         if (center) applyCalibratedRange(center);
         if (!accountStats) accountStats = { ...persisted, targetWpm: center || persisted.wpm };
+        // La misma coherencia al recargar: el target que se enseña es el del
+        // rango calibrado, no un centro que el trinquete pudo bloquear.
+        if (accountStats && calibratedRange
+          && (accountStats.targetWpm < calibratedRange.min || accountStats.targetWpm > calibratedRange.max)) {
+          accountStats.targetWpm = Math.round((calibratedRange.min + calibratedRange.max) / 2);
+        }
       }
     }
     const manualAccuracy = customAccuracy();
@@ -2666,6 +2681,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
     }
 
+    // El target visible tiene que ser el del rango que de verdad se usa. Si el
+    // trinquete bloquea una bajada, dejar targetWpm en el centro nuevo hacia
+    // parecer que el bot apunta a 110 cuando sigue tecleando 117.
+    if (!manualWpm && accountStats && calibratedRange
+      && (accountStats.targetWpm < calibratedRange.min || accountStats.targetWpm > calibratedRange.max)) {
+      accountStats.targetWpm = Math.round((calibratedRange.min + calibratedRange.max) / 2);
+    }
+
     if (manualAcc) {
       const applied = applyCalibratedAccuracy(manualAcc, { allowLower: true });
       if (applied.applied) {
@@ -2716,8 +2739,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (!force && now - calibrationProbeAt < 60000) return;
     calibrationProbeAt = now;
 
+    // Al cambiar de version se vuelve a leer aunque la foto anterior sea
+    // reciente: asi una release nueva no sigue usando un rango viejo durante
+    // media hora. Si el fetch falla, se marca igual y se reintenta a los 30 min.
+    const versionChanged = disk.get(KEYS.calibrationVersion, '') !== VERSION;
     const last = calibrationStamp();
-    if (!force && now - last < CONFIG.calibration.refreshMs) return;
+    if (!force && !versionChanged && now - last < CONFIG.calibration.refreshMs) return;
 
     calibrating = true;
     try {
@@ -2731,6 +2758,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       disk.set(KEYS.calibrationAt, String(Date.now()));
       if (force) log(`Pace calibration: ${result.reason || 'no data'}; keeping ${CONFIG.wpm.min}-${CONFIG.wpm.max} WPM / ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
     } finally {
+      disk.set(KEYS.calibrationVersion, VERSION);
       calibrating = false;
     }
   }
@@ -2748,9 +2776,20 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (!panel.refs || !panel.refs.cal) return;
 
     if (!accountStats) accountStats = readPersistedUser();
-    const accountText = accountStats && (accountStats.wpm || accountStats.accuracy)
+    // Cuando el suelo de recuperacion empuja el objetivo por encima de la
+    // media corta, la fila lo dice con las tres cifras juntas. Antes solo
+    // enseñaba "38.0 WPM" al lado de un objetivo de 110 y parecia que el bot
+    // seguia calibrado a 38.
+    const accountAvg = Number(accountStats && accountStats.wpm) || 0;
+    const accountTarget = Number(accountStats && accountStats.targetWpm) || 0;
+    const accountTop = Number(accountStats && accountStats.bestWpm) || 0;
+    const accountRaised = accountTarget > 0 && accountAvg > 0
+      && Math.abs(accountTarget - accountAvg) >= 0.5;
+    const accountText = accountStats && (accountAvg || accountStats.accuracy)
       ? [
-        accountStats.wpm ? `${accountStats.wpm.toFixed(1)} WPM` : '',
+        accountAvg ? `${accountAvg.toFixed(1)} ${accountRaised ? 'avg' : 'WPM'}` : '',
+        accountRaised ? `${Math.round(accountTarget)} target` : '',
+        accountRaised && accountTop > 0 ? `${Math.round(accountTop)} top` : '',
         accountStats.accuracy ? `${accountStats.accuracy.toFixed(1)}%` : '',
       ].filter(Boolean).join(' · ')
       : '—';
@@ -2759,6 +2798,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     const accText = calibratedAccuracy ? `${calibratedAccuracy.min}-${calibratedAccuracy.max}%` : '—';
     const at = calibrationStamp();
     const calSig = [wpmText, accText, accountText, at,
+      Number(accountStats && accountStats.targetWpm) || 0,
       Number(accountStats && accountStats.bestWpm) || 0,
       Number(accountStats && accountStats.races) || 0].join('|');
     if (panel.calSig === calSig) {
@@ -4830,6 +4870,8 @@ All of this only aims at believable statistics. It is your call and your risk.
     session.nitroSpread = 0;
     nitroPreview = null;
     session.typing = false;
+    session.inactivityNoted = false;
+    session.inactivityRescues = 0;
     session.capLogged = false;
     session.capMaxWait = 0;
     // El reloj se calibra una vez por carrera con el HUD del juego.
@@ -4930,7 +4972,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     // the overshoot the bench caught: a race that ends at 119 WPM but reads 130
     // during its first seconds, right when the game's HUD first refreshes.
     const dueAt = session.startedAt + (typed + 1) * msPerChar;
-    return clamp(dueAt - Date.now(), 0, 15000);
+    // Nunca retener 15 s: el servidor descalifica por inactividad a los ~12 s y
+    // una espera larga del gobernador es indistinguible de un bot colgado.
+    // 5.5 s deja margen incluso con el guard de 6 s.
+    const maxHold = Math.max(1000, Math.min(6000, Number(CONFIG.dqGuardMs) || 6000) - 500);
+    return clamp(dueAt - Date.now(), 0, maxHold);
   }
 
   /* ==========================================================================
@@ -5608,6 +5654,33 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (silent >= 8000 && now - lastLiveWarnAt >= 8000) {
       lastLiveWarnAt = now;
       log(`Live watchdog: ${phase} has gone ${(silent / 1000).toFixed(1)} s without an accepted key; the race loop is still in control.`);
+    }
+
+    // Ultima red antes del corte de ~12 s: si el bucle sigue vivo pero atascado
+    // (una espera larga, React remontando, un lock que no vuelve), se manda una
+    // tecla correcta. Se exige que tampoco se hayan enviado teclas en los
+    // ultimos 7 s para no duplicar una pulsacion del bucle ni romper la
+    // precision durante un stall normal.
+    if (phase !== 'racing' || silent < CONFIG.inactivityRescueMs) return;
+    if (now - (session.lastKeyAt || 0) < CONFIG.inactivityNudgeMs) return;
+
+    if (!typingLockHeld) {
+      acquireTypingLock({ steal: true }).catch(() => false);
+      return;
+    }
+
+    const app = findTypingApp();
+    const content = app ? getContent(app) : '';
+    const index = app ? getIndex(app) : -1;
+    if (!content || index < 0 || index >= content.length) return;
+
+    if (!session.inactivityNoted) {
+      session.inactivityNoted = true;
+      log(`Inactivity guard: ${(silent / 1000).toFixed(1)} s without an accepted key; sending one correct key to keep the race alive.`);
+    }
+    if (press(app, content[index])) {
+      session.lastKeyAt = Date.now();
+      session.inactivityRescues = (Number(session.inactivityRescues) || 0) + 1;
     }
   }
 
@@ -6423,6 +6496,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     let announced = false;
     let lastModalCheck = 0;
     let lastNudge = Date.now();
+    let lockWaitAt = 0;
 
     while (!session.stopped) {
       // El Web Lock solo se tiene mientras esta copia puede escribir. Si el
@@ -6431,9 +6505,22 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (standbyActive()) {
         if (typingLockHeld) releaseTypingLock();
       } else if (!typingLockHeld && !(await acquireTypingLock())) {
+        if (!lockWaitAt) lockWaitAt = Date.now();
+        // Si ya hay una carrera en pantalla y el lock sigue en una pestaña que
+        // no escribe, esperar indefinidamente deja la carrera sin teclas. Se
+        // recupera solo cuando la app ya existe; antes de abrir carrera no se
+        // toca el lock de la otra pestaña.
+        if (findTypingApp() && Date.now() - lockWaitAt >= 3000) {
+          log('Waiting for the race screen: the typing lock is stale; taking it back.');
+          if (await acquireTypingLock({ steal: true })) {
+            lockWaitAt = 0;
+            continue;
+          }
+        }
         await preciseSleep(CONFIG.pollMs);
         continue;
       }
+      lockWaitAt = 0;
 
       const app = findTypingApp();
       if (app) return app;
@@ -6490,6 +6577,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     let previousAttemptAt = 0;
     let lastIndex = -1;
     let lastProgressAt = Date.now();
+    let lockWaitAt = 0;
 
     while (!session.stopped && Date.now() < deadline) {
       await waitWhilePaused();
@@ -6540,8 +6628,18 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
 
       // La tecla de sondeo tambien es una tecla: no sale sin el Web Lock. Si
-      // otra pestaña lo tiene, esta espera en vez de escribir a la vez.
+      // otra pestaña lo tiene, esta espera en vez de escribir a la vez. Si la
+      // app ya esta en pantalla y el lock no vuelve, se recupera para no dejar
+      // la cuenta atras sin teclas.
       if (!typingLockHeld && !(await acquireTypingLock())) {
+        if (!lockWaitAt) lockWaitAt = Date.now();
+        if (findTypingApp() && Date.now() - lockWaitAt >= 3000) {
+          log('The typing lock did not come back during the countdown; taking it back.');
+          if (await acquireTypingLock({ steal: true })) {
+            lockWaitAt = 0;
+            continue;
+          }
+        }
         if (Date.now() - lastTypingLockNoteAt > 10000) {
           lastTypingLockNoteAt = Date.now();
           log('Waiting for the typing lock; no keys are sent from this tab.');
@@ -6549,6 +6647,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         await preciseSleep(300);
         continue;
       }
+      lockWaitAt = 0;
 
       const attemptAt = Date.now();
 
@@ -7430,6 +7529,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     let stalls = 0;
     let sendFails = 0;
     let blockedSince = 0;
+    let lockWaitSince = 0;
     let stallNoted = false;
     let expectedAfter = -1;
     let lastProgressAt = Date.now();
@@ -7536,8 +7636,19 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
 
       // El lock pudo liberarse al pasar a standby o al congelarse la pestaña.
-      // No se manda una tecla hasta recuperarlo.
+      // No se manda una tecla hasta recuperarlo. Si la carrera ya estaba viva
+      // y el lock sigue en una pestaña que no escribe, esperar para siempre es
+      // una DQ por inactividad: a los 3 s sin progreso se recupera con steal.
       if (!typingLockHeld && !(await acquireTypingLock())) {
+        if (!lockWaitSince) lockWaitSince = Date.now();
+        const silentFor = Date.now() - (session.lastAcceptedAt || Date.now());
+        if (silentFor >= 3000 && Date.now() - lockWaitSince >= 3000) {
+          log('The typing lock is held by a tab that is not typing; taking it back to avoid a DQ.');
+          if (await acquireTypingLock({ steal: true })) {
+            lockWaitSince = 0;
+            continue;
+          }
+        }
         if (Date.now() - lastTypingLockNoteAt > 10000) {
           lastTypingLockNoteAt = Date.now();
           log('Waiting for the typing lock; no keys are sent from this tab.');
@@ -7545,6 +7656,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         await sleep(300);
         continue;
       }
+      lockWaitSince = 0;
 
       // Enviamos la tecla correcta y el indice no avanzo: la carrera dejo de
       // aceptar entrada. Puede ser el final (resultados), una instancia muerta
@@ -7927,6 +8039,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       mysteryBox: CONFIG.mysteryBox.enabled !== false,
       stickers: CONFIG.stickers.enabled !== false,
       guard: CONFIG.guard.enabled !== false,
+      backgroundFarm: CONFIG.queue.backgroundFarm === true,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       customWpm: customWpm(),
@@ -7946,6 +8059,22 @@ All of this only aims at believable statistics. It is your call and your risk.
     log(next
       ? `Auto nitro: on (one word per race; strategy ${CONFIG.nitroStrategy}).`
       : 'Auto nitro: off.');
+    return true;
+  }
+
+  // AFK farming es el unico interruptor que puede provocar un DQ sin que el
+  // bucle tenga un fallo: una pestana oculta puede congelarse y entonces no hay
+  // teclas posibles. Por eso viene apagado y el aviso es explicito.
+  function setBackgroundFarm(on, options = {}) {
+    const next = on === true;
+    if (CONFIG.queue.backgroundFarm === next) return false;
+
+    CONFIG.queue.backgroundFarm = next;
+    if (options.persist !== false) savePrefs();
+    paintConfig();
+    log(next
+      ? 'AFK farming: on. A hidden tab can be frozen by the browser and that race can end in a DQ.'
+      : 'AFK farming: off. New races only start while this tab is visible.');
     return true;
   }
 
@@ -8168,6 +8297,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       mysteryBox: CONFIG.mysteryBox.enabled !== false,
       stickers: CONFIG.stickers.enabled !== false,
       guard: CONFIG.guard.enabled !== false,
+      backgroundFarm: CONFIG.queue.backgroundFarm === true,
       useNitro: CONFIG.useNitro !== false,
       sound: sfxOn === true,
     };
@@ -8533,6 +8663,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.shouldUseNitro = (content, index) => shouldUseNitro(String(content || ''), Number(index));
   window.__ntaDebug.autoNitro = () => CONFIG.useNitro !== false;
   window.__ntaDebug.setAutoNitro = (on) => setUseNitro(Boolean(on));
+  window.__ntaDebug.backgroundFarm = () => CONFIG.queue.backgroundFarm === true;
+  window.__ntaDebug.setBackgroundFarm = (on) => setBackgroundFarm(Boolean(on));
   window.__ntaDebug.nitroStrategy = () => CONFIG.nitroStrategy;
   window.__ntaDebug.setNitroStrategy = (value) => setNitroStrategy(String(value || ''));
   window.__ntaDebug.useNitro = (app) => useNitro(app);
@@ -8720,6 +8852,21 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.perf = () => ({ ...perfCounters });
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
+  // Prueba pura del gobernador sin tocar la carrera real: guarda y restaura
+  // los tres contadores que usa paceCapWait.
+  window.__ntaDebug.paceCapWaitFor = (startedAt, chars, nitroChars = 0) => {
+    const previous = {
+      startedAt: session.startedAt,
+      chars: session.chars,
+      nitroChars: session.nitroChars,
+    };
+    session.startedAt = Number(startedAt) || 0;
+    session.chars = Number(chars) || 0;
+    session.nitroChars = Number(nitroChars) || 0;
+    const wait = paceCapWait();
+    Object.assign(session, previous);
+    return wait;
+  };
   window.__ntaDebug.startup = () => ({
     nodes: panel.host && panel.host.shadowRoot
       ? panel.host.shadowRoot.querySelectorAll('*').length
@@ -9298,6 +9445,11 @@ All of this only aims at believable statistics. It is your call and your risk.
         CONFIG[key].enabled = data[key];
         done.push(`${key} ${data[key] ? 'on' : 'off'}`);
       }
+    }
+
+    if (typeof data.backgroundFarm === 'boolean') {
+      setBackgroundFarm(data.backgroundFarm, { persist: false });
+      done.push(`AFK farming ${data.backgroundFarm ? 'on' : 'off'}`);
     }
 
     if (typeof data.useNitro === 'boolean') {
@@ -10586,6 +10738,10 @@ All of this only aims at believable statistics. It is your call and your risk.
                     <span class="set-val"><b data-sw-txt="stickers" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="stickers" data-on="1" title="Send a sticker in ~35% of the races"></button></span>
                   </div>
                   <div class="set-row">
+                    <span class="set-lbl">AFK farming<i>race while this tab is hidden</i></span>
+                    <span class="set-val"><b data-sw-txt="backgroundFarm" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="backgroundFarm" data-on="0" title="Off by default. Chrome can freeze a hidden tab, and a race with no keys ends in a disqualification. Turn it on only if you accept that risk."></button></span>
+                  </div>
+                  <div class="set-row">
                     <span class="set-lbl">Auto nitro<i>skips one long word per race</i></span>
                     <span class="set-val"><b data-sw-txt="useNitro" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="useNitro" data-on="1" title="Auto nitro: press Enter once per race to skip one word chosen by the nitro strategy. It does not raise WPM; the saved time is paid back over the rest of the lesson"></button></span>
                   </div>
@@ -11319,6 +11475,8 @@ All of this only aims at believable statistics. It is your call and your risk.
           setPaceProfile(chip.dataset.pace);
         } else if (chip.dataset.toggle === 'useNitro') {
           setUseNitro(CONFIG.useNitro === false);
+        } else if (chip.dataset.toggle === 'backgroundFarm') {
+          setBackgroundFarm(CONFIG.queue.backgroundFarm !== true);
         } else if (chip.dataset.toggle === 'sound') {
           // El click ya es gesto valido para el audio: al encenderlo suena.
           setSfx(!sfxOn);
@@ -12165,8 +12323,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         });
         checkForUpdate();
         // Tick corto: checkForUpdate no repite una comprobacion buena hasta
-        // la hora, pero si la anterior fallo vuelve a probar a los 30 min.
-        setInterval(checkForUpdate, UPDATE_RETRY_MS);
+        // los 5 min; al volver a la pestana tambien se pregunta sin esperar.
+        setInterval(checkForUpdate, UPDATE_RECHECK_MS);
       }
     }
 
@@ -13609,9 +13767,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       // atascado cuando solo estaba aguantando el castigo. Peor: el presupuesto
       // quedaba gastado para un atasco de verdad en la misma ventana.
       //
-      // No hace falta el caso de la pestana oculta: `backgroundFarm` esta fijo a
-      // true, asi que `hiddenBlocked()` nunca es cierto y el bot sigue trabajando
-      // en segundo plano (una pestana oculta quieta si es un problema real).
+      // La pestana oculta se trata aparte: con AFK apagado `hiddenBlocked()`
+      // detiene la cola antes de abrir carrera; con AFK encendido se usa el reloj
+      // Worker y esta espera no debe recargar la pagina.
       if (blockUntil() > Date.now()) {
         noteProgress();
         return;
@@ -15589,9 +15747,13 @@ All of this only aims at believable statistics. It is your call and your risk.
       // El garaje es donde suele estar el usuario cuando espera una version
       // nueva. La comprobacion es la misma que usa el panel de carrera y el
       // intervalo se apoya en su marca de tiempo: si ya se comprobo hace poco,
-      // no vuelve a pedir el meta.
+      // no vuelve a pedir el meta. Al recuperar el foco se pregunta otra vez.
       checkForUpdate();
-      setInterval(checkForUpdate, UPDATE_RETRY_MS);
+      setInterval(checkForUpdate, UPDATE_RECHECK_MS);
+      window.addEventListener('focus', () => checkForUpdate());
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) checkForUpdate();
+      });
 
       // Si la ventana se encoge, el panel guardado puede quedar fuera de la
       // pantalla: se vuelve a meter con la misma posicion.
@@ -18092,10 +18254,18 @@ All of this only aims at believable statistics. It is your call and your risk.
       && typeof navigator.locks.request === 'function';
   }
 
-  function acquireTypingLock() {
+  function acquireTypingLock(options = {}) {
+    const steal = options && options.steal === true;
     if (!typingLocksAvailable()) return Promise.resolve(true);
     if (typingLockHeld) return Promise.resolve(true);
-    if (typingLockPending) return typingLockPending;
+    if (typingLockPending) {
+      if (!steal) return typingLockPending;
+      // Un intento normal que no ha vuelto no puede bloquear el rescate: se
+      // invalida y se pide el lock con steal. El callback viejo, si despierta,
+      // se suelta solo porque su epoch ya no coincide.
+      typingLockEpoch++;
+      typingLockPending = null;
+    }
 
     const epoch = ++typingLockEpoch;
     typingLockPending = new Promise((resolve) => {
@@ -18108,7 +18278,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       };
 
       try {
-        navigator.locks.request(TYPING_LOCK, { ifAvailable: true }, async (lock) => {
+        navigator.locks.request(TYPING_LOCK, steal ? { steal: true } : { ifAvailable: true }, async (lock) => {
           // Un release() durante la peticion invalida esta adquisicion: al
           // volver del callback el lock se suelta y no se toca el estado. Hay
           // que resolver la promesa pendiente; si no, raceOnce quedaria
@@ -18578,16 +18748,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     return CONFIG.guard.maxWpmLegit;
   }
 
-  // Aborto del guardia: la carrera en curso deja de recibir teclas (mandarlas
-  // mientras el contador esta disparado es lo que quema la cuenta) y se abre un
-  // hueco largo entre carreras. NO es una parada pegajosa: el propio bucle espera
-  // el hueco y sigue, asi que el bot no se queda mudo esperando una tecla.
+  // El guardia no puede dejar la carrera viva sin teclas: eso es una DQ segura.
+  // Marca el hueco y la carrera se termina al ritmo normal (mas lento por
+  // carefulRaces); despues el bucle espera el descanso. Antes ponia
+  // abandonRace=true y volvia sin teclear, justo el fallo que buscabamos.
   function guardStop(reason) {
     if (session.breakUntil > Date.now()) return;   // ya hay un hueco abierto
 
     guardCooldown(reason);
-    abandonRace = true;
-    log('Aborting the race: the numbers on screen are not the ones this script can produce.');
+    log('Race flagged by the guard: finishing it at a careful pace, then the break starts.');
   }
 
   // Cooldown del guardia: se termina la carrera en curso -dejarla sin teclas
@@ -18805,8 +18974,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     // Al volver de segundo plano se pinta una vez aunque el latido venga
     // frenado; mientras esta oculto updatePanel no toca el DOM.
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) updatePanel(true);
+      if (!document.hidden) {
+        updatePanel(true);
+        checkForUpdate();
+      }
     });
+    window.addEventListener('focus', () => checkForUpdate());
 
     // Un latido no puede llevarse por delante a los demas. Si `watchRaceResults`
     // tropieza con un DOM a medio montar (React remontando la carrera), sin esto
