@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.39 — 2026-11-16
+
+- fix: read the full account before the first race after a switch
+
 ## 8.14.38 — 2026-11-16
 
 - feat: calibrate each account and send stickers every race
