@@ -66,7 +66,7 @@ stats, and shows why it is waiting.
 
 - **Live:** WPM, accuracy, the AUTO pace badge, target range, race count, session average, result and the game HUD. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
 - **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops.
-- **Tune:** pace profile, limits, breaks, stickers, sound, AFK farming (off by default) and the safety guard.
+- **Tune:** pace profile, limits, breaks, stickers, sound, AFK farming (off by default) and the safety guard. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
 The update badge only appears when the Gist has a newer version. The script

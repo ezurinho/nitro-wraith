@@ -8454,6 +8454,50 @@ All of this only aims at believable statistics. It is your call and your risk.
     });
   } catch { /* almacenamiento bloqueado */ }
 
+  function tuneFilterText(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Filtro de TUNE: una tarjeta se queda si su texto o el titulo de su bloque
+  // contienen la consulta. No borra ajustes ni cambia valores; solo oculta lo
+  // que no coincide para no recorrer una lista larga. Las secciones sin
+  // coincidencias tambien se esconden y queda un aviso claro si no hay nada.
+  function filterTune() {
+    const input = panel.refs && panel.refs.tuneSearch;
+    const cfg = panel.refs && panel.refs.cfg;
+    if (!cfg) return;
+    const query = tuneFilterText(input ? input.value : '');
+    const cards = Array.from(cfg.querySelectorAll('.tune-sec .card'));
+    let visible = 0;
+
+    for (const card of cards) {
+      const section = card.closest('.tune-sec');
+      const title = section && section.querySelector('.tune-sec-h');
+      const haystack = tuneFilterText(`${card.textContent} ${title ? title.textContent : ''}`);
+      const show = !query || haystack.includes(query);
+      if (card.hidden !== !show) card.hidden = !show;
+      if (show) visible += 1;
+    }
+
+    for (const section of cfg.querySelectorAll('.tune-sec')) {
+      const show = Array.from(section.querySelectorAll('.card')).some((card) => !card.hidden);
+      if (section.hidden !== !show) section.hidden = !show;
+    }
+
+    setText(panel.refs.tuneCount, query ? `${visible}/${cards.length}` : `${cards.length} settings`);
+    if (panel.refs.tuneClear) panel.refs.tuneClear.hidden = !query;
+    if (panel.refs.tuneEmpty) {
+      const empty = Boolean(query && visible === 0);
+      panel.refs.tuneEmpty.hidden = !empty;
+      if (empty) setText(panel.refs.tuneEmpty, `No setting matches “${input.value.trim()}”.`);
+    }
+  }
+
   function paintConfig() {
     if (!panel.refs || !panel.refs.cfg) return;
 
@@ -10271,6 +10315,22 @@ All of this only aims at believable statistics. It is your call and your risk.
            cabecera solo separa; las tarjetas y sus controles siguen igual. */
         .tune-sec { margin: 0 0 11px; }
         .tune-sec:last-child { margin-bottom: 0; }
+        /* TUNE tiene muchas filas; el filtro evita recorrerlas todas cuando ya
+           se sabe que ajuste se busca. Vive fuera de los bloques para seguir
+           visible aunque no quede ninguna tarjeta. */
+        .tune-filter { display: flex; align-items: center; gap: 7px; margin: 0 1px 9px; }
+        .tune-search { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, .22); transition: border-color .18s ease, box-shadow .18s ease; }
+        .tune-search:focus-within { border-color: var(--line-strong); box-shadow: 0 0 16px -9px var(--acc); }
+        .tune-search > svg { flex: none; width: 12px; height: 12px; margin-left: 8px; color: var(--dim-2); }
+        .tune-search input { all: unset; flex: 1 1 auto; min-width: 0; padding: 0 5px; font: 600 10px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink); }
+        .tune-search input::placeholder { color: var(--dim-2); }
+        .tune-search input::-webkit-search-cancel-button { display: none; }
+        .tune-clear { all: unset; flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-right: 4px; border-radius: 5px; cursor: pointer; font: 700 14px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim-2); }
+        .tune-clear:hover { color: var(--acc); background: var(--acc-dim); }
+        .tune-clear:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+        .tune-clear[hidden], .tune-empty[hidden] { display: none; }
+        .tune-count { flex: none; font: 700 7.5px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--dim-2); white-space: nowrap; }
+        .tune-empty { margin: -2px 1px 10px; padding: 11px 8px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; font: 500 9.5px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
         .tune-sec-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin: 1px 1px 7px; }
         .tune-sec-h span { display: inline-flex; align-items: center; gap: 6px; font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); }
         .tune-sec-h span::before { content: ''; width: 12px; height: 1px; border-radius: 99px; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
@@ -10860,6 +10920,15 @@ All of this only aims at believable statistics. It is your call and your risk.
             <template data-view="tune">
             <section class="view v-tune cfg" id="nt-view-tune" role="tabpanel" aria-label="Tune">
               <div class="view-head"><span>Tune</span><b>rhythm · limits · automation</b></div>
+              <div class="tune-filter">
+                <label class="tune-search" title="Filter settings by name, section or description">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+                  <input type="search" data-field="tuneSearch" placeholder="Filter settings…" autocomplete="off" spellcheck="false" aria-label="Filter settings by name, section or description">
+                  <button class="tune-clear" type="button" data-field="tuneClear" aria-label="Clear settings filter" title="Clear filter" hidden>×</button>
+                </label>
+                <span class="tune-count" data-field="tuneCount" aria-live="polite">settings</span>
+              </div>
+              <div class="tune-empty" data-field="tuneEmpty" role="status" hidden></div>
               <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
                 <div class="tune-sec-h"><span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b></div>
                 <div class="card">
@@ -11249,6 +11318,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       themeName: pick('[data-field="themeName"]'),
       tuneCap: pick('[data-field="tuneCap"]'),
       tuneRange: pick('[data-field="tuneRange"]'),
+      tuneSearch: pick('[data-field="tuneSearch"]'),
+      tuneClear: pick('[data-field="tuneClear"]'),
+      tuneCount: pick('[data-field="tuneCount"]'),
+      tuneEmpty: pick('[data-field="tuneEmpty"]'),
       limitSlider: pick('[data-field="limitSlider"]'),
       etaLeft: pick('[data-field="etaLeft"]'),
       timeLimitRow: pick('[data-field="timeLimitRow"]'),
@@ -11571,6 +11644,26 @@ All of this only aims at believable statistics. It is your call and your risk.
       });
       paintActiveSlider('end');
     }
+
+    // Buscador de TUNE: filtra por texto de la tarjeta y por el titulo del
+    // bloque. Los ajustes ocultos siguen existiendo; solo dejan de ocupar sitio.
+    if (panel.refs.tuneSearch) {
+      panel.refs.tuneSearch.addEventListener('input', () => filterTune());
+      panel.refs.tuneSearch.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        event.stopPropagation();
+      });
+    }
+    if (panel.refs.tuneClear) {
+      panel.refs.tuneClear.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (panel.refs.tuneSearch) panel.refs.tuneSearch.value = '';
+        filterTune();
+        if (panel.refs.tuneSearch) panel.refs.tuneSearch.focus();
+      });
+    }
+    filterTune();
 
     // Fila de auto-calibracion: no hay apagado; el clic solo fuerza una lectura
     // nueva para que el rango se mueva ya con la media mas reciente.

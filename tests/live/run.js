@@ -4655,6 +4655,56 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && !narrowRace.strategyOverflow,
       narrowRace);
 
+    // Buscador de TUNE: filtra tarjetas y secciones, cuenta lo visible y deja
+    // un aviso cuando no hay coincidencias. El boton de limpiar lo restaura.
+    const tuneFilter = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+      const tab = shadow.querySelector('[data-tab-btn="tune"]');
+      const stats = shadow.querySelector('[data-tab-btn="stats"]');
+      if (!tab) return { has: false };
+      tab.click();
+      const input = shadow.querySelector('[data-field="tuneSearch"]');
+      const clear = shadow.querySelector('[data-field="tuneClear"]');
+      const count = shadow.querySelector('[data-field="tuneCount"]');
+      const empty = shadow.querySelector('[data-field="tuneEmpty"]');
+      const cards = Array.from(shadow.querySelectorAll('.tune-sec .card'));
+      const sections = Array.from(shadow.querySelectorAll('.tune-sec'));
+      if (!input || !clear || !count || !empty) return { has: false };
+      const state = () => ({
+        visible: cards.filter((card) => !card.hidden).length,
+        sections: sections.filter((section) => !section.hidden).length,
+        count: count.textContent,
+        empty: !empty.hidden,
+        clear: !clear.hidden,
+      });
+      const set = (value) => {
+        input.value = value;
+        input.dispatchEvent(new w.Event('input', { bubbles: true }));
+        return state();
+      };
+      const all = state();
+      const active = set('active hours');
+      const limits = set('limits');
+      const none = set('zzzz-no-setting');
+      const emptyText = empty.textContent;
+      clear.click();
+      const cleared = state();
+      if (stats) stats.click();
+      return { has: true, total: cards.length, all, active, limits, none, emptyText, cleared };
+    })()`);
+    check('the TUNE filter narrows cards and sections and clears back to all',
+      tuneFilter.has && tuneFilter.all.visible === tuneFilter.total
+        && tuneFilter.all.clear === false && tuneFilter.all.empty === false
+        && tuneFilter.active.visible === 1
+        && tuneFilter.limits.visible === 3 && tuneFilter.limits.sections === 1
+        && tuneFilter.none.visible === 0 && tuneFilter.none.sections === 0
+        && tuneFilter.none.empty === true && tuneFilter.none.clear === true
+        && /No setting matches/.test(tuneFilter.emptyText)
+        && tuneFilter.cleared.visible === tuneFilter.total
+        && tuneFilter.cleared.empty === false && tuneFilter.cleared.clear === false,
+      { has: tuneFilter.has, total: tuneFilter.total, all: tuneFilter.all, active: tuneFilter.active, limits: tuneFilter.limits, none: tuneFilter.none, cleared: tuneFilter.cleared });
+
     // 320 px fisicos al 200 % son 160 CSS: el rail lateral no cabe y el panel
     // pasa a columna con el rail arriba. La cabecera tiene que seguir visible
     // dentro del viewport y los controles no pueden desbordar a la derecha.
