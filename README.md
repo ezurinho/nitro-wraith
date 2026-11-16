@@ -50,8 +50,8 @@ stats, and shows why it is waiting.
 | Area | Behaviour |
 | --- | --- |
 | **Race loop** | Opens the next race after a short human delay. After a DQ it returns to the garage instead of pressing Try Again. |
-| **Typing** | Builds a WPM range from your average and top, capped at 120. A slow streak cannot lower it; if your average falls but your top is still high, it recovers toward 110. The panel shows the real `avg · target · top` so a collapsed short average cannot look like the target. Accuracy stays at 96% or above. |
-| **Rewards** | Claims the Mystery Box, closes daily challenges and uses stickers when the settings allow it. |
+| **Typing** | Builds a WPM range from the account that is signed in, capped at 120. A slow streak cannot lower the target, and a high top can recover it by at most 25% above the real average. The panel shows `avg · target · top` together. Accuracy stays at 96% or above. |
+| **Rewards** | Claims the Mystery Box, closes daily challenges and sends one sticker in every race when stickers are on. |
 | **Session care** | Renews the session when needed. Passwords and CAPTCHAs stay manual. |
 | **Limits** | Session races, time, XP, active hours and daily race/XP budgets. |
 | **Social** | Read-only Friends and Team counters. |
@@ -76,25 +76,30 @@ current.
 
 ## Pace
 
-The first load reads your average and top WPM from your profile. The stats API
-refreshes them every 30 minutes; clicking `auto` forces a fresh read, and a new
-script version triggers one fresh read immediately after the update.
+The first load reads your average, top WPM and full monthly history from the
+account that is signed in. The stats API refreshes them every 30 minutes;
+clicking `auto` forces a fresh read, and a new script version triggers one fresh
+read immediately after the update. Calibration is tied to the account ID: if you
+switch accounts in the same browser, the old range is cleared and the new
+account is read before racing.
 
 Automatic calibration has two rules:
 
 - **It only goes up.** A lower average cannot replace a higher target that is
   already saved. Only the custom override can bring it down.
-- **The top sets a recovery floor.** If your top is at least 80 WPM and at least
-  1.8× your average, the target becomes `min(110, round(top × 0.48))`. A 38 WPM
-  average with a 230 top recovers to 110 WPM (range 104–116). A beginner with a
-  50 top stays where they are.
+- **The top sets a proportional recovery floor.** If your top is at least 80
+  WPM and at least 1.8× your average, the target becomes
+  `min(110, round(top × 0.48), round(average × 1.25))`. A 38 WPM average with a
+  230 top recovers to 48 WPM (range 41–55); a 50 WPM account reaches 63, not
+  110. A 100 WPM account can still reach the 110 cap. A beginner with a 50 top
+  stays where they are.
 
 When the API exposes monthly totals, the target also anchors to the higher
 lifetime average. The report shows how many rows and pages were used; if a page
 fails, the last complete snapshot is kept. The account row shows the short
 average, the effective target and the top together, for example
-`38.0 avg · 117 target · 230 top`; the target is the middle of the range being
-typed, not the short average.
+`38.0 avg · 48 target · 230 top`; the target is the middle of the range being
+  typed, never the top and never a fixed 110.
 
 `TUNE` has optional **custom WPM** (15–119) and **custom accuracy** (96–100)
 fields. Leave them empty or at 0 for automatic calibration. The values are saved

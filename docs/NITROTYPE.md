@@ -15,10 +15,15 @@ does not try to beat the game's limits; it tries to stay inside them.
   never lower one that is already saved. Only the custom WPM override may lower
   it. This prevents a slow streak from becoming a permanent slow profile.
 - When the short average collapses relative to the account top, the recovery
-  floor is `min(110, round(top × 0.48))`, provided the top is at least 80 WPM
-  and at least 1.8× the average. A 38 WPM / 230 top account recovers around
-  110 WPM instead of staying at 38. Beginner accounts with a low top do not
-  trigger the floor.
+  floor is `min(110, round(top × 0.48), round(average × 1.25))`, provided the
+  top is at least 80 WPM and at least 1.8× the average. A 38 WPM / 230 top
+  account recovers to about 48 WPM, not 110; a 50 WPM account reaches 63. The
+  floor can never jump more than 25% above the account average. Beginner
+  accounts with a low top do not trigger it.
+- Calibration is stored per account ID. Switching accounts clears the previous
+  range, lifetime cache and calibration timestamp, then reads the signed-in
+  account before applying a target. A 50 WPM account cannot inherit the 110 WPM
+  range of another account in the same browser.
 - `TUNE` exposes custom WPM (15–119) and custom accuracy (96–100). Empty means
   automatic; a value overrides auto calibration and is persisted with the
   exported configuration.
@@ -46,7 +51,8 @@ does not try to beat the game's limits; it tries to stay inside them.
   main loop is stuck behind a lock or an unexpected wait.
 - The queue adds human delays, occasional long breaks, and session or daily limits.
 - Mystery Box, daily challenges, stickers, and the season card are read from the
-  game's own persisted state where possible.
+  game's own persisted state where possible. When stickers are enabled, one is
+  sent in every race; if the chat is not mounted yet, the next tick retries.
 
 ## Friends and Team
 

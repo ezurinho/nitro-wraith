@@ -2273,8 +2273,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('invalid selector falls back to text detection',
     fallback.clicked && fallback.stored === '' && fallback.label === 'on', fallback);
 
-  // El reto de stickers: mientras `racesWithSticker` siga pendiente, la
-  // politica deja de sortear el 35% y manda uno en cada carrera. Las
+  // El reto de stickers: la politica manda uno en cada carrera. Las
   // definiciones viven en la ventana de arriba; el tipador corre en un iframe.
   const stickerChallenge = await cdp.evaluate(`(async () => {
     const w = document.querySelector('iframe').contentWindow;
@@ -2328,12 +2327,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     return {
       pending,
       done,
+      chance: w.__ntaDebug.stickerChance(),
       firstRemaining: plan && plan.remaining,
       capped: Boolean(capped && capped.boost === false && capped.remaining === 0),
     };
   })()`, true);
-  check('sticker challenge is found outside the visible three and stops at its local cap',
+  check('stickers are enabled for every race and the challenge stops at its local cap',
     stickerChallenge.pending === true && stickerChallenge.done === false
+      && stickerChallenge.chance === 100
       && stickerChallenge.firstRemaining === 6 && stickerChallenge.capped === true,
     stickerChallenge);
 
@@ -2675,13 +2676,22 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     const d = document.querySelector('iframe').contentWindow.__ntaDebug;
     return {
       collapsed: d.paceCenter({ wpm: 38, currentWpm: 38, bestWpm: 230 }),
+      fifty: d.paceCenter({ wpm: 50, currentWpm: 50, bestWpm: 230 }),
+      hundred: d.paceCenter({ wpm: 100, currentWpm: 45, lifetimeWpm: 100, bestWpm: 230 }),
       beginner: d.paceCenter({ wpm: 30, bestWpm: 50 }),
       normal: d.paceCenter({ wpm: 110, bestWpm: 230 }),
     };
   })()`);
-  check('the top sets a recovery floor when the short average collapses',
-    recoveryPace.collapsed.center === 110 && recoveryPace.collapsed.floor === 110,
+  check('the top recovery floor stays proportional to the short average',
+    recoveryPace.collapsed.center === 48 && recoveryPace.collapsed.floor === 48,
     recoveryPace.collapsed);
+  check('a 50 WPM account does not jump to a 110 WPM target',
+    recoveryPace.fifty.center === 63 && recoveryPace.fifty.floor === 63,
+    recoveryPace.fifty);
+  check('a 100 WPM account is not dragged down by a short 45 WPM window',
+    recoveryPace.hundred.center === 110 && recoveryPace.hundred.average === 100
+      && recoveryPace.hundred.floor === 110,
+    recoveryPace.hundred);
   check('a beginner top does not trigger the recovery floor',
     recoveryPace.beginner.center === 30 && recoveryPace.beginner.floor === 0,
     recoveryPace.beginner);
@@ -6449,7 +6459,79 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     }
   }
 
+  // La calibracion es del navegador; al cambiar de cuenta se borra y se lee
+  // la nueva. La identidad sale del userID del perfil o del JWT.
+  const accountIdentity = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const old = w.localStorage.getItem('persist:nt');
+    try {
+      w.localStorage.setItem('persist:nt', JSON.stringify({
+        user: JSON.stringify({ userID: 987654, username: 'scope-test', avgSpeed: 50, highestSpeed: 230 }),
+      }));
+      // La prueba escribe localStorage directamente; invalidar la cache de un
+      // segundo que usa siteUser para que lea el perfil nuevo.
+      d.refreshChallenges();
+      return {
+        id: d.accountIdentity(),
+        target: d.paceCenter({ wpm: 50, currentWpm: 50, bestWpm: 230 }),
+      };
+    } finally {
+      if (old === null) w.localStorage.removeItem('persist:nt');
+      else w.localStorage.setItem('persist:nt', old);
+    }
+  })()`);
+  check('the account identity is read from the current profile',
+    accountIdentity.id === '987654'
+      && accountIdentity.target.center === 63,
+    accountIdentity);
+
   if (SHOT_DIR) await capturePanelThemes(cdp, appUrl);
+
+  // Cambio de cuenta: la identidad anterior no puede conservar el rango. Se
+  // restaura el almacenamiento al terminar para no dejar basura entre pruebas.
+  const accountReset = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const keys = [
+      'persist:nt', 'autoTyperCalibrationAccount', 'autoTyperCalibratedRange',
+      'autoTyperCalibratedAccuracy', 'autoTyperCalibrationAt',
+      'autoTyperCalibrationVersion', 'autoTyperLifetimeWpm',
+    ];
+    const before = {};
+    for (const key of keys) before[key] = w.localStorage.getItem(key);
+    try {
+      w.localStorage.setItem('persist:nt', JSON.stringify({
+        user: JSON.stringify({ userID: 555111, username: 'new-account', avgSpeed: 50, highestSpeed: 230 }),
+      }));
+      d.refreshChallenges();
+      w.localStorage.setItem('autoTyperCalibrationAccount', 'old-account');
+      w.localStorage.setItem('autoTyperCalibratedRange', JSON.stringify({ min: 104, max: 116, center: 110 }));
+      w.localStorage.setItem('autoTyperCalibratedAccuracy', JSON.stringify({ min: 96, max: 98, center: 97 }));
+      w.localStorage.setItem('autoTyperCalibrationAt', String(Date.now()));
+      w.localStorage.setItem('autoTyperLifetimeWpm', JSON.stringify({ wpm: 120, at: Date.now(), races: 1000 }));
+      const changed = d.ensureCalibrationAccount();
+      const state = d.autoPace();
+      return {
+        changed,
+        storedAccount: d.calibrationAccount(),
+        calibrated: state.calibrated,
+        accuracy: state.accuracy,
+        identity: d.accountIdentity(),
+      };
+    } finally {
+      for (const key of keys) {
+        if (before[key] === null) w.localStorage.removeItem(key);
+        else w.localStorage.setItem(key, before[key]);
+      }
+    }
+  })()`);
+  check('switching accounts clears the previous calibration before applying a target',
+    accountReset.changed === true
+      && accountReset.storedAccount === '555111'
+      && accountReset.calibrated === null && accountReset.accuracy === null
+      && accountReset.identity === '555111',
+    accountReset);
 
   return results;
 }

@@ -27,9 +27,11 @@ Everything adjustable lives in CONFIG, a few lines below:
   CONFIG.useNitro  -> Auto nitro: skip one word per race (strategy in TUNE)
   CONFIG.wpm.hardCap -> hard ceiling: no race may ever average above it
 
-Both ranges are calibrated against this account's own history (110 WPM average
-and 97% accuracy over 44,575 races) instead of a generic average: on another
-account, move them to that account's average.
+Both ranges are calibrated against the signed-in account's own history, not a
+generic 110 WPM. The original setup (110 WPM average, 97% accuracy) is only an
+example; a 50 WPM account stays near 50 and a 100 WPM account never drops to 45.
+Switching accounts in the same browser clears the old range and reads the new
+account before racing.
 
 No need to clear localStorage by hand any more: the series are stored with a
 signature (min:max:sessions), so they regenerate themselves when the ranges
@@ -462,10 +464,13 @@ All of this only aims at believable statistics. It is your call and your risk.
       customAccuracy: 0,
       // Si la media se hundio pero el top sigue alto, el objetivo no se queda
       // en la media hundida: se usa un suelo de recuperacion proporcional al
-      // top. Solo entra cuando hay una diferencia grande y creible.
+      // top. Nunca puede saltar mas de un 25% sobre la media actual: una
+      // cuenta de 50 WPM no empieza a 110 solo porque su top sea alto. El
+      // trinquete sigue impidiendo que una racha corta baje el objetivo.
       recoveryTopRatio: 0.48,
       recoveryTopMin: 80,
       recoveryTopCap: 110,
+      recoveryTopJumpRatio: 1.25,
     },
 
     // Popup de Daily Challenge completado: si nadie lo cierra se queda encima
@@ -641,14 +646,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       cooldownMs: [60000, 180000],
     },
 
-    // Automatic stickers inside the race. Sending one in every race would be an
-    // obvious pattern, so 35% of races is enough to look human. The exception
-    // is the Daily Challenge "racesWithSticker": while it is pending, every
-    // race sends one (otherwise 10/10 is a lottery); when it completes, the
-    // 35% shuffle comes back.
+    // Un sticker en todas las carreras. El usuario lo pidio explicitamente;
+    // se mantiene el envio unico por carrera y el reintento si el chat todavia
+    // no esta montado. El reto racesWithSticker ya no necesita boost.
     stickers: {
       enabled: true,
-      chance: 35,        // % de carreras en las que se manda uno
+      chance: 100,       // % de carreras en las que se manda uno
       challengeBoost: true, // reto racesWithSticker pendiente: 100%
       choice: 0,         // 0 = aleatorio; 1..n = ese sticker de la lista
       delayMs: [3200, 4600],  // espera hasta que el chat está listo
@@ -1003,6 +1006,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibratedAccuracy: 'autoTyperCalibratedAccuracy',
     calibrationAt: 'autoTyperCalibrationAt',
     calibrationVersion: 'autoTyperCalibrationVersion',
+    calibrationAccount: 'autoTyperCalibrationAccount',
     lifetimeWpm: 'autoTyperLifetimeWpm',
     challengeSelector: 'autoTyperChallengeSelector',
     trim: 'autoTyperTrim',
@@ -1995,6 +1999,53 @@ All of this only aims at believable statistics. It is your call and your risk.
     return null;
   })();
 
+  // La calibracion de localStorage es del navegador, no de la cuenta. Si en
+  // este navegador se entra con otra cuenta, el rango de la anterior no puede
+  // seguir mandando: se borra una vez y se vuelve a leer la cuenta actual.
+  function readAccountIdentity() {
+    const user = siteUser(0) || {};
+    const claims = jwtClaims() || {};
+    // El token es la sesion que el juego esta usando ahora; `persist:nt`
+    // puede seguir unos instantes con el usuario anterior tras un login.
+    const id = claims.sub ?? claims.userID ?? claims.userId ?? claims.username
+      ?? user.userID ?? user.userId ?? user.user_id ?? user.id
+      ?? user.username ?? user.userName;
+    return id === undefined || id === null ? '' : String(id).trim().toLowerCase();
+  }
+
+  function clearAccountCalibration() {
+    for (const key of [
+      KEYS.calibratedRange,
+      KEYS.calibratedAccuracy,
+      KEYS.calibrationAt,
+      KEYS.calibrationVersion,
+      KEYS.lifetimeWpm,
+    ]) disk.remove(key);
+    calibratedRange = null;
+    calibratedAccuracy = null;
+    accountStats = null;
+    calibrationReadAt = 0;
+    calibrationReadValue = 0;
+  }
+
+  // Devuelve true cuando la cuenta guardada no es la actual. En ese caso el
+  // arranque no puede aplicar el rango viejo; applyPrefs lee despues
+  // `persist:nt` de la cuenta nueva y crea el objetivo correcto.
+  function ensureCalibrationAccount() {
+    const id = readAccountIdentity();
+    if (!id) return false;
+    const stored = disk.get(KEYS.calibrationAccount, '');
+    if (stored === id) return false;
+    clearAccountCalibration();
+    disk.set(KEYS.calibrationAccount, id);
+    return true;
+  }
+
+  function rememberCalibrationAccount() {
+    const id = readAccountIdentity();
+    if (id) disk.set(KEYS.calibrationAccount, id);
+  }
+
   // Un rango simetrico alrededor de la media real. La mitad crece con el ritmo
   // (2 WPM en una cuenta de 15, 6 a partir de 86) para que la media de los
   // objetivos sea la media de la persona, sin convertir cada carrera en una
@@ -2030,7 +2081,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (best < avg * 1.8) return 0;
     const ratio = Number(CONFIG.calibration.recoveryTopRatio) || 0.48;
     const cap = Number(CONFIG.calibration.recoveryTopCap) || 110;
-    return Math.min(cap, Math.round(best * ratio));
+    const jump = Number(CONFIG.calibration.recoveryTopJumpRatio) || 1.25;
+    // El top solo puede recuperar un salto moderado sobre la media; si no,
+    // una cuenta de 50 WPM heredaria el 110 de otra cuenta con top alto.
+    return Math.min(cap, Math.round(best * ratio), Math.round(avg * jump));
   }
 
   // La media que de verdad puede sostener el bot: reciente e historica, con
@@ -2166,6 +2220,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   // Se aplica ANTES de que se sortee la serie de WPM: el rango del perfil entra
   // en la firma de la serie, asi que cambiarlo rehace los objetivos solo.
+  ensureCalibrationAccount();
   (function applyPrefs() {
     const prefs = readPrefs();
     CONFIG.breaks.enabled = prefs.breaks;
@@ -2719,6 +2774,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     disk.set(KEYS.calibrationAt, String(Date.now()));
+    rememberCalibrationAccount();
     paintCalibration();
     updatePanel();
     return { wpm: calibratedRange, accuracy: calibratedAccuracy };
@@ -7494,6 +7550,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     resetRaceState();
     if (connError) return abandonRaceForConnectionError();
 
+    // Primera carrera tras una instalacion o un cambio de cuenta sin datos en
+    // persist:nt: se lee la cuenta antes de abrir, en vez de arrancar con el
+    // rango de respaldo 104-117. Si el API falla, el bucle sigue con lo que
+    // haya y nunca deja la cola parada por esto.
+    if (!customWpm() && !calibratedRange && !(accountStats && accountStats.wpm)) {
+      log('No account pace yet: reading the signed-in account before the first race.');
+      await maybeCalibrate(true);
+    }
+
     // Si se recargo la pagina en mitad de un descanso, se termina antes de
     // abrir carrera: para eso estaba el descanso.
     await waitWhileBreaking();
@@ -8259,6 +8324,17 @@ All of this only aims at believable statistics. It is your call and your risk.
         return;
       }
       if (key === 'persist:nt') clearPersistRaw();
+      // Otra pestana entro con otra cuenta: no se puede seguir tecleando con
+      // el rango de la anterior. Al recargar, el arranque limpia la calibracion
+      // y la vuelve a leer de la cuenta nueva.
+      if (key === 'persist:nt' || key === 'player_token') {
+        const id = readAccountIdentity();
+        const stored = disk.get(KEYS.calibrationAccount, '');
+        if (id && stored && id !== stored) {
+          location.reload();
+          return;
+        }
+      }
       if (key === KEYS.calibrationAt) calibrationReadAt = 0;
       countReadCache.delete(key);
     });
@@ -8649,6 +8725,10 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.setCustomWpm = (value) => setCustomWpm(value);
   window.__ntaDebug.setCustomAccuracy = (value) => setCustomAccuracy(value);
   window.__ntaDebug.paceCenter = (stats) => effectivePaceCenter(stats || {});
+  window.__ntaDebug.accountIdentity = () => readAccountIdentity();
+  window.__ntaDebug.calibrationAccount = () => disk.get(KEYS.calibrationAccount, '');
+  window.__ntaDebug.ensureCalibrationAccount = () => ensureCalibrationAccount();
+  window.__ntaDebug.stickerChance = () => CONFIG.stickers.chance;
   window.__ntaDebug.progressWpm = (progress) => progressWpm(progress);
   window.__ntaDebug.lastProgress = () => session.lastProgress || null;
   window.__ntaDebug.liveCompareCsv = () => {
@@ -10734,8 +10814,8 @@ All of this only aims at believable statistics. It is your call and your risk.
                     <span class="set-val"><b data-sw-txt="mysteryBox" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="mysteryBox" data-on="1" title="Claim the free garage reward roughly every 21 h"></button></span>
                   </div>
                   <div class="set-row">
-                    <span class="set-lbl">Stickers<i>one in ~35% of the races</i></span>
-                    <span class="set-val"><b data-sw-txt="stickers" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="stickers" data-on="1" title="Send a sticker in ~35% of the races"></button></span>
+                    <span class="set-lbl">Stickers<i>one in every race</i></span>
+                    <span class="set-val"><b data-sw-txt="stickers" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="stickers" data-on="1" title="Send one sticker in every race"></button></span>
                   </div>
                   <div class="set-row">
                     <span class="set-lbl">AFK farming<i>race while this tab is hidden</i></span>
@@ -17997,13 +18077,10 @@ All of this only aims at believable statistics. It is your call and your risk.
   /* ==========================================================================
    * 15. STICKERS (INSIDE THE RACE)
    * ========================================================================== */
-  // Era el userscript "Auto Stickers": miraba cada 300 ms si existian las
-  // opciones del chat y mandaba una en el 100% de las carreras. Aqui se sortea
-  // una vez por carrera (CONFIG.stickers.chance) y solo con el reloj corriendo.
-  //
-  // El reto diario "10 Races with a Sticker" no avanza si el sorteo no toca:
-  // mientras siga pendiente se manda en todas las carreras y, al completarlo,
-  // vuelve el sorteo del 35%.
+  // Un sticker por carrera, con el reloj corriendo y una sola vez. `chance`
+  // queda en 100 por peticion expresa; el reto diario ya no necesita boost,
+  // pero se conserva para cuentas que tengan una configuracion antigua.
+  // Si el chat no esta montado cuando toca, el siguiente tick reintenta.
   function stickerChallengePending() {
     if (CONFIG.stickers.challengeBoost === false) return null;
     try {
@@ -18070,8 +18147,6 @@ All of this only aims at believable statistics. It is your call and your risk.
   };
 
   function initStickers() {
-    if (!CONFIG.stickers.enabled) return;
-
     let sentThisRace = false;
     let pending = false;
     let challengeNoted = false;
@@ -18130,8 +18205,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (sentThisRace || pending) return;
       if (!options().length) return;
 
-      // Se decide una sola vez por carrera, no en cada tick.
-      sentThisRace = true;
+      // Se decide una sola vez por carrera, no en cada tick. `sentThisRace`
+      // solo se marca cuando el clic salio de verdad: si el chat aun no estaba
+      // montado, el siguiente tick reintenta en vez de perder la carrera.
       const challenge = stickerChallengePending();
       const plan = challenge ? stickerBoostPlan(challenge) : null;
       const boost = Boolean(plan && plan.boost);
@@ -18141,15 +18217,19 @@ All of this only aims at believable statistics. It is your call and your risk.
       } else if (!boost) {
         challengeNoted = false;
       }
-      if (!boost && Math.random() * 100 > CONFIG.stickers.chance) return;
+      if (!boost && CONFIG.stickers.chance < 100
+        && Math.random() * 100 >= CONFIG.stickers.chance) return;
 
       pending = true;
       const [min, max] = CONFIG.stickers.delayMs;
       preciseSleep(min + Math.random() * (max - min)).then(() => {
         pending = false;
-        if (session.chars > 0 && !session.stopped) {
+        if (session.chars > 0 && session.typing && !session.stopped) {
           const sent = send();
-          if (sent && boost) noteStickerBoostSent(plan);
+          if (sent) {
+            sentThisRace = true;
+            if (boost) noteStickerBoostSent(plan);
+          }
         }
       });
     }, 700);
