@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.42 — 2026-11-16
+
+- feat: refresh account calibration by races and retry monthly pages
+
 ## 8.14.41 — 2026-11-16
 
 - feat: add instant settings filter to TUNE
