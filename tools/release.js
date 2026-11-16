@@ -139,9 +139,11 @@ function setVersion(next) {
   write(FILES.configSource, config);
   write(FILES.pkg, pkg);
   write(FILES.readme, readme);
+  // No escribir el resumen del build en stdout: el workflow lo vuelca entero
+  // en GITHUB_OUTPUT junto a MODE/VERSION/TAG y una linea extra lo invalida.
   execFileSync(process.execPath, [path.join(ROOT, 'tools/build.js')], {
     cwd: ROOT,
-    stdio: 'inherit',
+    stdio: 'ignore',
   });
 }
 
