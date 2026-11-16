@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.38 — 2026-11-16
+
+- feat: calibrate each account and send stickers every race
+
 ## 8.14.37 — 2026-11-16
 
 - fix: prevent inactivity DQs and surface updates and real targets
