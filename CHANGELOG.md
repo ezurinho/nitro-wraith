@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.46 — 2026-11-16
+
+- fix: keep build output out of release metadata
+- feat: split userscript into modules and improve AFK, UI and updates
+
 ## 8.14.45 — 2026-11-16
 
 - feat: add optional silent AFK keep-alive
