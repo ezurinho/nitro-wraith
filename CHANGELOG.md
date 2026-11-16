@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.36 — 2026-11-16
+
+- fix: stop automatic pace from lowering the target
+
 ## 8.14.35 — 2026-11-15
 
 - feat: keep the garage update reachable when folded
