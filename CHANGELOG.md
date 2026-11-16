@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.37 — 2026-11-16
+
+- fix: prevent inactivity DQs and surface updates and real targets
+
 ## 8.14.36 — 2026-11-16
 
 - fix: stop automatic pace from lowering the target
