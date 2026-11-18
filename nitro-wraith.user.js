@@ -1828,9 +1828,27 @@ All of this only aims at believable statistics. It is your call and your risk.
   let flightSavedAt = 0;
   let flightSaveTimer = 0;
 
+  // Sanea lo que llega al grabador. Solo tapa valores que parecen un secreto
+  // real: una clave de token/sesion/cookie con `=` o `:` y un valor opaco.
+  // Prosa como «Session resumed: 5 races» se conserva tal cual.
+  function looksSecret(value) {
+    const text = String(value || '');
+    if (text.length < 12) return false;
+    if (/^\$?[A-Za-z0-9+/=_-]{12,}$/.test(text)) return true;
+    return text.length >= 16 && /[A-Za-z]/.test(text) && /\d/.test(text);
+  }
+
   function scrubFlightText(text) {
     return String(text || '')
-      .replace(/((?:token|session|cookie|authorization)["'=:\s]+)[^\s,;"'}]+/gi, '$1***')
+      // Cabecera Authorization: el valor va tras «Bearer» y puede ser corto.
+      .replace(/Authorization(\s*[=:]\s*)(Bearer\s+)?[^\s,;"'}]+/gi,
+        (_match, sep, bearer) => `Authorization${sep}${bearer ? 'Bearer ' : ''}***`)
+      // Clave=valor o clave:valor, con comillas opcionales; se tapa solo el
+      // valor si parece secreto (`token=abc...`, `"session":"..."`, etc.).
+      .replace(/((?:access[_-]?token|refresh[_-]?token|player[_-]?token|id[_-]?token|token|api[_-]?key|apikey|password|secret|session[_-]?(?:id|key|token)?|cookie|authorization)["']?\s*[=:]\s*["']?)([^\s,;"'}]+)/gi,
+        (match, key, value) => (looksSecret(value) ? `${key}***` : match))
+      // Un JWT o una cadena base64 larga son secretos aunque no lleven clave.
+      .replace(/[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '***')
       .replace(/[A-Za-z0-9+/=_-]{80,}/g, '***')
       .slice(0, 240);
   }

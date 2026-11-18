@@ -6967,6 +6967,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       // El grabador sanea un token y persiste el anillo sin romper el diagnóstico.
       fd.clearFlight();
       fd.noteFlight('test', 'token=SUPERSECRETO1234567890');
+      fd.noteFlight('test', 'Session resumed: 5 races so far.');
+      fd.noteFlight('test', 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U');
       fd.flushFlight();
       await wait(80);
       const flight = fd.flight(20);
@@ -7017,7 +7019,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         flight: {
           count: flight.length,
           stored: flightStored.length,
-          leaked: flight.some((row) => /SUPERSECRETO/.test(row.text)),
+          leaked: flight.some((row) => /SUPERSECRETO|eyJhbGci|dozjgNry/.test(row.text)),
+          storedLeaked: flightStored.some((row) => /SUPERSECRETO|eyJhbGci|dozjgNry/.test(row.text)),
+          plainKept: flight.some((row) => row.text === 'Session resumed: 5 races so far.'),
           inDiagnostic: Array.isArray(diagnostic.flight) && diagnostic.flight.length > 0,
         },
         interlock: { strictOff, looseOff, strictHidden, strictVisible, looseHidden },
@@ -7043,6 +7047,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     safety.has === true
       && safety.flight.count > 0 && safety.flight.stored > 0
       && safety.flight.leaked === false && safety.flight.inDiagnostic === true,
+    safety);
+  check('the flight recorder keeps prose like "Session resumed" and still redacts real secrets',
+    safety.has === true
+      && safety.flight.plainKept === true
+      && safety.flight.leaked === false
+      && safety.flight.storedLeaked === false,
     safety);
   check('the AFK interlock only confirms a hidden race with strict mode and a running keep-alive',
     safety.has === true
