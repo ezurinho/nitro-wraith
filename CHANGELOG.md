@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.50 — 2026-11-18
+
+- fix: only redact real secrets in the flight recorder
+
 ## 8.14.49 — 2026-11-18
 
 - feat: add AFK safety interlock, health center and flight recorder
