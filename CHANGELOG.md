@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.51 — 2026-11-18
+
+- feat: add a separate canary release channel
+
 ## 8.14.50 — 2026-11-18
 
 - fix: only redact real secrets in the flight recorder
