@@ -154,6 +154,11 @@
       heart('session', handleSessionWarning);
     }, 500);
 
+    // Lectura viva a 4 Hz: el marcador, la precision, el progreso y el reloj
+    // cambian entre los repintados completos. updateLiveReadout se sale solo
+    // cuando la pestaña esta oculta o el panel esta plegado.
+    setInterval(() => heart('readout', updateLiveReadout), 250);
+
     // Vigilante de descalificacion: deja marcado cuando el modal esta en
     // pantalla para que el bucle cierre la carrera en vez de teclear al aire.
     // Aqui tambien vive el guardia (WPM imposible y copias duplicadas): es el

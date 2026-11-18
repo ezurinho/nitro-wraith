@@ -64,7 +64,7 @@ stats, and shows why it is waiting.
 
 <p align="center"><sub>A harness capture with demo values. The real panel sits in the bottom-right corner of the game.</sub></p>
 
-- **Live:** WPM, accuracy, the AUTO pace badge, target range, race count, session average, result and the game HUD. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
+- **Live:** WPM, accuracy, a **recent** pace for the last six seconds of accepted keys, the AUTO pace badge, target range, race count, session average, result and the game HUD. The header carries a dot and a freshness label: the figures are repainted four times per second, and if the race stops accepting keys the label turns amber (`stalled 3s`) instead of pretending the frozen number is live. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
 - **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops. The same panel has the **AFK off/on** control, the keep-alive state and whether the queue is visible, hidden or blocked by another gate.
 - **Tune:** pace profile, limits, breaks, stickers, sound, desktop alerts, AFK farming (off by default), the optional AFK keep-alive, the **AFK interlock**, the **AFK safety guard**, a live **AFK health** row and a **Health center** that summarizes account, AFK, update and freeze state. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
@@ -247,7 +247,25 @@ npm run build       # concatenate src/ into nitro-wraith.user.js and .meta.js
 npm run live:test   # CLI checks without opening Chrome
 npm run check       # synced build, syntax, release/README checks and harness
 npm test            # browser harness only
+npm run visual      # capture the six themes and compare them with the baselines
 ```
+
+### Visual regression
+
+`npm run visual` drives the harness through the same seeded live state and
+captures the six themes at 520×1200 (2×). The PNGs are compared against
+[`tests/visual/baselines/`](tests/visual/baselines/) pixel by pixel with the
+limits in [`tests/visual/config.json`](tests/visual/config.json): a channel
+tolerance of 12/255 absorbs antialiasing, and a theme fails when more than
+0.25% of its pixels differ. Captures freeze the clock and disable animations so
+the result is reproducible; a failing run writes `diff-<theme>.png` with the
+changed pixels in red next to `report.json` in `tests/visual/current/`.
+
+After an intentional UI change, review the new images and save them with
+`npm run visual:accept`. Baselines are tied to a browser and platform because
+fonts change between operating systems; `report.json` records the fingerprint,
+and the compare step warns when it does not match. Regenerate the baselines on
+the platform where you run the check.
 
 The source lives in [`src/`](src/README.md): 15 ordered fragments concatenated
 inside one IIFE. `nitro-wraith.user.js` is still the only installable file and

@@ -1470,7 +1470,7 @@
       if (Number.isFinite(value)) session[key] = Math.max(0, value);
     }
     // El banco tambien puede sembrar el reloj de la carrera y sus muestras.
-    for (const key of ['startedAt', 'endedAt', 'chars', 'nitroChars', 'correct', 'errors', 'pos', 'startIndex']) {
+    for (const key of ['startedAt', 'endedAt', 'chars', 'nitroChars', 'correct', 'errors', 'pos', 'startIndex', 'lastAcceptedAt']) {
       if (patch[key] === undefined) continue;
       const value = Number(patch[key]);
       if (Number.isFinite(value)) session[key] = Math.max(0, value);
@@ -1608,6 +1608,26 @@
     updatePanel(Boolean(force));
     return { ...perfCounters };
   };
+  // Lectura viva y formula del ritmo reciente: el banco comprueba el numero y
+  // el aviso de carrera muda sin esperar a teclear una carrera entera.
+  window.__ntaDebug.liveReadout = () => {
+    const measured = session.chars > 0;
+    const acceptedAt = Number(session.lastAcceptedAt) || 0;
+    const age = acceptedAt ? Math.max(0, Date.now() - acceptedAt) : null;
+    return {
+      wpm: measured ? wpmNow() : 0,
+      accuracy: measured ? accuracyNow() : 100,
+      pace: livePaceNow(),
+      age,
+      stale: Boolean(session.typing && !session.endedAt && age !== null && age > 2500),
+      typed: Math.max(0, session.chars - session.nitroChars),
+    };
+  };
+  window.__ntaDebug.livePaceFrom = (samples = []) => livePaceFrom(
+    (Array.isArray(samples) ? samples : [])
+      .map((item) => ({ at: Number(item && item.at), typed: Number(item && item.typed) }))
+      .filter((item) => Number.isFinite(item.at) && Number.isFinite(item.typed)),
+  );
   window.__ntaDebug.calibrateClock = () => calibrateRaceClock(
     Date.now(), hudWpm(), Math.max(0, session.chars - session.nitroChars),
   );
@@ -2884,6 +2904,17 @@
         .card-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 7px; margin-bottom: 7px; }
         .card-t { font: 800 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .19em; text-transform: uppercase; color: var(--ink-2); }
         .card-s { font: 600 8.5px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .05em; color: var(--dim-2); }
+        /* Edad del dato vivo: se actualiza cuatro veces por segundo y se pone
+           ambar cuando la carrera lleva un rato sin aceptar una tecla. */
+        .card-age { margin-left: auto; font: 600 8px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--dim-2); }
+        .card-age[data-good="0"] { color: var(--warn); }
+        /* El punto de la etiqueta live dice si la telemetria se esta moviendo. */
+        .v-stats .live-card .card-s[data-field="liveTag"] { display: inline-flex; align-items: center; gap: 5px; }
+        .v-stats .live-card .card-s[data-field="liveTag"]::before { content: ''; width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; opacity: .8; }
+        .panel[data-state="running"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--acc); }
+        .panel[data-state="running"] .v-stats .live-card .card-s[data-field="liveTag"]::before { box-shadow: 0 0 6px var(--acc); animation: nt-pulse 1.7s ease-in-out infinite; }
+        .panel[data-state="paused"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--warn); }
+        .panel[data-state="break"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--info); }
 
         /* Aparecen una tras otra, como si el panel se montara delante de ti. */
         .panel[data-fresh="1"] .card { animation: nt-card .40s cubic-bezier(.2, .9, .25, 1) both; }
@@ -3366,7 +3397,7 @@
               <div class="view-head"><span>Live</span><b>race telemetry</b></div>
               <div class="card live-card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
-                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span></div>
+                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
                 <div class="hero">
                   <div class="stat"><b data-field="live">—</b><span>live wpm</span></div>
                   <i class="sep"></i>
@@ -3381,6 +3412,7 @@
                 </svg>
                 <div class="rows">
                   <div class="row"><span>target</span><b data-field="target">—</b></div>
+                  <div class="row" title="Recent pace: WPM over the last 6 seconds of accepted keys, independent of the session average"><span>recent</span><b data-field="liveNow">—</b></div>
                   <div class="row race-row secondary" title="Race progress"><span>race</span><b data-field="progress">—</b></div>
                   <div class="row"><span>races</span><b data-field="races">0</b></div>
                   <div class="row day-xp-row" title="XP the game awarded today, read from the same daily summary as the 7-day card"><span>today</span><b data-field="dayXp">—</b></div>
@@ -3883,6 +3915,8 @@
       rail: pick('.rail'),
       views: pick('.views'),
       liveTag: pick('[data-field="liveTag"]'),
+      liveAge: pick('[data-field="liveAge"]'),
+      liveNow: pick('[data-field="liveNow"]'),
       footState: pick('[data-field="footState"]'),
       footMode: pick('[data-field="footMode"]'),
       footWpm: pick('[data-field="footWpm"]'),
@@ -5250,9 +5284,128 @@
 
   // En espera no hay una carrera que seguir: 2 s bastan para el reloj y el
   // estado. Durante el tecleo se vuelve a 1 s para que el panel no pierda
-  // ningun cambio visible de la carrera.
+  // ningun cambio visible de la carrera. La lectura viva (WPM, precision,
+  // reloj y progreso) va aparte a 4 Hz: estos dos segundos son para las
+  // tarjetas completas, no para el marcador.
   function panelPaintEveryMs() {
     return session.typing ? 1000 : 2000;
+  }
+
+  // -------------------------------------------------------------------------
+  // Lectura viva: lo que se mira durante la carrera, a 4 Hz.
+  // -------------------------------------------------------------------------
+  // Ventana corta de caracteres aceptados: mide el ritmo de AHORA, no la media
+  // acumulada de la carrera. Se muestrea desde el latido de 250 ms y nunca
+  // toca el estado del juego ni vuelve a leer el DOM.
+  const LIVE_PACE_WINDOW_MS = 6000;
+  const LIVE_PACE_MIN_MS = 3000;
+  const LIVE_PACE_MIN_CHARS = 3;
+  let livePaceSamples = [];
+  let livePaceKey = '';
+
+  // Puro: el banco comprueba la formula con muestras escritas a mano.
+  function livePaceFrom(samples) {
+    if (!Array.isArray(samples) || samples.length < 2) return null;
+    const first = samples[0];
+    const end = samples[samples.length - 1];
+    const minutes = (end.at - first.at) / 60000;
+    const chars = end.typed - first.typed;
+    if (!(minutes > 0) || minutes < LIVE_PACE_MIN_MS / 60000) return null;
+    if (!(chars >= LIVE_PACE_MIN_CHARS)) return null;
+    return (chars / 5) / minutes;
+  }
+
+  function livePaceNow(now = Date.now()) {
+    const key = `${session.startedAt}:${session.endedAt}`;
+    if (key !== livePaceKey) {
+      livePaceKey = key;
+      livePaceSamples = [];
+    }
+    const typed = Math.max(0, session.chars - session.nitroChars);
+    const last = livePaceSamples[livePaceSamples.length - 1];
+    if (!last || last.typed !== typed) livePaceSamples.push({ at: now, typed });
+    const horizon = now - LIVE_PACE_WINDOW_MS;
+    while (livePaceSamples.length > 2 && livePaceSamples[0].at < horizon) livePaceSamples.shift();
+    return livePaceFrom(livePaceSamples);
+  }
+
+  function paintLiveNumbers(measured, wpm, acc) {
+    flashValue(panel.refs.live, measured ? wpm.toFixed(1) : '—');
+    flashValue(panel.refs.acc, measured ? `${acc.toFixed(1)}%` : '—');
+    setGood(panel.refs.live, measured ? wpm >= profile.targetWPM * 0.95 : null);
+    setGood(panel.refs.acc, measured ? acc >= profile.accuracyGoal : null);
+
+    const pace = livePaceNow();
+    setText(panel.refs.liveNow, pace === null ? '—' : `${pace.toFixed(1)}`);
+    if (panel.refs.liveNow) {
+      panel.refs.liveNow.title = pace === null
+        ? `Recent pace: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
+        : `Recent pace: ${pace.toFixed(1)} WPM over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys. The session row is the cumulative average.`;
+    }
+
+    // Frescura: cuanto hace que el juego acepto la ultima tecla. Si la carrera
+    // sigue viva pero el numero no se mueve, se dice en ambar en vez de dejar
+    // que un WPM congelado parezca telemetria en directo.
+    const racing = Boolean(session.typing && !session.endedAt);
+    const acceptedAt = Number(session.lastAcceptedAt) || 0;
+    const age = acceptedAt ? Math.max(0, Date.now() - acceptedAt) : null;
+    const stale = racing && age !== null && age > 2500;
+    let ageText = '—';
+    if (session.endedAt) ageText = 'final';
+    else if (age !== null && (racing || measured)) {
+      ageText = stale ? `stalled ${Math.round(age / 1000)}s` : `${(age / 1000).toFixed(1)}s`;
+    }
+    setText(panel.refs.liveAge, ageText);
+    setGood(panel.refs.liveAge, stale ? false : null);
+    if (panel.refs.liveAge) {
+      panel.refs.liveAge.title = stale
+        ? `No accepted key for ${(age / 1000).toFixed(1)} s while the race is live: the readout is frozen, not current.`
+        : 'Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.';
+    }
+  }
+
+  function paintRaceProgress() {
+    const total = session.total;
+    const pos = clamp(session.pos, 0, total || 0);
+    const racePct = total > 0 ? progressPct(pos, total) : 0;
+    setText(panel.refs.progress, total > 0 ? `${pos}/${total}` : '—');
+    if (panel.refs.progFill) {
+      const width = `${racePct.toFixed(1)}%`;
+      if (panel.refs.progFill.style.width !== width) panel.refs.progFill.style.width = width;
+    }
+    if (panel.root) {
+      const fill = (racePct / 100).toFixed(4);
+      if (panel.root.style.getPropertyValue('--race-fill') !== fill) {
+        panel.root.style.setProperty('--race-fill', fill);
+      }
+    }
+  }
+
+  function paintLiveClock(measured, wpm, acc) {
+    setText(panel.refs.footWpm, measured ? `${wpm.toFixed(1)} wpm` : '— wpm');
+    setText(panel.refs.footAcc, measured ? `${acc.toFixed(1)}%` : '— acc');
+    // El reloj se congela al cerrar la carrera: antes seguia sumando durante
+    // la pantalla de resultados y parecia que la carrera no habia acabado.
+    const end = session.endedAt || Date.now();
+    const raceSeconds = measured && session.startedAt
+      ? Math.max(0, Math.round((end - session.startedAt) / 1000))
+      : 0;
+    setText(panel.refs.footClock, raceSeconds
+      ? `${Math.floor(raceSeconds / 60)}:${String(raceSeconds % 60).padStart(2, '0')}`
+      : '0:00');
+  }
+
+  function updateLiveReadout() {
+    if (!panel.root || !panel.root.isConnected) return;
+    if (document.hidden) return;
+    if (panel.root.dataset.collapsed === 'true') return;
+    if (!session.startedAt && !session.chars) return;
+    const measured = session.chars > 0;
+    const wpm = measured ? wpmNow() : 0;
+    const acc = measured ? accuracyNow() : 0;
+    paintLiveNumbers(measured, wpm, acc);
+    paintRaceProgress();
+    paintLiveClock(measured, wpm, acc);
   }
 
   // Un reto completado es un aviso, no un detalle de fondo: no espera al
@@ -5327,9 +5480,9 @@
     paintSeason();
     setText(panel.refs.target, `${profile.targetWPM} · ${profile.accuracyGoal.toFixed(1)}%`);
     // Los dos numeros grandes golpean la escala cuando cambian de verdad (parte
-    // entera), que es lo que se mira durante la carrera.
-    flashValue(panel.refs.live, measured ? wpm.toFixed(1) : '—');
-    flashValue(panel.refs.acc, measured ? `${acc.toFixed(1)}%` : '—');
+    // entera), que es lo que se mira durante la carrera. El mismo pintado corre
+    // a 4 Hz entre repintados completos (updateLiveReadout).
+    paintLiveNumbers(measured, wpm, acc);
     setText(panel.refs.session, `${profile.wpmSession}/${profile.wpm.length}`);
     setText(panel.refs.races, session.raceLimit
       ? `${session.races} / ${session.raceLimit}`
@@ -5633,22 +5786,7 @@
 
     // Avance de la carrera: numero de letras aceptadas y barra fina debajo del
     // marcador. Sin leccion cargada (resultados, descanso) se muestra un guion.
-    const total = session.total;
-    const pos = clamp(session.pos, 0, total || 0);
-    const racePct = total > 0 ? progressPct(pos, total) : 0;
-    setText(panel.refs.progress, total > 0 ? `${pos}/${total}` : '—');
-    if (panel.refs.progFill) {
-      const width = `${racePct.toFixed(1)}%`;
-      if (panel.refs.progFill.style.width !== width) panel.refs.progFill.style.width = width;
-    }
-    // La linea de la cabecera usa scaleX, no width: se queda en el compositor
-    // aunque el panel este en otra pestaña o haya una animacion de fondo.
-    if (panel.root) {
-      const fill = (racePct / 100).toFixed(4);
-      if (panel.root.style.getPropertyValue('--race-fill') !== fill) {
-        panel.root.style.setProperty('--race-fill', fill);
-      }
-    }
+    paintRaceProgress();
 
     if (breaking) {
       const left = Math.max(0, Math.ceil((session.breakUntil - Date.now()) / 1000));
@@ -5893,11 +6031,6 @@
       }
     }
 
-    // Green above target, amber below. WPM gets a 5% margin because an in-race
-    // reading always trails a little.
-    setGood(panel.refs.live, measured ? wpm >= profile.targetWPM * 0.95 : null);
-    setGood(panel.refs.acc, measured ? acc >= profile.accuracyGoal : null);
-
     // --- v7: cabecera, barra de estado y listas del registro --------------
     // La barra de abajo es la linea que se lee de un vistazo: LED, estado, modo,
     // WPM vivo, techo y la pista de teclas.
@@ -5916,18 +6049,10 @@
     const stateText = off ? 'waiting' : breaking ? 'break' : session.paused ? 'paused' : (session.typing ? 'racing' : 'idle');
     setText(panel.refs.footState, stateText);
     setText(panel.refs.footMode, MODE);
-    setText(panel.refs.footWpm, measured ? `${wpm.toFixed(1)} wpm` : '— wpm');
-    setText(panel.refs.footAcc, measured ? `${acc.toFixed(1)}%` : '— acc');
     setText(panel.refs.footCap, Number.isFinite(CONFIG.wpm.hardCap) ? `cap ${CONFIG.wpm.hardCap}` : 'no cap');
     // El reloj tiene su propio hueco: en compacto se quedan WPM, precision y
     // reloj, y el modo, el techo y la pista desaparecen. Alt+M lo recorre.
-    const raceSeconds = measured && session.startedAt
-      ? Math.max(0, Math.round((Date.now() - session.startedAt) / 1000))
-      : 0;
-    const raceClock = raceSeconds
-      ? `${Math.floor(raceSeconds / 60)}:${String(raceSeconds % 60).padStart(2, '0')}`
-      : '0:00';
-    setText(panel.refs.footClock, raceClock);
+    paintLiveClock(measured, wpm, acc);
     setText(panel.refs.footHint, off
       ? (terminalStop ? 'ban · until cleared'
         : stoppedNow ? `${stopKind.label} · ${stopWaitText(stopLeft)} left` : 'Alt+A resume')

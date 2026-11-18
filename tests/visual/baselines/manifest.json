@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "capturedAt": "2026-11-18T20:23:15.529Z",
+  "engine": {
+    "product": "Chrome/157.0.8103.80",
+    "browser": "Chrome",
+    "platform": "win32 10.0.26200"
+  },
+  "viewport": {
+    "width": 520,
+    "height": 1200,
+    "deviceScaleFactor": 2
+  },
+  "thresholds": {
+    "maxDiffRatio": 0.0025,
+    "channelTolerance": 12
+  },
+  "images": {
+    "theme-carbon.png": {
+      "sha256": "20cdeda756f2224ca5f99c254d9ef24666841fc4e3054cf36319359d04a383c6",
+      "width": 732,
+      "height": 1880
+    },
+    "theme-aurora.png": {
+      "sha256": "5eade6c35699a658f7321dd81b2da2582277817581ce2b70e984e67650a7b76a",
+      "width": 732,
+      "height": 1880
+    },
+    "theme-sunset.png": {
+      "sha256": "9f8e3d39314b54f3b9ee242a64b9a3be76102e9b58314c3677ec5aba10b40e4e",
+      "width": 732,
+      "height": 1880
+    },
+    "theme-ice.png": {
+      "sha256": "26aa556e1b869337505c0583a8e8c50c7eb9ba73615159c421867b03fca6ac53",
+      "width": 732,
+      "height": 1880
+    },
+    "theme-violet.png": {
+      "sha256": "9a3a6193608b46848346ddf0ac3da87108d03a63f987aab19dc835f61d5c9850",
+      "width": 732,
+      "height": 1880
+    },
+    "theme-rgb.png": {
+      "sha256": "bbfd7c62cfdc3c256e14abeb0739b8f195098ff5a48516275dbaeb253b303dc0",
+      "width": 732,
+      "height": 1880
+    }
+  }
+}

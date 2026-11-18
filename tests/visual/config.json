@@ -1,0 +1,10 @@
+{
+  "themes": ["carbon", "aurora", "sunset", "ice", "violet", "rgb"],
+  "maxDiffRatio": 0.0025,
+  "channelTolerance": 12,
+  "viewport": {
+    "width": 520,
+    "height": 1200,
+    "deviceScaleFactor": 2
+  }
+}

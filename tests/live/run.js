@@ -26,6 +26,12 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURES = path.join(__dirname, 'fixtures');
 const SCRIPT = path.join(ROOT, 'nitro-wraith.user.js');
 const SHOT_DIR = process.env.SHOT_DIR ? path.resolve(ROOT, process.env.SHOT_DIR) : '';
+// La regresion visual necesita una foto reproducible: reloj congelado y sin
+// animaciones. El check normal no activa nada de esto.
+const VISUAL_CAPTURE = process.env.VISUAL_CAPTURE === '1';
+// Mediodia local del 18/11/2026: la fecha congelada sigue siendo la misma en
+// cualquier zona horaria y las etiquetas de "hoy" no dependen del dia real.
+const VISUAL_FROZEN_AT = new Date(2026, 10, 18, 12, 0, 0).getTime();
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -256,6 +262,31 @@ async function captureShot(cdp, file, clip) {
 async function capturePanelThemes(cdp, appUrl) {
   if (!SHOT_DIR) return;
 
+  // Reloj congelado solo durante la captura visual: las etiquetas relativas
+  // ("just now", "27d", "closed 14:05") dejan de cambiar entre ejecuciones.
+  // Se inyecta antes de navegar y se retira al terminar, para que el resto del
+  // banco siga con el reloj real. El script se aplica tambien al iframe.
+  let freezeId = null;
+  if (VISUAL_CAPTURE) {
+    const frozen = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const RealDate = Date;
+        const AT = ${VISUAL_FROZEN_AT};
+        function FrozenDate(...args) {
+          if (!(this instanceof FrozenDate)) return new RealDate(AT).toString();
+          return args.length ? new RealDate(...args) : new RealDate(AT);
+        }
+        FrozenDate.prototype = RealDate.prototype;
+        FrozenDate.now = function () { return AT; };
+        FrozenDate.parse = RealDate.parse;
+        FrozenDate.UTC = RealDate.UTC;
+        window.__ntaVisualUnfreeze = function () { window.Date = RealDate; };
+        window.Date = FrozenDate;
+      })();`,
+    });
+    freezeId = frozen.identifier || null;
+  }
+
   // La captura documenta la funcion nueva: una cuenta de 110 WPM con top 230.
   // Se deja la calibracion y el perfil en el almacenamiento antes de navegar
   // para que el panel arranque como en una instalacion real, sin esperar al API.
@@ -266,6 +297,27 @@ async function capturePanelThemes(cdp, appUrl) {
         avgSpeed: 110, avgAcc: 98.7, highestSpeed: 230, racesPlayed: 48756,
       }),
     }));
+    // Temporada y resumen del dia ANTES de navegar. Con el reloj congelado las
+    // caches de 1,5 s no caducan, asi que sembrarlos despues dejaria la foto
+    // con guiones donde deberia estar el XP real.
+    if (${VISUAL_CAPTURE}) {
+      const now = ${VISUAL_FROZEN_AT};
+      localStorage.setItem('autoTyperSeason', JSON.stringify({
+        v: 2, at: now, auto: true, source: 'user', seasonID: 73,
+        seasonName: 'Spirit Racers', tier: 6, nextTier: 7,
+        progress: 34, xp: 76701, currentXp: 70000, nextXp: 90000,
+        endsAt: now + 27 * 86400000, endsText: 'Nov 29',
+      }));
+      const frozen = new Date(now);
+      const todayKey = frozen.getFullYear() + '-'
+        + String(frozen.getMonth() + 1).padStart(2, '0') + '-'
+        + String(frozen.getDate()).padStart(2, '0');
+      localStorage.setItem('ntQueue:todayPart:shot', JSON.stringify({
+        date: todayKey, races: 128, sumWpm: 14080, sumTarget: 14080,
+        boxes: 2, dq: 0, xp: 1240, clean: 120, firstAt: now - 7200000,
+        lastAt: now, dqAt: 0, updatedAt: now,
+      }));
+    }
     return true;
   })()`);
 
@@ -312,26 +364,12 @@ async function capturePanelThemes(cdp, appUrl) {
     frame.style.height = '1200px';
     w.document.body.style.minHeight = '1200px';
     const now = Date.now();
-    w.localStorage.setItem('autoTyperSeason', JSON.stringify({
-      v: 2, at: now, auto: true, source: 'user', seasonID: 73,
-      seasonName: 'Spirit Racers', tier: 6, nextTier: 7,
-      progress: 34, xp: 76701, currentXp: 70000, nextXp: 90000,
-      endsAt: now + 27 * 86400000, endsText: 'Nov 29',
-    }));
-    const today = new Date();
-    const todayKey = today.getFullYear() + '-'
-      + String(today.getMonth() + 1).padStart(2, '0') + '-'
-      + String(today.getDate()).padStart(2, '0');
-    w.localStorage.setItem('ntQueue:todayPart:shot', JSON.stringify({
-      date: todayKey, races: 128, sumWpm: 14080, sumTarget: 14080,
-      boxes: 2, dq: 0, xp: 1240, clean: 120, firstAt: now - 7200000,
-      lastAt: now, dqAt: 0, updatedAt: now,
-    }));
     d.patchSession({
       races: 128, raceLimit: 310, xp: 1240,
       sumRaces: 128, sumWpm: 13696, sumTarget: 13696, sumAcc: 12633.6,
       chars: 550, correct: 543, errors: 7,
       startedAt: now - 60000, endedAt: 0, clockDone: true, typing: true,
+      lastAcceptedAt: now - 200,
       stopped: 0, closed: 0,
       dailyRaceLimit: 0, dailyXpLimit: 0, activeOn: 0,
     });
@@ -361,6 +399,25 @@ async function capturePanelThemes(cdp, appUrl) {
   await sleep(1700);
   await cdp.evaluate(`(() => document.querySelector('iframe').contentWindow.__ntaDebug.paint(true))()`);
 
+  // Una regresion visual no puede comparar una animacion a medio camino: se
+  // apagan animaciones y transiciones dentro del shadow root. Los colores de
+  // cada tema siguen intactos.
+  if (VISUAL_CAPTURE) {
+    await cdp.evaluate(`(() => {
+      const root = document.querySelector('iframe').contentWindow.document
+        .getElementById('nt-autotyper-panel').shadowRoot;
+      if (!root) return false;
+      const style = document.createElement('style');
+      style.id = 'nta-visual-freeze';
+      style.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;}'
+        + '.panel,.panel[data-theme],.panel[data-theme] *,.panel[data-theme] *::before,.panel[data-theme] *::after,'
+        + '.panel[data-theme]::before,.panel[data-theme]::after{animation:none!important;transition:none!important;}';
+      root.appendChild(style);
+      return true;
+    })()`);
+    await cdp.evaluate('(() => document.querySelector(\'iframe\').contentWindow.__ntaDebug.paint(true))()');
+  }
+
   const themes = ['carbon', 'aurora', 'sunset', 'ice', 'violet', 'rgb'];
   try {
     for (const theme of themes) {
@@ -374,6 +431,7 @@ async function capturePanelThemes(cdp, appUrl) {
       })()`);
       if (!changed) throw new Error(`theme button not found: ${theme}`);
       await sleep(300);
+      await cdp.evaluate('(() => document.querySelector(\'iframe\').contentWindow.__ntaDebug.paint(true))()');
 
       const clip = await cdp.evaluate(`(() => {
         const frame = document.querySelector('iframe');
@@ -382,6 +440,13 @@ async function capturePanelThemes(cdp, appUrl) {
           .getElementById('nt-autotyper-panel').shadowRoot;
         const panel = root.querySelector('.panel');
         if (!panel) return null;
+        // El tema RGB anima el tono por CSS: se pausan TODAS las animaciones en
+        // el instante cero para que dos capturas no salgan con otro gradiente.
+        if (typeof panel.getAnimations === 'function') {
+          for (const anim of panel.getAnimations({ subtree: true })) {
+            try { anim.pause(); anim.currentTime = 0; } catch { /* animacion ya cancelada */ }
+          }
+        }
         const status = root.querySelector('[data-field="status"]');
         if (status) status.textContent = 'Live · auto pace';
         const guardRow = root.querySelector('[data-field="guard"]');
@@ -402,6 +467,47 @@ async function capturePanelThemes(cdp, appUrl) {
     }
   } finally {
     try { await cdp.send('Emulation.clearDeviceMetricsOverride'); } catch { /* ya cerro */ }
+
+    // La huella dice con que navegador y plataforma se tomaron las fotos: las
+    // fuentes no son iguales en todas partes y el informe lo avisa antes de
+    // mandar a nadie a mirar un diff que solo es texto con otra tipografia.
+    if (VISUAL_CAPTURE) {
+      try {
+        const version = await cdp.send('Browser.getVersion');
+        fs.mkdirSync(SHOT_DIR, { recursive: true });
+        fs.writeFileSync(path.join(SHOT_DIR, 'fingerprint.json'), `${JSON.stringify({
+          at: new Date().toISOString(),
+          engine: {
+            product: version.product,
+            browser: String(version.product || '').split('/')[0],
+            platform: `${process.platform} ${os.release()}`,
+          },
+          viewport: { width: 520, height: 1200, deviceScaleFactor: 2 },
+        }, null, 2)}\n`);
+      } catch { /* la captura ya esta hecha */ }
+    }
+
+    if (freezeId) {
+      try {
+        await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: freezeId });
+      } catch { /* el target ya cerro */ }
+    }
+
+    // El resto del banco comprueba tiempos reales (reintentos, esperas). Se
+    // descongela el reloj EN EL SITIO, sin navegar: recargar desmontaria las
+    // vistas que las pruebas siguientes ya tenian hidratadas.
+    if (VISUAL_CAPTURE) {
+      try {
+        await cdp.evaluate(`(() => {
+          try { if (window.__ntaVisualUnfreeze) window.__ntaVisualUnfreeze(); } catch { /* sin reloj congelado */ }
+          try {
+            const frame = document.querySelector('iframe');
+            if (frame && frame.contentWindow.__ntaVisualUnfreeze) frame.contentWindow.__ntaVisualUnfreeze();
+          } catch { /* sin reloj congelado */ }
+          return true;
+        })()`);
+      } catch { /* el banco sigue con lo que haya */ }
+    }
   }
 }
 
@@ -6808,7 +6914,49 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && accountIdentity.target.center === 63,
     accountIdentity);
 
-  if (SHOT_DIR) await capturePanelThemes(cdp, appUrl);
+  // La lectura viva: la formula del ritmo reciente y el aviso de telemetria
+  // congelada. Se restaura la sesion al terminar para no contaminar el resto.
+  const liveReadout = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.livePaceFrom || !d.liveReadout) return { has: false };
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const read = (field) => {
+      const node = shadow.querySelector('[data-field="' + field + '"]');
+      return node ? { text: (node.textContent || '').trim(), good: node.dataset.good || null } : null;
+    };
+    const pace = d.livePaceFrom([{ at: 0, typed: 0 }, { at: 6000, typed: 60 }]);
+    const short = d.livePaceFrom([{ at: 0, typed: 0 }, { at: 1000, typed: 8 }]);
+    d.patchSession({
+      typing: true, chars: 120, nitroChars: 0, correct: 120, errors: 0,
+      startedAt: Date.now() - 12000, endedAt: 0, lastAcceptedAt: Date.now() - 3000,
+    });
+    d.paint(true);
+    const result = {
+      has: true,
+      pace,
+      short,
+      age: read('liveAge'),
+      now: read('liveNow'),
+      row: Boolean(shadow.querySelector('[data-field="liveNow"]')),
+      state: d.liveReadout(),
+    };
+    d.patchSession({
+      typing: false, chars: 0, nitroChars: 0, correct: 0, errors: 0,
+      startedAt: 0, endedAt: 0, pos: 0, lastAcceptedAt: 0,
+    });
+    return result;
+  })()`);
+  check('the live readout reports a rolling 6-second pace and flags a quiet race',
+    liveReadout.has === true
+      && Math.abs(liveReadout.pace - 120) < 0.01
+      && liveReadout.short === null
+      && liveReadout.age && liveReadout.age.text === 'stalled 3s' && liveReadout.age.good === '0'
+      && liveReadout.now && liveReadout.now.text === '—'
+      && liveReadout.row === true
+      && liveReadout.state && liveReadout.state.stale === true
+      && Math.abs(liveReadout.state.wpm - 120) < 0.5,
+    liveReadout);
 
   // Un fallo del API no puede dejar la cuenta sin reintento hasta media hora:
   // el backoff corto se ve en el estado de la tarjeta y en el reloj expuesto.
@@ -7079,6 +7227,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && Boolean(safety.health.update) && Boolean(safety.health.freeze)
       && /Account|Review/.test(safety.health.note || ''),
     safety);
+
+  // La galeria va al final: navega y siembra el panel para las fotos, y ese
+  // estado no puede decidir ninguna comprobacion anterior.
+  if (SHOT_DIR) await capturePanelThemes(cdp, appUrl);
 
   return results;
 }

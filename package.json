@@ -7,7 +7,7 @@
     "build": "node tools/build.js",
     "build:check": "node tools/build.js --check",
     "test": "node tests/live/run.js",
-    "check": "node tools/build.js --check && node --check tools/build.js && node --check tools/canary.js && node --check nitro-wraith.user.js && node --check tests/live/run.js && node --check tests/live/live.js && node --check tests/live/live.test.js && node --check tests/live/fake-cdp.js && node --check tests/live/panel-read.js && node --check tests/live/history.js && node --check tests/live/report.js && node --check tests/live/chrome.js && node --check tests/live/tabs.js && node --check tools/export-downloads.js && node --check tools/release.js && node --check tools/readme.js && node tools/readme.js check && node tools/release.js check && node tests/live/live.test.js && node tests/live/run.js",
+    "check": "node tools/build.js --check && node --check tools/build.js && node --check tools/canary.js && node --check tools/visual.js && node --check nitro-wraith.user.js && node --check tests/live/run.js && node --check tests/live/live.js && node --check tests/live/live.test.js && node --check tests/live/fake-cdp.js && node --check tests/live/panel-read.js && node --check tests/live/history.js && node --check tests/live/report.js && node --check tests/live/chrome.js && node --check tests/live/tabs.js && node --check tools/export-downloads.js && node --check tools/release.js && node --check tools/readme.js && node tools/readme.js check && node tools/release.js check && node tests/live/live.test.js && node tests/live/run.js",
     "release:check": "node tools/release.js check",
     "readme:sync": "node tools/readme.js sync",
     "readme:check": "node tools/readme.js check",
@@ -16,7 +16,9 @@
     "live:tabs": "node tests/live/tabs.js",
     "live:history": "node tests/live/report.js",
     "export": "node tools/export-downloads.js",
-    "live:test": "node tests/live/live.test.js"
+    "live:test": "node tests/live/live.test.js",
+    "visual": "node tools/visual.js run",
+    "visual:accept": "node tools/visual.js accept"
   },
   "engines": {
     "node": ">=22"

@@ -24,6 +24,12 @@ tests/live/live-history.json
 !assets/
 !assets/*.png
 
+# Visual regression baselines are reference files, not local captures.
+!tests/visual/baselines/
+!tests/visual/baselines/*.png
+tests/visual/current/
+tests/visual/diff/
+
 # Historical working copies and archives
 archive/
 lote1/
