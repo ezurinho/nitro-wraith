@@ -99,8 +99,12 @@
   let keepAliveResumeAt = 0;
   let keepAliveGestureBound = false;
   const KEEPALIVE_SHARED_KEY = 'nta:keepAliveState';
-  const KEEPALIVE_SHARED_TTL = 60000;
+  // El latido se escribe cada 15 s; oculto, Chrome puede frenarlo a ~1 min.
+  // Dos minutos de margen evitan que el garaje muestre «blocked» con el audio
+  // aun corriendo durante una carrera larga.
+  const KEEPALIVE_SHARED_TTL = 120000;
   let keepAliveReportAt = 0;
+  let keepAliveHeartbeat = 0;
 
   // El audio vive en la ventana que recibio el gesto (el iframe o el garaje).
   // Este latido comparte solo el estado para que TUNE y el garaje no digan
@@ -146,6 +150,19 @@
         at: now,
       }));
     } catch { /* modo privado */ }
+  }
+
+  function startKeepAliveHeartbeat() {
+    if (keepAliveHeartbeat) return;
+    keepAliveHeartbeat = setInterval(() => {
+      if (keepAliveCtx && keepAliveCtx.state === 'running') reportKeepAlive('running');
+    }, 15000);
+  }
+
+  function stopKeepAliveHeartbeat() {
+    if (!keepAliveHeartbeat) return;
+    clearInterval(keepAliveHeartbeat);
+    keepAliveHeartbeat = 0;
   }
 
   function keepAliveSupported() {
@@ -232,6 +249,7 @@
       gain: keepAliveGain ? keepAliveGain.gain.value : null,
       error: keepAliveError,
       shared: keepAliveShared(),
+      heartbeat: keepAliveHeartbeat !== 0,
       label: keepAliveInfo().label,
     };
   }
@@ -259,7 +277,7 @@
     const hidden = pageHidden();
     if (!hidden) {
       return {
-        text: `visible · keep-alive ${keep.label}`,
+        text: `visible · keep-alive ${keep.label}${count ? ` · freeze ${count}` : ''}`,
         state: keep.label === 'on' ? 'on' : 'ready',
         title: `AFK is on, but this tab is visible. Hiding it starts the AFK cycle. Keep-alive: ${keep.label}.${last}`,
       };
@@ -347,6 +365,7 @@
     }
 
     bindKeepAliveGesture();
+    startKeepAliveHeartbeat();
     if (keepAliveCtx.state === 'suspended' || keepAliveCtx.state === 'interrupted') {
       const now = Date.now();
       if (now - keepAliveResumeAt > 5000) {
@@ -382,6 +401,7 @@
     keepAliveGain = null;
     keepAliveMode = '';
     keepAliveResumeAt = 0;
+    stopKeepAliveHeartbeat();
     reportKeepAlive('none');
   }
 
@@ -1152,11 +1172,7 @@
   window.__ntaDebug.keepAlive = () => keepAliveDebug();
   window.__ntaDebug.setKeepAlive = (on) => setKeepAlive(Boolean(on));
   window.__ntaDebug.afkFreeze = () => ({ ...afkFreezeStats });
-  window.__ntaDebug.resetAfkFreeze = () => {
-    afkFreezeStats = { count: 0, lastAt: 0, lastDurationMs: 0, totalMs: 0 };
-    saveAfkFreezeStats();
-    return { ...afkFreezeStats };
-  };
+  window.__ntaDebug.resetAfkFreeze = () => resetAfkFreezeStats();
   window.__ntaDebug.nitroStrategy = () => CONFIG.nitroStrategy;
   window.__ntaDebug.setNitroStrategy = (value) => setNitroStrategy(String(value || ''));
   window.__ntaDebug.useNitro = (app) => useNitro(app);
@@ -2765,6 +2781,9 @@
         .set-val b[data-state="n/a"] { color: var(--warn); }
         .set-row.afk-health-row .set-val { min-width: 0; max-width: 58%; }
         .set-row.afk-health-row .set-val b { white-space: normal; text-align: right; line-height: 1.35; }
+        .afk-health-reset { all: unset; flex: none; padding: 2px 5px; border-radius: 5px; cursor: pointer; color: var(--dim); border: 1px solid var(--line); font: 700 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+        .afk-health-reset:hover, .afk-health-reset:focus-visible { color: var(--acc-2); border-color: var(--line-strong); }
+        .afk-health-reset:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
         .set-val b[data-field="nitroPreview"] { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; color: var(--ink); }
         .set-val b[data-field="nitroPreview"][data-good="1"] { color: var(--acc); }
         .set-val b[data-field="nitroPreview"][data-good="0"] { color: var(--warn); }
@@ -3321,7 +3340,7 @@
                   </div>
                   <div class="set-row afk-health-row" title="Live AFK state, keep-alive state and freeze events recorded by this browser">
                     <span class="set-lbl">AFK health<i>hidden state · freeze count</i></span>
-                    <span class="set-val"><b data-field="afkHealth" data-state="off" role="status" aria-live="polite">off · visible-only</b></span>
+                    <span class="set-val"><b data-field="afkHealth" data-state="off" role="status" aria-live="polite">off · visible-only</b><button class="afk-health-reset" type="button" data-act="afkFreezeReset" title="Clear the freeze history recorded in this browser">reset</button></span>
                   </div>
                   <div class="set-row">
                     <span class="set-lbl">Auto nitro<i>skips one long word per race</i></span>
@@ -3695,6 +3714,7 @@
       up: pick('[data-field="up"]'),
       upInfo: pick('[data-field="upInfo"]'),
       updateCheck: pick('[data-act="updateCheck"]'),
+      afkFreezeReset: pick('[data-act="afkFreezeReset"]'),
       nitroStrategy: pick('[data-field="nitroStrategy"]'),
       nitroPreview: pick('[data-field="nitroPreview"]'),
       foot: pick('[data-field="foot"]'),
@@ -3772,6 +3792,16 @@
 
     // La tarjeta Season no adivina: abre la pagina oficial y deja que su propia
     // pestana escriba la foto que este panel leera al volver.
+    if (panel.refs.afkFreezeReset) {
+      panel.refs.afkFreezeReset.addEventListener('click', (event) => {
+        event.stopPropagation();
+        resetAfkFreezeStats();
+        log('AFK freeze history cleared for this browser.');
+        paintConfig();
+        if (typeof paintGaragePanel === 'function') paintGaragePanel();
+      });
+    }
+
     if (panel.refs.updateCheck) {
       panel.refs.updateCheck.addEventListener('click', async (event) => {
         event.stopPropagation();
@@ -5781,4 +5811,4 @@
       }
     }
   }
-
+

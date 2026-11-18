@@ -61,11 +61,15 @@ function metaHeader(text) {
 function write() {
   const next = bundle();
   const meta = metaHeader(next);
-  const old = fs.existsSync(SCRIPT) ? normalize(fs.readFileSync(SCRIPT, 'utf8')) : '';
-  const oldMeta = fs.existsSync(META) ? normalize(fs.readFileSync(META, 'utf8')) : '';
+  const raw = fs.existsSync(SCRIPT) ? fs.readFileSync(SCRIPT, 'utf8') : '';
+  const rawMeta = fs.existsSync(META) ? fs.readFileSync(META, 'utf8') : '';
+  const old = normalize(raw);
+  const oldMeta = normalize(rawMeta);
 
-  if (next !== old) fs.writeFileSync(SCRIPT, next);
-  if (meta !== oldMeta) fs.writeFileSync(META, meta);
+  // Escribe tambien cuando solo cambian los finales de linea: asi el checkout
+  // de Windows queda en LF y las comprobaciones exactas del harness coinciden.
+  if (next !== old || next !== raw) fs.writeFileSync(SCRIPT, next);
+  if (meta !== oldMeta || meta !== rawMeta) fs.writeFileSync(META, meta);
   console.log(`built ${MODULES.length} modules -> ${path.basename(SCRIPT)} (${next.length} bytes)`);
 }
 

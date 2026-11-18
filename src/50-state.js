@@ -139,6 +139,11 @@
     afkFreezeStats.totalMs += ms;
     saveAfkFreezeStats();
   }
+  function resetAfkFreezeStats() {
+    afkFreezeStats = { count: 0, lastAt: 0, lastDurationMs: 0, totalMs: 0 };
+    saveAfkFreezeStats();
+    return { ...afkFreezeStats };
+  }
   // El freeze ocurre en el iframe de la carrera, pero el garaje vive en la
   // ventana de arriba. Sin esta relectura, el contador del garaje se quedaba
   // congelado en el valor del arranque hasta recargar la pagina.
@@ -816,4 +821,4 @@
     const maxHold = Math.max(1000, Math.min(6000, Number(CONFIG.dqGuardMs) || 6000) - 500);
     return clamp(dueAt - Date.now(), 0, maxHold);
   }
-
+

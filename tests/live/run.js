@@ -5212,11 +5212,13 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && (keepAliveSwitch.on.mode === 'constant' || keepAliveSwitch.on.mode === 'oscillator')
       && keepAliveSwitch.on.state === 'running'
       && keepAliveSwitch.on.running === true
+      && keepAliveSwitch.on.heartbeat === true
       && keepAliveSwitch.on.label === 'on'
       && keepAliveSwitch.imported.enabled === false
       && keepAliveSwitch.imported.stored === false
       && keepAliveSwitch.exported === false
-      && keepAliveSwitch.after.enabled === false,
+      && keepAliveSwitch.after.enabled === false
+      && keepAliveSwitch.after.heartbeat === false,
     keepAliveSwitch);
 
   // La salud de AFK no es un adorno: dice si la pestana esta visible, si el
@@ -5226,7 +5228,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     const d = w.__ntaDebug;
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const row = shadow.querySelector('[data-field="afkHealth"]');
-    if (!row || !d.setBackgroundFarm || !d.afkFreeze) return { has: false };
+    const resetButton = shadow.querySelector('[data-act="afkFreezeReset"]');
+    if (!row || !resetButton || !d.setBackgroundFarm || !d.afkFreeze) return { has: false };
 
     const before = (row.textContent || '').trim();
     d.setBackgroundFarm(true);
@@ -5238,8 +5241,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     w.document.dispatchEvent(new w.Event('freeze'));
     w.document.dispatchEvent(new w.Event('resume'));
     const freeze = d.afkFreeze();
-    d.resetAfkFreeze();
-    return { has: true, before, on, onTitle, freeze };
+    resetButton.click();
+    const reset = d.afkFreeze();
+    return { has: true, before, on, onTitle, freeze, reset, hasReset: true };
   })()`, false, true);
   check('TUNE reports real AFK health and Page Lifecycle freezes',
     afkHealth.has
@@ -5248,7 +5252,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && /AFK is on, but this tab is visible/.test(afkHealth.onTitle)
       && afkHealth.freeze.count === 1
       && afkHealth.freeze.lastDurationMs >= 0
-      && afkHealth.freeze.totalMs >= 0,
+      && afkHealth.freeze.totalMs >= 0
+      && afkHealth.hasReset === true
+      && afkHealth.reset.count === 0,
     afkHealth);
 
   // La estrategia se prueba en la funcion pura y en el selector real: primero
