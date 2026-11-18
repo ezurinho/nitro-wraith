@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.52 — 2026-11-18
+
+- feat: add panel visual regression and a live readout
+- fix: stamp canary builds with the checked-out commit
+
 ## 8.14.51 — 2026-11-18
 
 - feat: add a separate canary release channel
