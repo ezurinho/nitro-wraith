@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-11-18T20:23:15.529Z",
+  "capturedAt": "2026-11-18T20:35:52.640Z",
   "engine": {
     "product": "Chrome/157.0.8103.80",
     "browser": "Chrome",
@@ -17,32 +17,32 @@
   },
   "images": {
     "theme-carbon.png": {
-      "sha256": "20cdeda756f2224ca5f99c254d9ef24666841fc4e3054cf36319359d04a383c6",
+      "sha256": "43ed7ddd98caf123146015a3aef94b601ea468a50ef83571de751b00055aec07",
       "width": 732,
       "height": 1880
     },
     "theme-aurora.png": {
-      "sha256": "5eade6c35699a658f7321dd81b2da2582277817581ce2b70e984e67650a7b76a",
+      "sha256": "1992841c295f855aff4c323028847a4bf7ac8c566c9c5ddb2408480dd20b6650",
       "width": 732,
       "height": 1880
     },
     "theme-sunset.png": {
-      "sha256": "9f8e3d39314b54f3b9ee242a64b9a3be76102e9b58314c3677ec5aba10b40e4e",
+      "sha256": "4b2d5811393a6b21c5e23545c4a0305c8fbd5c5bff12050a00c2756fda6baa4d",
       "width": 732,
       "height": 1880
     },
     "theme-ice.png": {
-      "sha256": "26aa556e1b869337505c0583a8e8c50c7eb9ba73615159c421867b03fca6ac53",
+      "sha256": "af0b1d6f766e4b57c1f1ed774253fbd55771d331e80f2cf1f6f848224feff796",
       "width": 732,
       "height": 1880
     },
     "theme-violet.png": {
-      "sha256": "9a3a6193608b46848346ddf0ac3da87108d03a63f987aab19dc835f61d5c9850",
+      "sha256": "d55e8f244c93399e94892592060552cc7def09b44f81bbbaaf662e577bd57c3b",
       "width": 732,
       "height": 1880
     },
     "theme-rgb.png": {
-      "sha256": "bbfd7c62cfdc3c256e14abeb0739b8f195098ff5a48516275dbaeb253b303dc0",
+      "sha256": "b201da48b007cbf0e4cd3bb6923075b50a1fd67192eafd23465dea8854d66c49",
       "width": 732,
       "height": 1880
     }
