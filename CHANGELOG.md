@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.48 — 2026-11-18
+
+- feat: add a GitHub fallback for update checks
+
 ## 8.14.47 — 2026-11-18
 
 - feat: keep AFK health fresh and allow freeze reset

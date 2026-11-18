@@ -322,7 +322,7 @@
 
   };
 
-  const VERSION = '8.14.47';
+  const VERSION = '8.14.48';
 
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se consulta cada 5 min y al volver a la
