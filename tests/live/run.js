@@ -709,11 +709,18 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       w.fetch = async () => ({ ok: true, status: 200, text: async () => '// @version ${scriptVersion}' });
       const final = await d.checkForUpdate(true);
       const finalState = d.updateState();
+
+      w.fetch = async (url) => String(url).includes('gist.githubusercontent.com')
+        ? { ok: false, status: 404, text: async () => '' }
+        : { ok: true, status: 200, text: async () => '// @version ${scriptVersion}' };
+      const fallback = await d.checkForUpdate(true);
+      const fallbackState = d.updateState();
       return {
         has: true, checkButton: Boolean(checkButton),
         rejected, failed, failedRow, failedTitle, failedDiagnostic,
         accepted, recovered, recoveredRow, recoveredTitle,
         timedOut, timeoutState, timeoutRow, timeoutTitle, final, finalState,
+        fallback, fallbackState,
       };
     } finally {
       if (saved === null) w.localStorage.removeItem(key); else w.localStorage.setItem(key, saved);
@@ -747,6 +754,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && updateHealth.final === true
       && updateHealth.finalState && updateHealth.finalState.error === null
       && updateHealth.finalState.latest === scriptVersion,
+    updateHealth);
+  check('the update check falls back to the GitHub release asset',
+    updateHealth.fallback === true
+      && updateHealth.fallbackState
+      && updateHealth.fallbackState.status === 200
+      && updateHealth.fallbackState.error === null
+      && updateHealth.fallbackState.latest === scriptVersion
+      && updateHealth.fallbackState.via === 'github',
     updateHealth);
   check('results-page failure falls back to the garage before stopping',
     scriptText.includes("notifyTopNeedGarage('the results page would not open another race')")

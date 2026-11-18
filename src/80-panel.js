@@ -3473,7 +3473,7 @@
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
                   <button class="act" type="button" data-act="updateCheck" title="Check the public Gist for a newer version now">check now</button>
                 </div>
-                <div class="cfg-note">The Gist meta is checked every 5 minutes, when you return to the tab and when the connection comes back; the installed copy changes only when you download a release.</div>
+                <div class="cfg-note">The Gist meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the Gist is down, the latest GitHub release asset is used. The installed copy changes only when you download a release.</div>
               </div>
               <div class="card">
                 <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>

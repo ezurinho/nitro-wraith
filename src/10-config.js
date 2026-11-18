@@ -329,6 +329,7 @@
   // pestana; si falla, se reintenta a los 5 min. Un fallo de red no borra un
   // aviso anterior ni bloquea la partida.
   const UPDATE_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
+  const UPDATE_GITHUB_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
   const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
   const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
   const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
@@ -365,6 +366,7 @@
         status: Number(saved.status) || 0,
         error: saved.error ? String(saved.error) : null,
         latest: saved.latest ? String(saved.latest) : null,
+        via: saved.via === 'github' ? 'github' : 'gist',
         ageMs: Math.max(0, Date.now() - at),
         retryMs: saved.error ? UPDATE_RETRY_MS : UPDATE_RECHECK_MS,
       };
@@ -479,7 +481,8 @@
     let timeout = 0;
     const fail = (status, error) => {
       const keep = previous && previous.latest ? previous.latest : '';
-      saveUpdateState({ at: Date.now(), latest: keep, status, error });
+      const via = previous && previous.via === 'github' ? 'github' : 'gist';
+      saveUpdateState({ at: Date.now(), latest: keep, status, error, via });
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       paintUpdateBadge(garageUpdateNode, true);
@@ -495,38 +498,60 @@
       // siempre: el siguiente intento se quedaria bloqueado por updateChecking.
       const controller = typeof AbortController === 'function' ? new AbortController() : null;
       if (controller) timeout = setTimeout(() => controller.abort(), UPDATE_FETCH_TIMEOUT_MS);
-      const response = await fetch(UPDATE_META_URL, {
-        cache: 'no-store',
-        credentials: 'omit',
-        referrerPolicy: 'no-referrer',
-        signal: controller ? controller.signal : undefined,
-      });
-      if (!response || !response.ok) {
-        return fail(Number(response && response.status) || 0, `HTTP ${Number(response && response.status) || 0}`);
+
+      const readMeta = async (url, via) => {
+        const response = await fetch(url, {
+          cache: 'no-store',
+          credentials: 'omit',
+          referrerPolicy: 'no-referrer',
+          signal: controller ? controller.signal : undefined,
+        });
+        if (!response || !response.ok) {
+          const status = Number(response && response.status) || 0;
+          const error = new Error(`HTTP ${status}`);
+          error.updateStatus = status;
+          throw error;
+        }
+        const text = await response.text();
+        const match = String(text || '').match(/@version\s+([\d.]+)/);
+        if (!match) {
+          const error = new Error('meta has no @version');
+          error.updateStatus = response.status || 200;
+          throw error;
+        }
+        return { version: match[1], status: response.status || 200, via };
+      };
+
+      // El Gist es la via normal de instalacion. Si su CDN o el propio Gist
+      // fallan, la release de GitHub guarda el mismo meta como segunda fuente.
+      let result;
+      try {
+        result = await readMeta(UPDATE_META_URL, 'gist');
+      } catch (firstError) {
+        if (firstError && firstError.name === 'AbortError') throw firstError;
+        result = await readMeta(UPDATE_GITHUB_META_URL, 'github');
       }
 
-      const text = await response.text();
-      const match = String(text || '').match(/@version\s+([\d.]+)/);
-      if (!match) {
-        return fail(200, 'meta has no @version');
-      }
-
-      const fetched = match[1];
       const keep = previous && previous.latest && versionNewer(previous.latest, VERSION)
         ? previous.latest
-        : fetched;
-      saveUpdateState({ at: Date.now(), latest: keep, status: response.status || 200, error: null });
+        : result.version;
+      saveUpdateState({
+        at: Date.now(), latest: keep, status: result.status, error: null, via: result.via,
+      });
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       paintUpdateBadge(garageUpdateNode, true);
       paintUpdateBadge(garageCompactUpdateNode, false, true);
-      if (previous && previous.error) log(`Update check recovered: latest meta v${fetched}.`);
+      if (previous && previous.error) {
+        log(`Update check recovered: latest meta v${result.version}${result.via === 'github' ? ' (GitHub fallback)' : ''}.`);
+      }
       return true;
     } catch (error) {
       const message = error && error.name === 'AbortError'
         ? 'timeout'
         : String(error && error.message ? error.message : error || 'network error').slice(0, 120);
-      return fail(0, message);
+      const status = Number(error && error.updateStatus);
+      return fail(Number.isFinite(status) && status >= 0 ? status : 0, message);
     } finally {
       if (timeout) clearTimeout(timeout);
       updateChecking = false;
@@ -534,7 +559,11 @@
   }
 
   function openUpdateDownload() {
-    try { window.open(UPDATE_DOWNLOAD_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+    const info = updateInfo();
+    // Si el Gist fallo y el aviso vino del fallback, la descarga tambien usa
+    // el asset de la release: no se manda al usuario a un endpoint caido.
+    const url = info && info.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
+    try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
   }
 
   // Handshake para el dry-run y el banco: la version se publica en el window

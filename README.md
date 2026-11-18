@@ -188,7 +188,7 @@ without an accepted character.
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never
 printed, exported or sent to another host. The only off-site request is the
-public Gist version check, made without credentials.
+public Gist version check and, if it is unavailable, the public meta asset of the latest GitHub release; both are made without credentials.
 
 ## Releases
 
