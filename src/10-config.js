@@ -336,6 +336,13 @@
 
   const VERSION = '8.14.50';
 
+  // Canal de publicacion: el build estable apunta al Gist; el canary se genera
+  // aparte con tools/canary.js. Solo ese artefacto cambia CHANNEL, su version y
+  // sus URLs: el Gist, `releases/latest` y los tags estables no se tocan.
+  const CHANNEL = 'stable';
+  const UPDATE_CANARY_URL = 'https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.user.js';
+  const UPDATE_STABLE_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se consulta cada 5 min y al volver a la
   // pestana; si falla, se reintenta a los 5 min. Un fallo de red no borra un

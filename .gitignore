@@ -6,8 +6,9 @@
 .env.*
 node_modules/
 
-# Generated release notes
+# Generated release notes and canary artifacts
 .release-notes.md
+dist/
 
 # Local exports, logs and screenshots
 Nitro Type userscript.txt

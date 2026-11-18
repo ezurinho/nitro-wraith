@@ -2249,6 +2249,7 @@
     return {
       app: 'nitro-wraith',
       version: VERSION,
+      channel: CHANNEL,
       at: new Date().toISOString(),
       page: location.pathname,
       mode: MODE,
@@ -3653,6 +3654,7 @@
                     <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, flight recorder, environment) to paste when something is off">report</button>
                     <button class="act" type="button" data-act="csv" title="Download the closed sessions as a CSV (date, races, WPM, target, deviation, accuracy, DQ, reason) for a spreadsheet">csv</button>
                     <button class="act" type="button" data-act="releases" title="Open the GitHub release history to install a previous version if the newest one misbehaves">versions</button>
+                    <button class="act" type="button" data-act="channel" title="${CHANNEL === 'canary' ? 'Download the stable release and go back to the normal channel' : 'Install the canary test build; it updates itself from the canary release and never changes the stable one'}">${CHANNEL === 'canary' ? 'stable' : 'canary'}</button>
                   </div>
                   <div class="rows">
                     <div class="row up-row" data-field="upRow" title="Auto-update check: the last result, its error and when it will retry"><span>update</span><b data-field="up">—</b></div>
@@ -4026,8 +4028,9 @@
     paintTheme();
 
     // Cabecera: version. No cambia en caliente, se pinta una vez.
-    setText(panel.refs.ver, `v${VERSION}`);
-    setText(panel.refs.aboutVer, `v${VERSION}`);
+    const versionLabel = `v${VERSION}${CHANNEL === 'canary' ? ' · canary' : ''}`;
+    setText(panel.refs.ver, versionLabel);
+    setText(panel.refs.aboutVer, versionLabel);
     if (!panel.mountedViews || panel.mountedViews.has('log')) {
       paintLogLists();
       paintChallengeList();
@@ -4453,6 +4456,11 @@
           exportSessionsCsv();
         } else if (chip.dataset.act === 'releases') {
           try { window.open(UPDATE_RELEASES_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+        } else if (chip.dataset.act === 'channel') {
+          // En canary el boton vuelve al Gist estable; en estable abre el build
+          // de prueba. Ninguno de los dos cambia la release estable por si solo.
+          const url = CHANNEL === 'canary' ? UPDATE_STABLE_URL : UPDATE_CANARY_URL;
+          try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
 
         chip.blur();

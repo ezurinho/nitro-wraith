@@ -72,9 +72,11 @@ stats, and shows why it is waiting.
 The update badge only appears when the Gist has a newer version. The script
 checks every 5 minutes and again whenever you return to the tab, so a new
 release shows up without waiting an hour. If you do not see it, your copy is
-current. **versions** in TUNE opens the GitHub release history, so a release
-that misbehaves can be replaced with an earlier one; the diagnostic report now
-includes the recent flight recorder (sanitized events across reloads).
+current. **versions** in TUNE opens the GitHub release history and **canary**
+installs the test channel (in a canary build that button reads **stable** and
+goes back), so a release that misbehaves can be replaced without touching the
+stable one; the diagnostic report now includes the recent flight recorder
+(sanitized events across reloads).
 
 ## Pace
 
@@ -152,6 +154,11 @@ blocks and the AFK guard.
 3. Sign in at [nitrotype.com](https://www.nitrotype.com/).
 4. Reload the page. The panel appears in the bottom-right corner.
 
+To test the next build before it is stable, install the
+[canary userscript](https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.user.js).
+It updates itself from the canary pre-release, and the **stable** button in TUNE
+returns to the normal channel.
+
 > [!IMPORTANT]
 > Use one userscript only. NITRO WRAITH replaces the old "Auto Redirect Script"
 > and "Auto Stickers"; another copy will fight over the queue.
@@ -197,13 +204,34 @@ without an accepted character.
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never
 printed, exported or sent to another host. The only off-site request is the
-public Gist version check and, if it is unavailable, the public meta asset of the latest GitHub release; both are made without credentials.
+public Gist version check and, if it is unavailable, the public meta asset of the latest GitHub release; a canary build checks the public canary pre-release meta instead. All are made without credentials.
 
 ## Releases
 
 Releases are automatic. When `check` passes on `main` and the userscript changed,
 the workflow bumps the version, updates the changelog and README, syncs the Gist,
 tags the commit and publishes the release. README-only changes do not release.
+
+### Canary channel
+
+`canary` is a separate test channel. A push to the `canary` branch runs the same
+checks and publishes a GitHub **pre-release** tagged `canary`, with fixed install
+and update URLs:
+
+- [Install the canary userscript](https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.user.js)
+- [Canary meta](https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.meta.js)
+
+Canary builds are versioned `<stable>.<build>` (for example `8.14.51.7`), so they
+update themselves from the canary alias, while the next stable release is newer
+and takes over when it ships. The workflow never edits the Gist, the stable tags
+or `releases/latest`; every publish also keeps an immutable `canary-<version>`
+tag.
+
+To roll the canary back, run the **canary** workflow (Actions → canary → Run
+workflow) with `ref` set to an earlier `canary-<version>` tag. It rebuilds that
+commit and republishes the alias with a fresh build number; the stable release is
+untouched. The **stable** button in TUNE, or the Gist install link, returns a
+canary copy to the normal channel.
 
 - [Changelog](CHANGELOG.md)
 - [All releases](https://github.com/ezurinho/nitro-wraith/releases)

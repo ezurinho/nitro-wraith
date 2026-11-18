@@ -1,0 +1,100 @@
+name: canary
+
+on:
+  push:
+    branches: [canary]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch or canary tag to publish (use an old canary tag to roll back)
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: canary-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Find Chrome
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$CHROME"
+          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          "$CHROME" --version
+
+      - name: Run checks
+        run: npm run check
+
+      - name: Build the canary artifacts
+        run: node tools/canary.js prepare "${GITHUB_RUN_NUMBER}"
+
+      - name: Publish the canary alias
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p "require('./dist/canary/build.json').version")"
+          tag="canary-${version}"
+          sha="$(git rev-parse HEAD)"
+          notes="$(mktemp)"
+
+          {
+            echo "# NITRO WRAITH — canary ${version}"
+            echo
+            echo "Test build from \`${GITHUB_REPOSITORY}@${sha}\` (${GITHUB_REF_NAME}, run ${GITHUB_RUN_NUMBER})."
+            echo
+            echo "This is a GitHub pre-release. It never writes the stable Gist, the stable tags or \`releases/latest\`."
+            echo
+            echo "## Install or update (canary)"
+            echo
+            echo "https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.user.js"
+            echo
+            echo "## Back to stable"
+            echo
+            echo "https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js"
+            echo
+            echo "## Roll back the canary"
+            echo
+            echo "Run the **canary** workflow with \`ref\` set to an earlier \`canary-<version>\` tag. The alias is republished from that commit with a new build number; the stable release is untouched."
+          } > "$notes"
+
+          # Cada publicacion deja un tag inmutable para poder volver a ella.
+          git tag -f "$tag" "$sha"
+          git push origin "refs/tags/$tag" --force
+
+          if gh release view canary >/dev/null 2>&1; then
+            gh release upload canary \
+              dist/canary/nitro-wraith.user.js \
+              dist/canary/nitro-wraith.meta.js \
+              dist/canary/build.json --clobber
+            gh release edit canary \
+              --title "NITRO WRAITH — canary" \
+              --notes-file "$notes" \
+              --prerelease
+          else
+            gh release create canary \
+              --target "$sha" \
+              --prerelease \
+              --latest=false \
+              --title "NITRO WRAITH — canary" \
+              --notes-file "$notes" \
+              dist/canary/nitro-wraith.user.js \
+              dist/canary/nitro-wraith.meta.js \
+              dist/canary/build.json
+          fi

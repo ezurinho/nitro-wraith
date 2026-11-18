@@ -775,6 +775,13 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   const VERSION = '8.14.50';
 
+  // Canal de publicacion: el build estable apunta al Gist; el canary se genera
+  // aparte con tools/canary.js. Solo ese artefacto cambia CHANNEL, su version y
+  // sus URLs: el Gist, `releases/latest` y los tags estables no se tocan.
+  const CHANNEL = 'stable';
+  const UPDATE_CANARY_URL = 'https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.user.js';
+  const UPDATE_STABLE_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+
   // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
   // asi que se puede leer sin token. Se consulta cada 5 min y al volver a la
   // pestana; si falla, se reintenta a los 5 min. Un fallo de red no borra un
@@ -10760,6 +10767,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     return {
       app: 'nitro-wraith',
       version: VERSION,
+      channel: CHANNEL,
       at: new Date().toISOString(),
       page: location.pathname,
       mode: MODE,
@@ -12164,6 +12172,7 @@ All of this only aims at believable statistics. It is your call and your risk.
                     <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, flight recorder, environment) to paste when something is off">report</button>
                     <button class="act" type="button" data-act="csv" title="Download the closed sessions as a CSV (date, races, WPM, target, deviation, accuracy, DQ, reason) for a spreadsheet">csv</button>
                     <button class="act" type="button" data-act="releases" title="Open the GitHub release history to install a previous version if the newest one misbehaves">versions</button>
+                    <button class="act" type="button" data-act="channel" title="${CHANNEL === 'canary' ? 'Download the stable release and go back to the normal channel' : 'Install the canary test build; it updates itself from the canary release and never changes the stable one'}">${CHANNEL === 'canary' ? 'stable' : 'canary'}</button>
                   </div>
                   <div class="rows">
                     <div class="row up-row" data-field="upRow" title="Auto-update check: the last result, its error and when it will retry"><span>update</span><b data-field="up">—</b></div>
@@ -12537,8 +12546,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     paintTheme();
 
     // Cabecera: version. No cambia en caliente, se pinta una vez.
-    setText(panel.refs.ver, `v${VERSION}`);
-    setText(panel.refs.aboutVer, `v${VERSION}`);
+    const versionLabel = `v${VERSION}${CHANNEL === 'canary' ? ' · canary' : ''}`;
+    setText(panel.refs.ver, versionLabel);
+    setText(panel.refs.aboutVer, versionLabel);
     if (!panel.mountedViews || panel.mountedViews.has('log')) {
       paintLogLists();
       paintChallengeList();
@@ -12964,6 +12974,11 @@ All of this only aims at believable statistics. It is your call and your risk.
           exportSessionsCsv();
         } else if (chip.dataset.act === 'releases') {
           try { window.open(UPDATE_RELEASES_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+        } else if (chip.dataset.act === 'channel') {
+          // En canary el boton vuelve al Gist estable; en estable abre el build
+          // de prueba. Ninguno de los dos cambia la release estable por si solo.
+          const url = CHANNEL === 'canary' ? UPDATE_STABLE_URL : UPDATE_CANARY_URL;
+          try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
 
         chip.blur();

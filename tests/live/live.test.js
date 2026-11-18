@@ -28,6 +28,7 @@ const CHROME = path.join(__dirname, 'chrome.js');
 const TABS = path.join(__dirname, 'tabs.js');
 const REPORT = path.join(__dirname, 'report.js');
 const EXPORT = path.join(__dirname, '..', '..', 'tools', 'export-downloads.js');
+const CANARY = path.join(__dirname, '..', '..', 'tools', 'canary.js');
 const SCRIPT_PATH = path.join(__dirname, '..', '..', 'nitro-wraith.user.js');
 const SPAWN_TIMEOUT_MS = 25000;
 
@@ -829,6 +830,54 @@ async function runCase(item) {
     contrast.length === themeNames.length
       && contrast.every((item) => item.dim >= 4.5 && item.dim2 >= 4.5),
     contrast.map((item) => `${item.name} ${item.dim.toFixed(2)}/${item.dim2.toFixed(2)}`).join(' · '));
+
+  // Canal canary: se ejecuta la herramienta real y se comprueba que el build de
+  // prueba queda aislado del estable (version de cuatro partes, URLs propias y
+  // vuelta al Gist), sin tocar los artefactos que se publican en main.
+  const canaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nta-canary-'));
+  try {
+    const stableScript = fs.readFileSync(SCRIPT_PATH, 'utf8');
+    const stableMeta = fs.readFileSync(path.join(__dirname, '..', '..', 'nitro-wraith.meta.js'), 'utf8');
+    const stableVersion = (stableScript.match(/@version\s+(\S+)/) || [])[1];
+    const canary = await runNode(CANARY, ['prepare', '17', '--out', canaryDir]);
+    const canaryUser = fs.existsSync(path.join(canaryDir, 'nitro-wraith.user.js'))
+      ? fs.readFileSync(path.join(canaryDir, 'nitro-wraith.user.js'), 'utf8')
+      : '';
+    const canaryMeta = fs.existsSync(path.join(canaryDir, 'nitro-wraith.meta.js'))
+      ? fs.readFileSync(path.join(canaryDir, 'nitro-wraith.meta.js'), 'utf8')
+      : '';
+    let manifest = null;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(canaryDir, 'build.json'), 'utf8')); } catch { manifest = null; }
+    const expected = `${stableVersion}.17`;
+
+    unit('canary builds a four-part userscript with its own update URLs',
+      canary.code === 0
+        && canaryUser.includes(`// @version      ${expected}`)
+        && canaryMeta.includes(`// @version      ${expected}`)
+        && canaryUser.includes('releases/download/canary/nitro-wraith.meta.js')
+        && canaryUser.includes('releases/download/canary/nitro-wraith.user.js')
+        && canaryUser.includes(`const VERSION = '${expected}';`),
+      canary.output.trim().split('\n').slice(-2).join(' | '));
+
+    unit('the canary build reports its channel and keeps the way back to stable',
+      canaryUser.includes("const CHANNEL = 'canary';")
+        && canaryUser.includes("const UPDATE_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.meta.js';")
+        && canaryUser.includes("const UPDATE_STABLE_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';")
+        && canaryUser.includes('data-act="channel"')
+        && manifest && manifest.channel === 'canary'
+        && manifest.version === expected
+        && manifest.sourceVersion === stableVersion
+        && manifest.tag === `canary-${expected}`,
+      JSON.stringify(manifest));
+
+    unit('preparing canary leaves the stable artifacts untouched',
+      fs.readFileSync(SCRIPT_PATH, 'utf8') === stableScript
+        && fs.readFileSync(path.join(__dirname, '..', '..', 'nitro-wraith.meta.js'), 'utf8') === stableMeta
+        && stableScript.includes("const CHANNEL = 'stable';"),
+      'stable files changed');
+  } finally {
+    fs.rmSync(canaryDir, { recursive: true, force: true });
+  }
 
   for (const item of CASES) {
     const result = await runCase(item);
