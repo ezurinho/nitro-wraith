@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.47 — 2026-11-18
+
+- feat: keep AFK health fresh and allow freeze reset
+- fix: compare build output without line-ending noise
+
 ## 8.14.46 — 2026-11-16
 
 - fix: keep build output out of release metadata
