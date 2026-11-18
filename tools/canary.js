@@ -89,8 +89,12 @@ function prepare(build, outDir) {
     version,
     sourceVersion: stable,
     tag: versionTag,
-    sourceRef: process.env.GITHUB_REF || '',
-    commit: process.env.GITHUB_SHA || gitValue(['rev-parse', 'HEAD']),
+    // `GITHUB_SHA` es el SHA del evento, no el del checkout: en un rollback
+    // (workflow_dispatch con ref=<tag>) apuntaria a la rama, no al tag. El HEAD
+    // real del checkout es la unica fuente fiable.
+    sourceRef: process.env.CANARY_SOURCE_REF || process.env.GITHUB_REF || '',
+    commit: gitValue(['rev-parse', 'HEAD']) || process.env.GITHUB_SHA || '',
+    eventSha: process.env.GITHUB_SHA || '',
     run: Number(process.env.GITHUB_RUN_NUMBER) || null,
     builtAt: new Date().toISOString(),
     installURL: CANARY_USER,
