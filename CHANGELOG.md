@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.49 — 2026-11-18
+
+- feat: add AFK safety interlock, health center and flight recorder
+
 ## 8.14.48 — 2026-11-18
 
 - feat: add a GitHub fallback for update checks
