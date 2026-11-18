@@ -75,6 +75,10 @@
     useNitro: true,
     nitroStrategy: 'longest',   // longest | first | last; se cambia en TUNE
 
+    // Avisos del sistema (Notification API). Apagados por defecto: el permiso
+    // se pide desde TUNE y solo se usa para DQ, bloqueos y el interlock AFK.
+    notifications: { enabled: false },
+
     // Breaks: nobody chains two hundred races without leaving the keyboard. Every
     // N races the bot waits before pressing "Race Again", and now and then the
     // break is long. This only works because the queue in the top window keeps its
@@ -98,6 +102,14 @@
       // documento despierto cuando AFK esta encendido. No sustituye al reloj
       // Worker ni garantiza que el navegador no congele la pestana.
       keepAlive: false,
+      // Si se activa, AFK solo abre carreras ocultas cuando el keep-alive esta
+      // realmente en marcha. Es el cinturon de seguridad que evita farmear a
+      // ciegas cuando el audio quedo suspendido o bloqueado.
+      afkRequireKeepAlive: false,
+      // Una DQ justo despues de un freeze suele ser una carrera que perdio sus
+      // teclas. Con esto activo, esa correlacion apaga AFK en vez de repetir el
+      // mismo experimento con la cuenta.
+      afkFreezeGuard: true,
       tickMs: 1000,
       continueDelayMs: [2400, 5200],  // respiro antes de pulsar Continue/Race Again (se sortea)
       continueLongChance: 0.12,       // y de vez en cuando, una pausa mas larga
@@ -332,6 +344,7 @@
   const UPDATE_GITHUB_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
   const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
   const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
+  const UPDATE_RELEASES_URL = 'https://github.com/ezurinho/nitro-wraith/releases';
   const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
   const UPDATE_KEY = 'nta:update';
   const UPDATE_RECHECK_MS = 5 * 60000;
@@ -490,6 +503,7 @@
       if (!previous || previous.error !== error) {
         log(`Update check failed: ${error} (retrying in 5 min).`);
       }
+      noteFlight('update-error', error);
       return false;
     };
 
@@ -538,6 +552,12 @@
       saveUpdateState({
         at: Date.now(), latest: keep, status: result.status, error: null, via: result.via,
       });
+      noteFlight('update', `v${result.version} via ${result.via}${versionNewer(keep, VERSION) ? ' (newer)' : ''}`);
+      if (versionNewer(keep, VERSION)
+        && (!previous || !previous.latest || versionNewer(keep, previous.latest))
+        && typeof notifyUser === 'function') {
+        notifyUser('Nitro Wraith: update available', `v${keep} is available; this copy is v${VERSION}. Open the update badge to download it.`, 'update');
+      }
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       paintUpdateBadge(garageUpdateNode, true);

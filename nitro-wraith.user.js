@@ -514,6 +514,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     useNitro: true,
     nitroStrategy: 'longest',   // longest | first | last; se cambia en TUNE
 
+    // Avisos del sistema (Notification API). Apagados por defecto: el permiso
+    // se pide desde TUNE y solo se usa para DQ, bloqueos y el interlock AFK.
+    notifications: { enabled: false },
+
     // Breaks: nobody chains two hundred races without leaving the keyboard. Every
     // N races the bot waits before pressing "Race Again", and now and then the
     // break is long. This only works because the queue in the top window keeps its
@@ -537,6 +541,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       // documento despierto cuando AFK esta encendido. No sustituye al reloj
       // Worker ni garantiza que el navegador no congele la pestana.
       keepAlive: false,
+      // Si se activa, AFK solo abre carreras ocultas cuando el keep-alive esta
+      // realmente en marcha. Es el cinturon de seguridad que evita farmear a
+      // ciegas cuando el audio quedo suspendido o bloqueado.
+      afkRequireKeepAlive: false,
+      // Una DQ justo despues de un freeze suele ser una carrera que perdio sus
+      // teclas. Con esto activo, esa correlacion apaga AFK en vez de repetir el
+      // mismo experimento con la cuenta.
+      afkFreezeGuard: true,
       tickMs: 1000,
       continueDelayMs: [2400, 5200],  // respiro antes de pulsar Continue/Race Again (se sortea)
       continueLongChance: 0.12,       // y de vez en cuando, una pausa mas larga
@@ -771,6 +783,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   const UPDATE_GITHUB_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
   const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
   const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
+  const UPDATE_RELEASES_URL = 'https://github.com/ezurinho/nitro-wraith/releases';
   const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
   const UPDATE_KEY = 'nta:update';
   const UPDATE_RECHECK_MS = 5 * 60000;
@@ -929,6 +942,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (!previous || previous.error !== error) {
         log(`Update check failed: ${error} (retrying in 5 min).`);
       }
+      noteFlight('update-error', error);
       return false;
     };
 
@@ -977,6 +991,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       saveUpdateState({
         at: Date.now(), latest: keep, status: result.status, error: null, via: result.via,
       });
+      noteFlight('update', `v${result.version} via ${result.via}${versionNewer(keep, VERSION) ? ' (newer)' : ''}`);
+      if (versionNewer(keep, VERSION)
+        && (!previous || !previous.latest || versionNewer(keep, previous.latest))
+        && typeof notifyUser === 'function') {
+        notifyUser('Nitro Wraith: update available', `v${keep} is available; this copy is v${VERSION}. Open the update badge to download it.`, 'update');
+      }
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       paintUpdateBadge(garageUpdateNode, true);
@@ -1789,6 +1809,61 @@ All of this only aims at believable statistics. It is your call and your risk.
   const NOTICE_RING = 16;
   const noticeRing = [];
 
+  // Grabador de vuelo: un anillo corto de eventos y avisos, persistido entre
+  // recargas. No lleva tokens ni HTML: solo hora, tipo y una linea saneada.
+  // Sirve para reconstruir «que paso justo antes» sin abrir la consola, sobre
+  // todo cuando el iframe se recarga o el freeze impide leerla.
+  const FLIGHT_KEY = 'nta:flight';
+  const FLIGHT_LIMIT = 240;
+  let flightRing = (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FLIGHT_KEY) || '[]');
+      return Array.isArray(saved)
+        ? saved.filter((row) => row && Number.isFinite(Number(row.at)) && row.text)
+          .slice(-FLIGHT_LIMIT)
+          .map((row) => ({ at: Number(row.at), kind: String(row.kind || 'event').slice(0, 24), text: String(row.text).slice(0, 240) }))
+        : [];
+    } catch { return []; }
+  })();
+  let flightSavedAt = 0;
+  let flightSaveTimer = 0;
+
+  function scrubFlightText(text) {
+    return String(text || '')
+      .replace(/((?:token|session|cookie|authorization)["'=:\s]+)[^\s,;"'}]+/gi, '$1***')
+      .replace(/[A-Za-z0-9+/=_-]{80,}/g, '***')
+      .slice(0, 240);
+  }
+
+  function saveFlightNow() {
+    flightSavedAt = Date.now();
+    if (flightSaveTimer) {
+      clearTimeout(flightSaveTimer);
+      flightSaveTimer = 0;
+    }
+    try { localStorage.setItem(FLIGHT_KEY, JSON.stringify(flightRing)); } catch { /* modo privado */ }
+  }
+
+  function noteFlight(kind, detail) {
+    const text = scrubFlightText(detail);
+    if (!text) return;
+    flightRing.push({ at: Date.now(), kind: String(kind || 'event').slice(0, 24), text });
+    if (flightRing.length > FLIGHT_LIMIT) flightRing.splice(0, flightRing.length - FLIGHT_LIMIT);
+    if (Date.now() - flightSavedAt > 1500) saveFlightNow();
+    else if (!flightSaveTimer) flightSaveTimer = setTimeout(saveFlightNow, 1500);
+  }
+
+  function flightEvents(limit = FLIGHT_LIMIT) {
+    const count = clamp(parseInt(limit, 10) || FLIGHT_LIMIT, 1, FLIGHT_LIMIT);
+    return flightRing.slice(-count).map((row) => ({ ...row }));
+  }
+
+  function clearFlight() {
+    flightRing = [];
+    saveFlightNow();
+    return true;
+  }
+
   const log = (...args) => {
     console.log('%c[NTAuto]', 'color:#7cc7ff;font-weight:bold', ...args);
 
@@ -1799,6 +1874,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     lastStatus = text;
     noticeRing.push({ at: Date.now(), text });
     if (noticeRing.length > NOTICE_RING) noticeRing.shift();
+    noteFlight('log', text);
     if (statusEl) setText(statusEl, text);
   };
 
@@ -2243,6 +2319,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     return { min: Math.min(min, max), max };
   }
 
+  // Version del objeto autoTyperPrefs. La lectura sigue aceptando objetos sin
+  // `schema` (instalaciones antiguas): los campos nuevos se rellenan con su
+  // valor seguro y el siguiente guardado ya escribe la version actual.
+  const PREFS_SCHEMA = 2;
+
   // Interruptores que antes vivian solo en CONFIG: apagar uno desde el panel se
   // perdia en la siguiente recarga. Ahora se guardan en autoTyperPrefs.
   function readPrefs() {
@@ -2256,12 +2337,18 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const flag = (key) => (typeof saved[key] === 'boolean' ? saved[key] : true);
     return {
+      schema: Math.max(1, Number(saved.schema) || 1),
       breaks: flag('breaks'),
       mysteryBox: flag('mysteryBox'),
       stickers: flag('stickers'),
       guard: flag('guard'),
       backgroundFarm: saved.backgroundFarm === true,
       keepAlive: saved.keepAlive === true,
+      afkRequireKeepAlive: saved.afkRequireKeepAlive === true,
+      // Ausente en instalaciones viejas: se estrena activado porque solo actua
+      // ante la correlacion freeze -> DQ, no en una carrera normal.
+      afkFreezeGuard: saved.afkFreezeGuard !== false,
+      notifications: saved.notifications === true,
       useNitro: flag('useNitro'),
       nitroStrategy: normalizeNitroStrategy(saved.nitroStrategy),
       challenges: flag('challenges'),
@@ -2275,12 +2362,16 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   function savePrefs() {
     disk.set(KEYS.prefs, JSON.stringify({
+      schema: PREFS_SCHEMA,
       breaks: CONFIG.breaks.enabled !== false,
       mysteryBox: CONFIG.mysteryBox.enabled !== false,
       stickers: CONFIG.stickers.enabled !== false,
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
       keepAlive: CONFIG.queue.keepAlive === true,
+      afkRequireKeepAlive: CONFIG.queue.afkRequireKeepAlive === true,
+      afkFreezeGuard: CONFIG.queue.afkFreezeGuard !== false,
+      notifications: CONFIG.notifications.enabled === true,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       challenges: CONFIG.challenges.enabled !== false,
@@ -2301,9 +2392,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     } catch {
       saved = {};
     }
+    // Se fusiona una sola clave para no pisar ajustes que la otra ventana
+    // conoce y esta no. El schema sube al guardar, sin tocar el resto.
+    saved.schema = PREFS_SCHEMA;
     saved[key] = next === true;
     try { disk.set(KEYS.prefs, JSON.stringify(saved)); } catch { /* modo privado */ }
   }
+
+  const savePrefFlag = saveQueuePref;
 
   function saveBackgroundFarmPref(next) {
     saveQueuePref('backgroundFarm', next);
@@ -2324,6 +2420,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.guard.enabled = prefs.guard;
     CONFIG.queue.backgroundFarm = prefs.backgroundFarm;
     CONFIG.queue.keepAlive = prefs.keepAlive;
+    CONFIG.queue.afkRequireKeepAlive = prefs.afkRequireKeepAlive;
+    CONFIG.queue.afkFreezeGuard = prefs.afkFreezeGuard;
+    CONFIG.notifications.enabled = prefs.notifications;
     CONFIG.useNitro = prefs.useNitro;
     CONFIG.nitroStrategy = prefs.nitroStrategy;
     CONFIG.challenges.enabled = prefs.challenges;
@@ -6566,18 +6665,42 @@ All of this only aims at believable statistics. It is your call and your risk.
     return CONFIG.queue.backgroundFarm !== false;
   }
 
+  // Interlock: con AFK estricto, una pestana oculta no abre carreras hasta que
+  // el keep-alive confirma que esta corriendo. `ready` o `blocked` no cuentan:
+  // un AudioContext suspendido no mantiene vivo el documento.
+  function afkKeepAliveConfirmed() {
+    if (CONFIG.queue.afkRequireKeepAlive !== true) return true;
+    if (typeof keepAliveInfo !== 'function') return false;
+    try {
+      return keepAliveInfo().label === 'on';
+    } catch {
+      return false;
+    }
+  }
+
+  // Separado de `hiddenBlocked` para poder probar la decision con hidden=true
+  // sin depender de que el navegador de pruebas tenga la página en segundo plano.
+  function afkHiddenBlocked(hidden = pageHidden()) {
+    if (!hidden) return false;
+    return !backgroundFarm() || !afkKeepAliveConfirmed();
+  }
+
   function hiddenBlocked() {
-    return pageHidden() && !backgroundFarm();
+    return afkHiddenBlocked();
   }
 
   // Con backgroundFarm activo no se abre una espera por estar oculto. Solo se
   // espera si el modo AFK esta apagado; ahi el navegador frena los timers y la
   // carrera se quedaria sin teclas (DQ por inactividad).
   async function waitWhileHidden() {
-    if (!pageHidden() || backgroundFarm()) return false;
+    if (!pageHidden() || !hiddenBlocked()) return false;
 
-    log('Background farming is off: no new race until the tab is visible again.');
-    while (!session.stopped && pageHidden()) await preciseSleep(1000);
+    const strict = backgroundFarm() && CONFIG.queue.afkRequireKeepAlive === true;
+    log(strict
+      ? 'AFK interlock: hidden tab with no running keep-alive; no new race until it is confirmed or the tab is visible again.'
+      : 'Background farming is off: no new race until the tab is visible again.');
+    noteFlight('afk-hold', strict ? 'keep-alive not confirmed' : 'background farming off');
+    while (!session.stopped && pageHidden() && hiddenBlocked()) await preciseSleep(1000);
     return true;
   }
 
@@ -6603,6 +6726,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       disk.set(DQ_BLOCK_UNTIL, String(until));
       log(`The site blocked the account for too many disqualifications: no race for ${Math.round(ms / 60000)} min.`);
       beep('block');
+      if (typeof notifyUser === 'function') {
+        notifyUser('Nitro Wraith: site block', `Too many disqualifications; waiting ${Math.round(ms / 60000)} min before racing again.`, 'site-block');
+      }
+      noteFlight('site-block', `${Math.round(ms / 60000)} min`);
     }
     session.breakUntil = Math.max(session.breakUntil, until);
     saveCounters();
@@ -7225,6 +7352,19 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Una DQ no se puede deshacer (la decide el servidor), pero si se puede
   // llevar la cuenta: a las 5 seguidas Nitro Type bloquea la cuenta unos
   // minutos, asi que a la segunda se para el bot en vez de encadenar.
+  // Decisión pura del guardián AFK: una DQ cuenta como consecuencia del freeze
+  // solo si AFK estaba activo y el último freeze es reciente. Se expone en
+  // debug para probar la decisión sin fabricar una DQ real.
+  function afkFreezeGuardDecision(now = Date.now()) {
+    const freeze = typeof refreshAfkFreezeStats === 'function' ? refreshAfkFreezeStats() : afkFreezeStats;
+    const recent = Boolean(freeze && freeze.lastAt && now - freeze.lastAt < 15 * 60000);
+    return {
+      tripped: CONFIG.queue.afkFreezeGuard !== false && CONFIG.queue.backgroundFarm === true && recent,
+      recent,
+      minutes: recent ? Math.round((now - freeze.lastAt) / 60000) : null,
+    };
+  }
+
   function noteDisqualification() {
     session.dqStreak++;
     session.dqCount++;
@@ -7233,6 +7373,22 @@ All of this only aims at believable statistics. It is your call and your risk.
     // del dia lo ensena para saber si el ritmo esta aguantando hoy.
     todayBump({ dq: 1, resetClean: true, dqAt: Date.now() });
     log(`Disqualification #${session.dqStreak} in a row; not recorded in the history.`);
+    noteFlight('dq', `#${session.dqStreak} in a row`);
+    if (typeof notifyUser === 'function') {
+      notifyUser('Nitro Wraith: disqualification', `Race disqualified (${session.dqStreak} in a row).`, 'dq');
+    }
+
+    // Correlacion freeze -> DQ: si el contador de freezes se movio hace poco y
+    // AFK estaba abierto, esta DQ es la senal para dejar de farmear a ciegas.
+    const afkGuard = afkFreezeGuardDecision();
+    if (afkGuard.tripped) {
+      const text = `AFK safety guard: a disqualification followed a freeze (${afkGuard.minutes} min ago). AFK farming was turned off; keep-alive is left as it was.`;
+      if (typeof setBackgroundFarm === 'function') setBackgroundFarm(false);
+      storeNotice(text);
+      noteFlight('afk-guard', text);
+      log(text);
+      if (typeof notifyUser === 'function') notifyUser('Nitro Wraith: AFK safety guard', text, 'afk-guard');
+    }
 
     // A la cuarta se para: la quinta ya es el bloqueo del sitio. Dos o tres DQ
     // seguidas paran el tiempo suficiente para que algo se arregle (assets,
@@ -8382,7 +8538,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   function configSnapshot() {
     return {
       app: 'nitro-wraith',
-      version: 1,
+      version: 2,
+      prefsSchema: PREFS_SCHEMA,
       paceProfile,
       raceLimit: session.raceLimit,
       xpLimit: session.xpLimit,
@@ -8399,6 +8556,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
       keepAlive: CONFIG.queue.keepAlive === true,
+      afkRequireKeepAlive: CONFIG.queue.afkRequireKeepAlive === true,
+      afkFreezeGuard: CONFIG.queue.afkFreezeGuard !== false,
+      notifications: CONFIG.notifications.enabled === true,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       customWpm: customWpm(),
@@ -8631,6 +8791,101 @@ All of this only aims at believable statistics. It is your call and your risk.
     };
   }
 
+  // Avisos del sistema: opcionales y con permiso explicito. Se deduplican por
+  // etiqueta porque la misma DQ puede verla el iframe y el garaje; sin esto
+  // sonarian dos notificaciones por un solo evento.
+  function notificationSupported() {
+    return typeof window.Notification === 'function';
+  }
+
+  function notificationInfo() {
+    if (!notificationSupported()) {
+      return { label: 'n/a', title: 'Desktop alerts: this browser does not expose the Notification API.' };
+    }
+    const permission = Notification.permission;
+    if (permission === 'denied') {
+      return { label: 'blocked', title: 'Desktop alerts: blocked. Allow notifications for nitrotype.com in the browser site settings, then try again.' };
+    }
+    if (!CONFIG.notifications.enabled) {
+      return { label: 'off', title: 'Desktop alerts: off. Only DQ, site blocks and the AFK safety guard use them.' };
+    }
+    if (permission !== 'granted') {
+      return { label: 'ready', title: 'Desktop alerts: click the switch to ask the browser for permission.' };
+    }
+    return { label: 'on', title: 'Desktop alerts: on. They are sent for disqualifications, site blocks and the AFK safety guard.' };
+  }
+
+  function notifyUser(title, body, tag = 'event') {
+    if (!CONFIG.notifications.enabled || !notificationSupported() || Notification.permission !== 'granted') return false;
+    const key = `nta:notify:${String(tag || 'event').slice(0, 40)}`;
+    try {
+      const last = Number(localStorage.getItem(key)) || 0;
+      if (Date.now() - last < 20000) return false;
+      localStorage.setItem(key, String(Date.now()));
+    } catch { /* modo privado: se avisa igual */ }
+    try {
+      const notice = new Notification(String(title || 'Nitro Wraith'), {
+        body: String(body || '').slice(0, 220),
+        tag: String(tag || 'event'),
+      });
+      notice.onclick = () => {
+        try { window.focus(); } catch { /* ventana sin foco */ }
+        try { notice.close(); } catch { /* ya cerrada */ }
+      };
+      noteFlight('notify', `${tag}: ${title}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function setNotifications(on) {
+    const next = on === true;
+    const apply = () => {
+      CONFIG.notifications.enabled = next;
+      savePrefFlag('notifications', next);
+      paintConfig();
+      log(next
+        ? 'Desktop alerts: on. Permission granted; DQ, site blocks and the AFK guard will notify.'
+        : 'Desktop alerts: off.');
+      noteFlight('settings', `notifications ${next ? 'on' : 'off'}`);
+    };
+
+    if (!next) {
+      if (!CONFIG.notifications.enabled) return false;
+      apply();
+      return true;
+    }
+    if (!notificationSupported()) {
+      log('Desktop alerts: this browser does not expose the Notification API.');
+      return false;
+    }
+    if (Notification.permission === 'denied') {
+      log('Desktop alerts: permission is blocked in the browser; allow notifications for this site first.');
+      paintConfig();
+      return false;
+    }
+    if (Notification.permission === 'granted') {
+      apply();
+      return true;
+    }
+
+    // El clic del interruptor es el gesto que exige el navegador para pedir
+    // permiso. Si se rechaza, el interruptor se queda apagado.
+    try {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') apply();
+        else {
+          log(`Desktop alerts: permission ${permission}; the switch stays off.`);
+          paintConfig();
+        }
+      }).catch(() => paintConfig());
+    } catch {
+      paintConfig();
+    }
+    return true;
+  }
+
   function bindKeepAliveGesture() {
     if (keepAliveGestureBound) return;
     keepAliveGestureBound = true;
@@ -8794,6 +9049,34 @@ All of this only aims at believable statistics. It is your call and your risk.
     log(next
       ? 'AFK farming: on. A hidden tab can be frozen by the browser and that race can end in a DQ.'
       : 'AFK farming: off. New races only start while this tab is visible.');
+    return true;
+  }
+
+  function setAfkRequireKeepAlive(on, options = {}) {
+    const next = on === true;
+    if (CONFIG.queue.afkRequireKeepAlive === next) return false;
+
+    CONFIG.queue.afkRequireKeepAlive = next;
+    if (options.persist !== false) savePrefFlag('afkRequireKeepAlive', next);
+    paintConfig();
+    log(next
+      ? 'AFK interlock: hidden races now require a confirmed running keep-alive.'
+      : 'AFK interlock: off. Hidden races can start even when the keep-alive is not running.');
+    noteFlight('settings', `AFK interlock ${next ? 'on' : 'off'}`);
+    return true;
+  }
+
+  function setAfkFreezeGuard(on, options = {}) {
+    const next = on !== false;
+    if (CONFIG.queue.afkFreezeGuard === next) return false;
+
+    CONFIG.queue.afkFreezeGuard = next;
+    if (options.persist !== false) savePrefFlag('afkFreezeGuard', next);
+    paintConfig();
+    log(next
+      ? 'AFK safety guard: on. A DQ within 15 min of a freeze turns AFK farming off.'
+      : 'AFK safety guard: off.');
+    noteFlight('settings', `AFK freeze guard ${next ? 'on' : 'off'}`);
     return true;
   }
 
@@ -9094,6 +9377,50 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
+  // Centro de salud: un resumen que dice QUE revisar, sin obligar a leer todo
+  // TUNE. No inventa un estado "sano" si falta la calibracion o el update.
+  function paintHealthCenter() {
+    if (!panel.refs || !panel.refs.healthSummary) return;
+    const up = updateHealth();
+    const freeze = refreshAfkFreezeStats();
+    const keep = keepAliveInfo();
+    const afk = afkHealthInfo();
+    const account = accountStats
+      ? `${accountStats.wpm || '?'} avg${accountStats.races ? ` · ${accountStats.races} races` : ''}`
+      : calibratedRange ? `${calibratedRange.min}-${calibratedRange.max} wpm` : 'no data';
+    const afkGate = !backgroundFarm()
+      ? 'visible-only'
+      : CONFIG.queue.afkRequireKeepAlive === true
+        ? `strict · ${keep.label}`
+        : `open · ${keep.label}`;
+    const freezeText = freeze.count
+      ? `${freeze.count}${freeze.lastAt ? ` · ${Math.max(0, Math.round((Date.now() - freeze.lastAt) / 60000))}m` : ''}`
+      : 'none';
+
+    setText(panel.refs.healthAccount, account);
+    setText(panel.refs.healthAfk, afkGate);
+    setText(panel.refs.healthUpdate, up.text);
+    setText(panel.refs.healthFreeze, freezeText);
+
+    const issues = [];
+    if (!accountStats && !calibratedRange) issues.push('account');
+    if (up.good === false) issues.push('update');
+    if (backgroundFarm() && afk.state === 'blocked') issues.push('AFK');
+    if (backgroundFarm() && CONFIG.queue.afkRequireKeepAlive === true && keep.label !== 'on') issues.push('keep-alive');
+    const summary = issues.length ? `${issues.length} to review` : 'all clear';
+    setText(panel.refs.healthSummary, summary);
+    if (panel.refs.healthSummary.dataset.state !== (issues.length ? 'warn' : 'ok')) {
+      panel.refs.healthSummary.dataset.state = issues.length ? 'warn' : 'ok';
+    }
+    const note = !accountStats && !calibratedRange
+      ? 'First run: open the garage and let calibration read this account. AFK stays off until you enable it; the report has the full state.'
+      : issues.length
+        ? `Review: ${[...new Set(issues)].join(', ')}. The report includes the flight recorder and the exact AFK state.`
+        : `Account ${account}; AFK ${afkGate}; update ${up.text}; freezes ${freezeText}.`;
+    setText(panel.refs.healthNote, note);
+    panel.refs.healthNote.title = `${note} Copy report puts the full diagnostic on the clipboard.`;
+  }
+
   function paintConfig() {
     if (!panel.refs || !panel.refs.cfg) return;
 
@@ -9117,10 +9444,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
       keepAlive: CONFIG.queue.keepAlive === true,
+      afkRequireKeepAlive: CONFIG.queue.afkRequireKeepAlive === true,
+      afkFreezeGuard: CONFIG.queue.afkFreezeGuard !== false,
+      notifications: CONFIG.notifications.enabled === true,
       useNitro: CONFIG.useNitro !== false,
       sound: sfxOn === true,
     };
     const keepAlive = keepAliveInfo();
+    const notifications = notificationInfo();
     const afkHealth = afkHealthInfo();
     const afkHealthNode = panel.refs.cfg.querySelector('[data-field="afkHealth"]');
     if (afkHealthNode) {
@@ -9140,7 +9471,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (label) {
         // El keep-alive tiene estados reales (`ready`, `blocked`): el texto no
         // puede decir "on" si el audio sigue suspendido.
-        const text = key === 'keepAlive' ? keepAlive.label : (on ? 'on' : 'off');
+        const text = key === 'keepAlive'
+          ? keepAlive.label
+          : key === 'notifications' ? notifications.label : (on ? 'on' : 'off');
         setText(label, text);
         if (label.dataset.on !== value) label.dataset.on = value;
         if (label.dataset.state !== text) label.dataset.state = text;
@@ -9150,6 +9483,11 @@ All of this only aims at believable statistics. It is your call and your risk.
         button.dataset.state = keepAlive.label;
         if (label) label.title = keepAlive.title;
       }
+      if (key === 'notifications') {
+        button.title = notifications.title;
+        button.dataset.state = notifications.label;
+        if (label) label.title = notifications.title;
+      }
     }
 
     // Tecno y rango del perfil activo, en la tarjeta de ritmo y en la de guardia.
@@ -9157,6 +9495,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.tuneCap, Number.isFinite(CONFIG.wpm.hardCap) ? `≤ ${CONFIG.wpm.hardCap} wpm` : 'no cap');
     setText(panel.refs.tuneRange, `${tier.min}-${tier.max}`);
     setText(panel.refs.infoCap, String(CONFIG.wpm.hardCap));
+    paintHealthCenter();
 
     // Los overrides manuales no se pisan mientras el usuario esta escribiendo.
     const setNumberValue = (el, value) => {
@@ -9508,8 +9847,24 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.setBackgroundFarm = (on) => setBackgroundFarm(Boolean(on));
   window.__ntaDebug.keepAlive = () => keepAliveDebug();
   window.__ntaDebug.setKeepAlive = (on) => setKeepAlive(Boolean(on));
+  window.__ntaDebug.afkRequireKeepAlive = () => CONFIG.queue.afkRequireKeepAlive === true;
+  window.__ntaDebug.setAfkRequireKeepAlive = (on) => setAfkRequireKeepAlive(Boolean(on));
+  window.__ntaDebug.afkKeepAliveConfirmed = () => afkKeepAliveConfirmed();
+  window.__ntaDebug.hiddenBlocked = () => hiddenBlocked();
+  window.__ntaDebug.afkHiddenBlocked = (hidden) => afkHiddenBlocked(hidden !== false);
+  window.__ntaDebug.prefs = () => readPrefs();
+  window.__ntaDebug.afkFreezeGuard = () => CONFIG.queue.afkFreezeGuard !== false;
+  window.__ntaDebug.setAfkFreezeGuard = (on) => setAfkFreezeGuard(on !== false);
+  window.__ntaDebug.afkGuardDecision = () => afkFreezeGuardDecision();
   window.__ntaDebug.afkFreeze = () => ({ ...afkFreezeStats });
   window.__ntaDebug.resetAfkFreeze = () => resetAfkFreezeStats();
+  window.__ntaDebug.notifications = () => ({ ...notificationInfo(), enabled: CONFIG.notifications.enabled === true });
+  window.__ntaDebug.setNotifications = (on) => setNotifications(Boolean(on));
+  window.__ntaDebug.flight = (limit) => flightEvents(limit);
+  window.__ntaDebug.clearFlight = () => clearFlight();
+  window.__ntaDebug.noteFlight = (kind, detail) => { noteFlight(String(kind || 'event'), String(detail || '')); return true; };
+  window.__ntaDebug.flushFlight = () => { saveFlightNow(); return flightRing.length; };
+  window.__ntaDebug.noteDq = () => { noteDisqualification(); return { streak: session.dqStreak, count: session.dqCount }; };
   window.__ntaDebug.nitroStrategy = () => CONFIG.nitroStrategy;
   window.__ntaDebug.setNitroStrategy = (value) => setNitroStrategy(String(value || ''));
   window.__ntaDebug.useNitro = (app) => useNitro(app);
@@ -10313,6 +10668,30 @@ All of this only aims at believable statistics. It is your call and your risk.
       done.push(`AFK keep-alive ${data.keepAlive ? 'on' : 'off'}`);
     }
 
+    if (typeof data.afkRequireKeepAlive === 'boolean') {
+      setAfkRequireKeepAlive(data.afkRequireKeepAlive, { persist: false });
+      done.push(`AFK interlock ${data.afkRequireKeepAlive ? 'on' : 'off'}`);
+    }
+
+    if (typeof data.afkFreezeGuard === 'boolean') {
+      setAfkFreezeGuard(data.afkFreezeGuard, { persist: false });
+      done.push(`AFK guard ${data.afkFreezeGuard ? 'on' : 'off'}`);
+    }
+
+    if (typeof data.notifications === 'boolean') {
+      // Un import no debe disparar un prompt de permiso: se aplica solo si el
+      // navegador ya lo tiene concedido; si no, se conserva apagado.
+      if (data.notifications === false) {
+        if (CONFIG.notifications.enabled) setNotifications(false);
+        done.push('notifications off');
+      } else if (notificationSupported() && Notification.permission === 'granted') {
+        setNotifications(true);
+        done.push('notifications on');
+      } else {
+        done.push('notifications need permission');
+      }
+    }
+
     if (typeof data.useNitro === 'boolean') {
       setUseNitro(data.useNitro, { persist: false });
       done.push(`auto nitro ${data.useNitro ? 'on' : 'off'}`);
@@ -10429,7 +10808,25 @@ All of this only aims at believable statistics. It is your call and your risk.
         guard: CONFIG.guard.enabled !== false,
         useNitro: CONFIG.useNitro !== false,
         nitroStrategy: CONFIG.nitroStrategy,
+        backgroundFarm: CONFIG.queue.backgroundFarm === true,
+        afkRequireKeepAlive: CONFIG.queue.afkRequireKeepAlive === true,
+        afkFreezeGuard: CONFIG.queue.afkFreezeGuard !== false,
+        notifications: CONFIG.notifications.enabled === true,
+        notificationPermission: notificationSupported() ? Notification.permission : 'unsupported',
         sound: sfxOn === true,
+      },
+      afk: {
+        keepAlive: keepAliveInfo().label,
+        freeze: (() => {
+          const stats = refreshAfkFreezeStats();
+          return {
+            count: stats.count,
+            lastAt: stats.lastAt ? new Date(stats.lastAt).toISOString() : null,
+            lastMinutes: stats.lastAt ? Math.round((Date.now() - stats.lastAt) / 60000) : null,
+            lastDurationMs: stats.lastDurationMs,
+            totalMs: stats.totalMs,
+          };
+        })(),
       },
       nitro: nitroPreview
         ? { index: nitroPreview.index, word: nitroPreview.word, chars: nitroPreview.chars }
@@ -10515,6 +10912,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       day,
       lastRaces: raceHistory.slice(-CONFIG.historySize),
       notices: noticeRing.slice(-10).map((item) => `${clockText(item.at)} ${item.text}`),
+      flight: flightEvents(80),
       queueNotice: queueNotice && queueNotice.text ? `${clockText(queueNotice.at)} ${queueNotice.text}` : null,
       box: {
         nextInMin: (() => {
@@ -11562,6 +11960,21 @@ All of this only aims at believable statistics. It is your call and your risk.
                 <span class="tune-count" data-field="tuneCount" aria-live="polite">settings</span>
               </div>
               <div class="tune-empty" data-field="tuneEmpty" role="status" hidden></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-health-label">
+                <div class="tune-sec-h"><span id="tune-health-label">Health</span><b>account · AFK · update</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h4l2-5 4 10 2-5h6"/><path d="M4 20h16"/></svg></span>
+                  <div class="card-h"><span class="card-t">Health center</span><span class="card-s" data-field="healthSummary">checking</span></div>
+                  <div class="rows">
+                    <div class="row" title="Account calibration source and freshness"><span>account</span><b data-field="healthAccount">—</b></div>
+                    <div class="row" title="AFK farming, keep-alive and the strict interlock; the same values as the AFK rows below"><span>AFK gate</span><b data-field="healthAfk">—</b></div>
+                    <div class="row" title="Last update check result and age"><span>update</span><b data-field="healthUpdate">—</b></div>
+                    <div class="row" title="Page Lifecycle freezes recorded in this browser"><span>freezes</span><b data-field="healthFreeze">—</b></div>
+                  </div>
+                  <div class="cfg-note" data-field="healthNote">One place to see what needs attention.</div>
+                  <button class="act" type="button" data-act="report" title="Copy the full diagnostic report, including the recent flight recorder, to paste when something is off">copy report</button>
+                </div>
+              </div>
               <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
                 <div class="tune-sec-h"><span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b></div>
                 <div class="card">
@@ -11675,6 +12088,14 @@ All of this only aims at believable statistics. It is your call and your risk.
                     <span class="set-lbl">AFK keep-alive<i>near-silent audio holds the tab</i></span>
                     <span class="set-val"><b data-sw-txt="keepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="keepAlive" data-on="0" title="Optional and off by default. Near-silent audio makes Chrome treat this tab as active while AFK farming is on. It needs one click to unlock audio and cannot guarantee that the tab will not freeze. Muting the tab can disable it."></button></span>
                   </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK interlock<i>hidden races need keep-alive running</i></span>
+                    <span class="set-val"><b data-sw-txt="afkRequireKeepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="afkRequireKeepAlive" data-on="0" title="Recommended with AFK farming: a hidden tab cannot open a race unless the keep-alive reports a running AudioContext. A suspended or blocked keep-alive holds the queue instead of risking a DQ."></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK safety guard<i>DQ after a freeze turns AFK off</i></span>
+                    <span class="set-val"><b data-sw-txt="afkFreezeGuard" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="afkFreezeGuard" data-on="1" title="On by default. If a disqualification happens within 15 minutes of a recorded freeze while AFK farming is on, AFK is turned off and a notice is kept. It does not undo the DQ."></button></span>
+                  </div>
                   <div class="set-row afk-health-row" title="Live AFK state, keep-alive state and freeze events recorded by this browser">
                     <span class="set-lbl">AFK health<i>hidden state · freeze count</i></span>
                     <span class="set-val"><b data-field="afkHealth" data-state="off" role="status" aria-live="polite">off · visible-only</b><button class="afk-health-reset" type="button" data-act="afkFreezeReset" title="Clear the freeze history recorded in this browser">reset</button></span>
@@ -11699,6 +12120,10 @@ All of this only aims at believable statistics. It is your call and your risk.
                     <span class="set-lbl">Sound<i>discreet tone when the bot waits</i></span>
                     <span class="set-val"><b data-sw-txt="sound" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="sound" data-on="0" title="Sound alerts: a short tone on long breaks, duplicate copies and site blocks"></button></span>
                   </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Desktop alerts<i>DQ and site blocks, with permission</i></span>
+                    <span class="set-val"><b data-sw-txt="notifications" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="notifications" data-on="0" title="Desktop alerts: permission is requested on the first click. Only disqualifications, site blocks and the AFK safety guard use them; the panel and sound settings are unchanged."></button></span>
+                  </div>
                 </div>
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 0 18h1.6a1.7 1.7 0 0 0 1.2-2.9l-.5-.5a1.7 1.7 0 0 1 1.2-2.9H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.7Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="8.3" r="1.1" fill="currentColor" stroke="none"/></svg></span>
@@ -11718,8 +12143,9 @@ All of this only aims at believable statistics. It is your call and your risk.
                   <div class="rows" style="display:flex; gap:6px; margin:0 0 2px">
                     <button class="act" type="button" data-act="export" title="Copy this configuration (profile, limit, sound, switches) so it can be pasted in another browser or account">copy</button>
                     <button class="act" type="button" data-act="import" title="Apply whatever config is pasted in the box below">apply</button>
-                    <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, environment) to paste when something is off">report</button>
+                    <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, flight recorder, environment) to paste when something is off">report</button>
                     <button class="act" type="button" data-act="csv" title="Download the closed sessions as a CSV (date, races, WPM, target, deviation, accuracy, DQ, reason) for a spreadsheet">csv</button>
+                    <button class="act" type="button" data-act="releases" title="Open the GitHub release history to install a previous version if the newest one misbehaves">versions</button>
                   </div>
                   <div class="rows">
                     <div class="row up-row" data-field="upRow" title="Auto-update check: the last result, its error and when it will retry"><span>update</span><b data-field="up">—</b></div>
@@ -11960,6 +12386,12 @@ All of this only aims at believable statistics. It is your call and your risk.
       themeName: pick('[data-field="themeName"]'),
       tuneCap: pick('[data-field="tuneCap"]'),
       tuneRange: pick('[data-field="tuneRange"]'),
+      healthSummary: pick('[data-field="healthSummary"]'),
+      healthAccount: pick('[data-field="healthAccount"]'),
+      healthAfk: pick('[data-field="healthAfk"]'),
+      healthUpdate: pick('[data-field="healthUpdate"]'),
+      healthFreeze: pick('[data-field="healthFreeze"]'),
+      healthNote: pick('[data-field="healthNote"]'),
       tuneSearch: pick('[data-field="tuneSearch"]'),
       tuneClear: pick('[data-field="tuneClear"]'),
       tuneCount: pick('[data-field="tuneCount"]'),
@@ -12489,6 +12921,12 @@ All of this only aims at believable statistics. It is your call and your risk.
           setBackgroundFarm(CONFIG.queue.backgroundFarm !== true);
         } else if (chip.dataset.toggle === 'keepAlive') {
           setKeepAlive(CONFIG.queue.keepAlive !== true);
+        } else if (chip.dataset.toggle === 'afkRequireKeepAlive') {
+          setAfkRequireKeepAlive(CONFIG.queue.afkRequireKeepAlive !== true);
+        } else if (chip.dataset.toggle === 'afkFreezeGuard') {
+          setAfkFreezeGuard(CONFIG.queue.afkFreezeGuard === false);
+        } else if (chip.dataset.toggle === 'notifications') {
+          setNotifications(CONFIG.notifications.enabled !== true);
         } else if (chip.dataset.toggle === 'sound') {
           // El click ya es gesto valido para el audio: al encenderlo suena.
           setSfx(!sfxOn);
@@ -12506,6 +12944,8 @@ All of this only aims at believable statistics. It is your call and your risk.
           exportDiagnostics();
         } else if (chip.dataset.act === 'csv') {
           exportSessionsCsv();
+        } else if (chip.dataset.act === 'releases') {
+          try { window.open(UPDATE_RELEASES_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
 
         chip.blur();
@@ -14742,6 +15182,13 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     function watchStuck() {
+      // El interlock AFK puede mantener la cola quieta a proposito: no es un
+      // marco muerto. Recargar aqui solo gastaria el presupuesto de recargas y
+      // volveria a abrir la carrera oculta que se acaba de bloquear.
+      if (hiddenBlocked()) {
+        noteProgress();
+        return;
+      }
       // «Clear ban» deja la cola pausada a proposito: no es un marco muerto ni
       // un atasco que haya que recargar. Solo un Resume/Alt+A manual la arma.
       if (banClearHeld()) {
@@ -20282,6 +20729,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     document.addEventListener('freeze', () => {
       frozenAt = Date.now();
       noteAfkFreeze();
+      noteFlight('freeze', `visible=${document.visibilityState === 'visible'} racing=${Boolean(session.liveRound && !session.stopped)}`);
       releaseTypingLock();
       if (session.liveRound && !session.stopped) {
         log('Browser froze this tab; the typing lock was released.');
@@ -20295,6 +20743,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       const frozenFor = Math.max(0, Date.now() - frozenAt);
       frozenAt = 0;
       noteAfkResume(frozenFor);
+      noteFlight('resume', `${Math.round(frozenFor / 1000)} s frozen`);
       log(`Browser resumed after ${(frozenFor / 1000).toFixed(1)} s frozen; rechecking the race.`);
       syncKeepAlive();
       updatePanel();

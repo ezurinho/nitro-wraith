@@ -45,7 +45,8 @@
   function configSnapshot() {
     return {
       app: 'nitro-wraith',
-      version: 1,
+      version: 2,
+      prefsSchema: PREFS_SCHEMA,
       paceProfile,
       raceLimit: session.raceLimit,
       xpLimit: session.xpLimit,
@@ -62,6 +63,9 @@
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
       keepAlive: CONFIG.queue.keepAlive === true,
+      afkRequireKeepAlive: CONFIG.queue.afkRequireKeepAlive === true,
+      afkFreezeGuard: CONFIG.queue.afkFreezeGuard !== false,
+      notifications: CONFIG.notifications.enabled === true,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       customWpm: customWpm(),
@@ -294,6 +298,101 @@
     };
   }
 
+  // Avisos del sistema: opcionales y con permiso explicito. Se deduplican por
+  // etiqueta porque la misma DQ puede verla el iframe y el garaje; sin esto
+  // sonarian dos notificaciones por un solo evento.
+  function notificationSupported() {
+    return typeof window.Notification === 'function';
+  }
+
+  function notificationInfo() {
+    if (!notificationSupported()) {
+      return { label: 'n/a', title: 'Desktop alerts: this browser does not expose the Notification API.' };
+    }
+    const permission = Notification.permission;
+    if (permission === 'denied') {
+      return { label: 'blocked', title: 'Desktop alerts: blocked. Allow notifications for nitrotype.com in the browser site settings, then try again.' };
+    }
+    if (!CONFIG.notifications.enabled) {
+      return { label: 'off', title: 'Desktop alerts: off. Only DQ, site blocks and the AFK safety guard use them.' };
+    }
+    if (permission !== 'granted') {
+      return { label: 'ready', title: 'Desktop alerts: click the switch to ask the browser for permission.' };
+    }
+    return { label: 'on', title: 'Desktop alerts: on. They are sent for disqualifications, site blocks and the AFK safety guard.' };
+  }
+
+  function notifyUser(title, body, tag = 'event') {
+    if (!CONFIG.notifications.enabled || !notificationSupported() || Notification.permission !== 'granted') return false;
+    const key = `nta:notify:${String(tag || 'event').slice(0, 40)}`;
+    try {
+      const last = Number(localStorage.getItem(key)) || 0;
+      if (Date.now() - last < 20000) return false;
+      localStorage.setItem(key, String(Date.now()));
+    } catch { /* modo privado: se avisa igual */ }
+    try {
+      const notice = new Notification(String(title || 'Nitro Wraith'), {
+        body: String(body || '').slice(0, 220),
+        tag: String(tag || 'event'),
+      });
+      notice.onclick = () => {
+        try { window.focus(); } catch { /* ventana sin foco */ }
+        try { notice.close(); } catch { /* ya cerrada */ }
+      };
+      noteFlight('notify', `${tag}: ${title}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function setNotifications(on) {
+    const next = on === true;
+    const apply = () => {
+      CONFIG.notifications.enabled = next;
+      savePrefFlag('notifications', next);
+      paintConfig();
+      log(next
+        ? 'Desktop alerts: on. Permission granted; DQ, site blocks and the AFK guard will notify.'
+        : 'Desktop alerts: off.');
+      noteFlight('settings', `notifications ${next ? 'on' : 'off'}`);
+    };
+
+    if (!next) {
+      if (!CONFIG.notifications.enabled) return false;
+      apply();
+      return true;
+    }
+    if (!notificationSupported()) {
+      log('Desktop alerts: this browser does not expose the Notification API.');
+      return false;
+    }
+    if (Notification.permission === 'denied') {
+      log('Desktop alerts: permission is blocked in the browser; allow notifications for this site first.');
+      paintConfig();
+      return false;
+    }
+    if (Notification.permission === 'granted') {
+      apply();
+      return true;
+    }
+
+    // El clic del interruptor es el gesto que exige el navegador para pedir
+    // permiso. Si se rechaza, el interruptor se queda apagado.
+    try {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') apply();
+        else {
+          log(`Desktop alerts: permission ${permission}; the switch stays off.`);
+          paintConfig();
+        }
+      }).catch(() => paintConfig());
+    } catch {
+      paintConfig();
+    }
+    return true;
+  }
+
   function bindKeepAliveGesture() {
     if (keepAliveGestureBound) return;
     keepAliveGestureBound = true;
@@ -457,6 +556,34 @@
     log(next
       ? 'AFK farming: on. A hidden tab can be frozen by the browser and that race can end in a DQ.'
       : 'AFK farming: off. New races only start while this tab is visible.');
+    return true;
+  }
+
+  function setAfkRequireKeepAlive(on, options = {}) {
+    const next = on === true;
+    if (CONFIG.queue.afkRequireKeepAlive === next) return false;
+
+    CONFIG.queue.afkRequireKeepAlive = next;
+    if (options.persist !== false) savePrefFlag('afkRequireKeepAlive', next);
+    paintConfig();
+    log(next
+      ? 'AFK interlock: hidden races now require a confirmed running keep-alive.'
+      : 'AFK interlock: off. Hidden races can start even when the keep-alive is not running.');
+    noteFlight('settings', `AFK interlock ${next ? 'on' : 'off'}`);
+    return true;
+  }
+
+  function setAfkFreezeGuard(on, options = {}) {
+    const next = on !== false;
+    if (CONFIG.queue.afkFreezeGuard === next) return false;
+
+    CONFIG.queue.afkFreezeGuard = next;
+    if (options.persist !== false) savePrefFlag('afkFreezeGuard', next);
+    paintConfig();
+    log(next
+      ? 'AFK safety guard: on. A DQ within 15 min of a freeze turns AFK farming off.'
+      : 'AFK safety guard: off.');
+    noteFlight('settings', `AFK freeze guard ${next ? 'on' : 'off'}`);
     return true;
   }
 
@@ -757,6 +884,50 @@
     }
   }
 
+  // Centro de salud: un resumen que dice QUE revisar, sin obligar a leer todo
+  // TUNE. No inventa un estado "sano" si falta la calibracion o el update.
+  function paintHealthCenter() {
+    if (!panel.refs || !panel.refs.healthSummary) return;
+    const up = updateHealth();
+    const freeze = refreshAfkFreezeStats();
+    const keep = keepAliveInfo();
+    const afk = afkHealthInfo();
+    const account = accountStats
+      ? `${accountStats.wpm || '?'} avg${accountStats.races ? ` · ${accountStats.races} races` : ''}`
+      : calibratedRange ? `${calibratedRange.min}-${calibratedRange.max} wpm` : 'no data';
+    const afkGate = !backgroundFarm()
+      ? 'visible-only'
+      : CONFIG.queue.afkRequireKeepAlive === true
+        ? `strict · ${keep.label}`
+        : `open · ${keep.label}`;
+    const freezeText = freeze.count
+      ? `${freeze.count}${freeze.lastAt ? ` · ${Math.max(0, Math.round((Date.now() - freeze.lastAt) / 60000))}m` : ''}`
+      : 'none';
+
+    setText(panel.refs.healthAccount, account);
+    setText(panel.refs.healthAfk, afkGate);
+    setText(panel.refs.healthUpdate, up.text);
+    setText(panel.refs.healthFreeze, freezeText);
+
+    const issues = [];
+    if (!accountStats && !calibratedRange) issues.push('account');
+    if (up.good === false) issues.push('update');
+    if (backgroundFarm() && afk.state === 'blocked') issues.push('AFK');
+    if (backgroundFarm() && CONFIG.queue.afkRequireKeepAlive === true && keep.label !== 'on') issues.push('keep-alive');
+    const summary = issues.length ? `${issues.length} to review` : 'all clear';
+    setText(panel.refs.healthSummary, summary);
+    if (panel.refs.healthSummary.dataset.state !== (issues.length ? 'warn' : 'ok')) {
+      panel.refs.healthSummary.dataset.state = issues.length ? 'warn' : 'ok';
+    }
+    const note = !accountStats && !calibratedRange
+      ? 'First run: open the garage and let calibration read this account. AFK stays off until you enable it; the report has the full state.'
+      : issues.length
+        ? `Review: ${[...new Set(issues)].join(', ')}. The report includes the flight recorder and the exact AFK state.`
+        : `Account ${account}; AFK ${afkGate}; update ${up.text}; freezes ${freezeText}.`;
+    setText(panel.refs.healthNote, note);
+    panel.refs.healthNote.title = `${note} Copy report puts the full diagnostic on the clipboard.`;
+  }
+
   function paintConfig() {
     if (!panel.refs || !panel.refs.cfg) return;
 
@@ -780,10 +951,14 @@
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
       keepAlive: CONFIG.queue.keepAlive === true,
+      afkRequireKeepAlive: CONFIG.queue.afkRequireKeepAlive === true,
+      afkFreezeGuard: CONFIG.queue.afkFreezeGuard !== false,
+      notifications: CONFIG.notifications.enabled === true,
       useNitro: CONFIG.useNitro !== false,
       sound: sfxOn === true,
     };
     const keepAlive = keepAliveInfo();
+    const notifications = notificationInfo();
     const afkHealth = afkHealthInfo();
     const afkHealthNode = panel.refs.cfg.querySelector('[data-field="afkHealth"]');
     if (afkHealthNode) {
@@ -803,7 +978,9 @@
       if (label) {
         // El keep-alive tiene estados reales (`ready`, `blocked`): el texto no
         // puede decir "on" si el audio sigue suspendido.
-        const text = key === 'keepAlive' ? keepAlive.label : (on ? 'on' : 'off');
+        const text = key === 'keepAlive'
+          ? keepAlive.label
+          : key === 'notifications' ? notifications.label : (on ? 'on' : 'off');
         setText(label, text);
         if (label.dataset.on !== value) label.dataset.on = value;
         if (label.dataset.state !== text) label.dataset.state = text;
@@ -813,6 +990,11 @@
         button.dataset.state = keepAlive.label;
         if (label) label.title = keepAlive.title;
       }
+      if (key === 'notifications') {
+        button.title = notifications.title;
+        button.dataset.state = notifications.label;
+        if (label) label.title = notifications.title;
+      }
     }
 
     // Tecno y rango del perfil activo, en la tarjeta de ritmo y en la de guardia.
@@ -820,6 +1002,7 @@
     setText(panel.refs.tuneCap, Number.isFinite(CONFIG.wpm.hardCap) ? `≤ ${CONFIG.wpm.hardCap} wpm` : 'no cap');
     setText(panel.refs.tuneRange, `${tier.min}-${tier.max}`);
     setText(panel.refs.infoCap, String(CONFIG.wpm.hardCap));
+    paintHealthCenter();
 
     // Los overrides manuales no se pisan mientras el usuario esta escribiendo.
     const setNumberValue = (el, value) => {
@@ -1171,8 +1354,24 @@
   window.__ntaDebug.setBackgroundFarm = (on) => setBackgroundFarm(Boolean(on));
   window.__ntaDebug.keepAlive = () => keepAliveDebug();
   window.__ntaDebug.setKeepAlive = (on) => setKeepAlive(Boolean(on));
+  window.__ntaDebug.afkRequireKeepAlive = () => CONFIG.queue.afkRequireKeepAlive === true;
+  window.__ntaDebug.setAfkRequireKeepAlive = (on) => setAfkRequireKeepAlive(Boolean(on));
+  window.__ntaDebug.afkKeepAliveConfirmed = () => afkKeepAliveConfirmed();
+  window.__ntaDebug.hiddenBlocked = () => hiddenBlocked();
+  window.__ntaDebug.afkHiddenBlocked = (hidden) => afkHiddenBlocked(hidden !== false);
+  window.__ntaDebug.prefs = () => readPrefs();
+  window.__ntaDebug.afkFreezeGuard = () => CONFIG.queue.afkFreezeGuard !== false;
+  window.__ntaDebug.setAfkFreezeGuard = (on) => setAfkFreezeGuard(on !== false);
+  window.__ntaDebug.afkGuardDecision = () => afkFreezeGuardDecision();
   window.__ntaDebug.afkFreeze = () => ({ ...afkFreezeStats });
   window.__ntaDebug.resetAfkFreeze = () => resetAfkFreezeStats();
+  window.__ntaDebug.notifications = () => ({ ...notificationInfo(), enabled: CONFIG.notifications.enabled === true });
+  window.__ntaDebug.setNotifications = (on) => setNotifications(Boolean(on));
+  window.__ntaDebug.flight = (limit) => flightEvents(limit);
+  window.__ntaDebug.clearFlight = () => clearFlight();
+  window.__ntaDebug.noteFlight = (kind, detail) => { noteFlight(String(kind || 'event'), String(detail || '')); return true; };
+  window.__ntaDebug.flushFlight = () => { saveFlightNow(); return flightRing.length; };
+  window.__ntaDebug.noteDq = () => { noteDisqualification(); return { streak: session.dqStreak, count: session.dqCount }; };
   window.__ntaDebug.nitroStrategy = () => CONFIG.nitroStrategy;
   window.__ntaDebug.setNitroStrategy = (value) => setNitroStrategy(String(value || ''));
   window.__ntaDebug.useNitro = (app) => useNitro(app);
@@ -1976,6 +2175,30 @@
       done.push(`AFK keep-alive ${data.keepAlive ? 'on' : 'off'}`);
     }
 
+    if (typeof data.afkRequireKeepAlive === 'boolean') {
+      setAfkRequireKeepAlive(data.afkRequireKeepAlive, { persist: false });
+      done.push(`AFK interlock ${data.afkRequireKeepAlive ? 'on' : 'off'}`);
+    }
+
+    if (typeof data.afkFreezeGuard === 'boolean') {
+      setAfkFreezeGuard(data.afkFreezeGuard, { persist: false });
+      done.push(`AFK guard ${data.afkFreezeGuard ? 'on' : 'off'}`);
+    }
+
+    if (typeof data.notifications === 'boolean') {
+      // Un import no debe disparar un prompt de permiso: se aplica solo si el
+      // navegador ya lo tiene concedido; si no, se conserva apagado.
+      if (data.notifications === false) {
+        if (CONFIG.notifications.enabled) setNotifications(false);
+        done.push('notifications off');
+      } else if (notificationSupported() && Notification.permission === 'granted') {
+        setNotifications(true);
+        done.push('notifications on');
+      } else {
+        done.push('notifications need permission');
+      }
+    }
+
     if (typeof data.useNitro === 'boolean') {
       setUseNitro(data.useNitro, { persist: false });
       done.push(`auto nitro ${data.useNitro ? 'on' : 'off'}`);
@@ -2092,7 +2315,25 @@
         guard: CONFIG.guard.enabled !== false,
         useNitro: CONFIG.useNitro !== false,
         nitroStrategy: CONFIG.nitroStrategy,
+        backgroundFarm: CONFIG.queue.backgroundFarm === true,
+        afkRequireKeepAlive: CONFIG.queue.afkRequireKeepAlive === true,
+        afkFreezeGuard: CONFIG.queue.afkFreezeGuard !== false,
+        notifications: CONFIG.notifications.enabled === true,
+        notificationPermission: notificationSupported() ? Notification.permission : 'unsupported',
         sound: sfxOn === true,
+      },
+      afk: {
+        keepAlive: keepAliveInfo().label,
+        freeze: (() => {
+          const stats = refreshAfkFreezeStats();
+          return {
+            count: stats.count,
+            lastAt: stats.lastAt ? new Date(stats.lastAt).toISOString() : null,
+            lastMinutes: stats.lastAt ? Math.round((Date.now() - stats.lastAt) / 60000) : null,
+            lastDurationMs: stats.lastDurationMs,
+            totalMs: stats.totalMs,
+          };
+        })(),
       },
       nitro: nitroPreview
         ? { index: nitroPreview.index, word: nitroPreview.word, chars: nitroPreview.chars }
@@ -2178,6 +2419,7 @@
       day,
       lastRaces: raceHistory.slice(-CONFIG.historySize),
       notices: noticeRing.slice(-10).map((item) => `${clockText(item.at)} ${item.text}`),
+      flight: flightEvents(80),
       queueNotice: queueNotice && queueNotice.text ? `${clockText(queueNotice.at)} ${queueNotice.text}` : null,
       box: {
         nextInMin: (() => {
@@ -3225,6 +3467,21 @@
                 <span class="tune-count" data-field="tuneCount" aria-live="polite">settings</span>
               </div>
               <div class="tune-empty" data-field="tuneEmpty" role="status" hidden></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-health-label">
+                <div class="tune-sec-h"><span id="tune-health-label">Health</span><b>account · AFK · update</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h4l2-5 4 10 2-5h6"/><path d="M4 20h16"/></svg></span>
+                  <div class="card-h"><span class="card-t">Health center</span><span class="card-s" data-field="healthSummary">checking</span></div>
+                  <div class="rows">
+                    <div class="row" title="Account calibration source and freshness"><span>account</span><b data-field="healthAccount">—</b></div>
+                    <div class="row" title="AFK farming, keep-alive and the strict interlock; the same values as the AFK rows below"><span>AFK gate</span><b data-field="healthAfk">—</b></div>
+                    <div class="row" title="Last update check result and age"><span>update</span><b data-field="healthUpdate">—</b></div>
+                    <div class="row" title="Page Lifecycle freezes recorded in this browser"><span>freezes</span><b data-field="healthFreeze">—</b></div>
+                  </div>
+                  <div class="cfg-note" data-field="healthNote">One place to see what needs attention.</div>
+                  <button class="act" type="button" data-act="report" title="Copy the full diagnostic report, including the recent flight recorder, to paste when something is off">copy report</button>
+                </div>
+              </div>
               <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
                 <div class="tune-sec-h"><span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b></div>
                 <div class="card">
@@ -3338,6 +3595,14 @@
                     <span class="set-lbl">AFK keep-alive<i>near-silent audio holds the tab</i></span>
                     <span class="set-val"><b data-sw-txt="keepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="keepAlive" data-on="0" title="Optional and off by default. Near-silent audio makes Chrome treat this tab as active while AFK farming is on. It needs one click to unlock audio and cannot guarantee that the tab will not freeze. Muting the tab can disable it."></button></span>
                   </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK interlock<i>hidden races need keep-alive running</i></span>
+                    <span class="set-val"><b data-sw-txt="afkRequireKeepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="afkRequireKeepAlive" data-on="0" title="Recommended with AFK farming: a hidden tab cannot open a race unless the keep-alive reports a running AudioContext. A suspended or blocked keep-alive holds the queue instead of risking a DQ."></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK safety guard<i>DQ after a freeze turns AFK off</i></span>
+                    <span class="set-val"><b data-sw-txt="afkFreezeGuard" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="afkFreezeGuard" data-on="1" title="On by default. If a disqualification happens within 15 minutes of a recorded freeze while AFK farming is on, AFK is turned off and a notice is kept. It does not undo the DQ."></button></span>
+                  </div>
                   <div class="set-row afk-health-row" title="Live AFK state, keep-alive state and freeze events recorded by this browser">
                     <span class="set-lbl">AFK health<i>hidden state · freeze count</i></span>
                     <span class="set-val"><b data-field="afkHealth" data-state="off" role="status" aria-live="polite">off · visible-only</b><button class="afk-health-reset" type="button" data-act="afkFreezeReset" title="Clear the freeze history recorded in this browser">reset</button></span>
@@ -3362,6 +3627,10 @@
                     <span class="set-lbl">Sound<i>discreet tone when the bot waits</i></span>
                     <span class="set-val"><b data-sw-txt="sound" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="sound" data-on="0" title="Sound alerts: a short tone on long breaks, duplicate copies and site blocks"></button></span>
                   </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Desktop alerts<i>DQ and site blocks, with permission</i></span>
+                    <span class="set-val"><b data-sw-txt="notifications" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="notifications" data-on="0" title="Desktop alerts: permission is requested on the first click. Only disqualifications, site blocks and the AFK safety guard use them; the panel and sound settings are unchanged."></button></span>
+                  </div>
                 </div>
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 0 18h1.6a1.7 1.7 0 0 0 1.2-2.9l-.5-.5a1.7 1.7 0 0 1 1.2-2.9H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.7Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="8.3" r="1.1" fill="currentColor" stroke="none"/></svg></span>
@@ -3381,8 +3650,9 @@
                   <div class="rows" style="display:flex; gap:6px; margin:0 0 2px">
                     <button class="act" type="button" data-act="export" title="Copy this configuration (profile, limit, sound, switches) so it can be pasted in another browser or account">copy</button>
                     <button class="act" type="button" data-act="import" title="Apply whatever config is pasted in the box below">apply</button>
-                    <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, environment) to paste when something is off">report</button>
+                    <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, flight recorder, environment) to paste when something is off">report</button>
                     <button class="act" type="button" data-act="csv" title="Download the closed sessions as a CSV (date, races, WPM, target, deviation, accuracy, DQ, reason) for a spreadsheet">csv</button>
+                    <button class="act" type="button" data-act="releases" title="Open the GitHub release history to install a previous version if the newest one misbehaves">versions</button>
                   </div>
                   <div class="rows">
                     <div class="row up-row" data-field="upRow" title="Auto-update check: the last result, its error and when it will retry"><span>update</span><b data-field="up">—</b></div>
@@ -3623,6 +3893,12 @@
       themeName: pick('[data-field="themeName"]'),
       tuneCap: pick('[data-field="tuneCap"]'),
       tuneRange: pick('[data-field="tuneRange"]'),
+      healthSummary: pick('[data-field="healthSummary"]'),
+      healthAccount: pick('[data-field="healthAccount"]'),
+      healthAfk: pick('[data-field="healthAfk"]'),
+      healthUpdate: pick('[data-field="healthUpdate"]'),
+      healthFreeze: pick('[data-field="healthFreeze"]'),
+      healthNote: pick('[data-field="healthNote"]'),
       tuneSearch: pick('[data-field="tuneSearch"]'),
       tuneClear: pick('[data-field="tuneClear"]'),
       tuneCount: pick('[data-field="tuneCount"]'),
@@ -4152,6 +4428,12 @@
           setBackgroundFarm(CONFIG.queue.backgroundFarm !== true);
         } else if (chip.dataset.toggle === 'keepAlive') {
           setKeepAlive(CONFIG.queue.keepAlive !== true);
+        } else if (chip.dataset.toggle === 'afkRequireKeepAlive') {
+          setAfkRequireKeepAlive(CONFIG.queue.afkRequireKeepAlive !== true);
+        } else if (chip.dataset.toggle === 'afkFreezeGuard') {
+          setAfkFreezeGuard(CONFIG.queue.afkFreezeGuard === false);
+        } else if (chip.dataset.toggle === 'notifications') {
+          setNotifications(CONFIG.notifications.enabled !== true);
         } else if (chip.dataset.toggle === 'sound') {
           // El click ya es gesto valido para el audio: al encenderlo suena.
           setSfx(!sfxOn);
@@ -4169,6 +4451,8 @@
           exportDiagnostics();
         } else if (chip.dataset.act === 'csv') {
           exportSessionsCsv();
+        } else if (chip.dataset.act === 'releases') {
+          try { window.open(UPDATE_RELEASES_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
 
         chip.blur();

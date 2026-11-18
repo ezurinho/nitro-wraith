@@ -218,6 +218,7 @@
     document.addEventListener('freeze', () => {
       frozenAt = Date.now();
       noteAfkFreeze();
+      noteFlight('freeze', `visible=${document.visibilityState === 'visible'} racing=${Boolean(session.liveRound && !session.stopped)}`);
       releaseTypingLock();
       if (session.liveRound && !session.stopped) {
         log('Browser froze this tab; the typing lock was released.');
@@ -231,6 +232,7 @@
       const frozenFor = Math.max(0, Date.now() - frozenAt);
       frozenAt = 0;
       noteAfkResume(frozenFor);
+      noteFlight('resume', `${Math.round(frozenFor / 1000)} s frozen`);
       log(`Browser resumed after ${(frozenFor / 1000).toFixed(1)} s frozen; rechecking the race.`);
       syncKeepAlive();
       updatePanel();

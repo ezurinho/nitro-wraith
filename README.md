@@ -66,13 +66,15 @@ stats, and shows why it is waiting.
 
 - **Live:** WPM, accuracy, the AUTO pace badge, target range, race count, session average, result and the game HUD. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
 - **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops. The same panel has the **AFK off/on** control, the keep-alive state and whether the queue is visible, hidden or blocked by another gate.
-- **Tune:** pace profile, limits, breaks, stickers, sound, AFK farming (off by default), the optional AFK keep-alive, a live **AFK health** row (visible/hidden, real keep-alive state, freeze count and a reset for that local history) and the safety guard. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
+- **Tune:** pace profile, limits, breaks, stickers, sound, desktop alerts, AFK farming (off by default), the optional AFK keep-alive, the **AFK interlock**, the **AFK safety guard**, a live **AFK health** row and a **Health center** that summarizes account, AFK, update and freeze state. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
 The update badge only appears when the Gist has a newer version. The script
 checks every 5 minutes and again whenever you return to the tab, so a new
 release shows up without waiting an hour. If you do not see it, your copy is
-current.
+current. **versions** in TUNE opens the GitHub release history, so a release
+that misbehaves can be replaced with an earlier one; the diagnostic report now
+includes the recent flight recorder (sanitized events across reloads).
 
 ## Pace
 
@@ -126,6 +128,14 @@ downloaded and nothing is audible; the switch shows `on`, `ready`, `blocked`,
 first click is required because browsers only allow audio after a gesture, and
 muting the tab or the system can still disable it. This is best effort, not a
 guarantee: keep the tab visible for long runs if the race cannot be lost.
+
+**AFK interlock** is opt-in: with it on, a hidden tab cannot open a race until
+the keep-alive reports a running context. **AFK safety guard** is on by default:
+if a disqualification arrives within 15 minutes of a recorded freeze while AFK
+is on, AFK is turned off and the reason is kept in the panel and the diagnostic
+report. It cannot undo the disqualification. **Desktop alerts** are opt-in and
+ask for browser permission on the first click; they are used only for DQ, site
+blocks and the AFK guard.
 
 ## Themes
 

@@ -867,18 +867,42 @@
     return CONFIG.queue.backgroundFarm !== false;
   }
 
+  // Interlock: con AFK estricto, una pestana oculta no abre carreras hasta que
+  // el keep-alive confirma que esta corriendo. `ready` o `blocked` no cuentan:
+  // un AudioContext suspendido no mantiene vivo el documento.
+  function afkKeepAliveConfirmed() {
+    if (CONFIG.queue.afkRequireKeepAlive !== true) return true;
+    if (typeof keepAliveInfo !== 'function') return false;
+    try {
+      return keepAliveInfo().label === 'on';
+    } catch {
+      return false;
+    }
+  }
+
+  // Separado de `hiddenBlocked` para poder probar la decision con hidden=true
+  // sin depender de que el navegador de pruebas tenga la página en segundo plano.
+  function afkHiddenBlocked(hidden = pageHidden()) {
+    if (!hidden) return false;
+    return !backgroundFarm() || !afkKeepAliveConfirmed();
+  }
+
   function hiddenBlocked() {
-    return pageHidden() && !backgroundFarm();
+    return afkHiddenBlocked();
   }
 
   // Con backgroundFarm activo no se abre una espera por estar oculto. Solo se
   // espera si el modo AFK esta apagado; ahi el navegador frena los timers y la
   // carrera se quedaria sin teclas (DQ por inactividad).
   async function waitWhileHidden() {
-    if (!pageHidden() || backgroundFarm()) return false;
+    if (!pageHidden() || !hiddenBlocked()) return false;
 
-    log('Background farming is off: no new race until the tab is visible again.');
-    while (!session.stopped && pageHidden()) await preciseSleep(1000);
+    const strict = backgroundFarm() && CONFIG.queue.afkRequireKeepAlive === true;
+    log(strict
+      ? 'AFK interlock: hidden tab with no running keep-alive; no new race until it is confirmed or the tab is visible again.'
+      : 'Background farming is off: no new race until the tab is visible again.');
+    noteFlight('afk-hold', strict ? 'keep-alive not confirmed' : 'background farming off');
+    while (!session.stopped && pageHidden() && hiddenBlocked()) await preciseSleep(1000);
     return true;
   }
 
@@ -904,6 +928,10 @@
       disk.set(DQ_BLOCK_UNTIL, String(until));
       log(`The site blocked the account for too many disqualifications: no race for ${Math.round(ms / 60000)} min.`);
       beep('block');
+      if (typeof notifyUser === 'function') {
+        notifyUser('Nitro Wraith: site block', `Too many disqualifications; waiting ${Math.round(ms / 60000)} min before racing again.`, 'site-block');
+      }
+      noteFlight('site-block', `${Math.round(ms / 60000)} min`);
     }
     session.breakUntil = Math.max(session.breakUntil, until);
     saveCounters();
@@ -1526,6 +1554,19 @@
   // Una DQ no se puede deshacer (la decide el servidor), pero si se puede
   // llevar la cuenta: a las 5 seguidas Nitro Type bloquea la cuenta unos
   // minutos, asi que a la segunda se para el bot en vez de encadenar.
+  // Decisión pura del guardián AFK: una DQ cuenta como consecuencia del freeze
+  // solo si AFK estaba activo y el último freeze es reciente. Se expone en
+  // debug para probar la decisión sin fabricar una DQ real.
+  function afkFreezeGuardDecision(now = Date.now()) {
+    const freeze = typeof refreshAfkFreezeStats === 'function' ? refreshAfkFreezeStats() : afkFreezeStats;
+    const recent = Boolean(freeze && freeze.lastAt && now - freeze.lastAt < 15 * 60000);
+    return {
+      tripped: CONFIG.queue.afkFreezeGuard !== false && CONFIG.queue.backgroundFarm === true && recent,
+      recent,
+      minutes: recent ? Math.round((now - freeze.lastAt) / 60000) : null,
+    };
+  }
+
   function noteDisqualification() {
     session.dqStreak++;
     session.dqCount++;
@@ -1534,6 +1575,22 @@
     // del dia lo ensena para saber si el ritmo esta aguantando hoy.
     todayBump({ dq: 1, resetClean: true, dqAt: Date.now() });
     log(`Disqualification #${session.dqStreak} in a row; not recorded in the history.`);
+    noteFlight('dq', `#${session.dqStreak} in a row`);
+    if (typeof notifyUser === 'function') {
+      notifyUser('Nitro Wraith: disqualification', `Race disqualified (${session.dqStreak} in a row).`, 'dq');
+    }
+
+    // Correlacion freeze -> DQ: si el contador de freezes se movio hace poco y
+    // AFK estaba abierto, esta DQ es la senal para dejar de farmear a ciegas.
+    const afkGuard = afkFreezeGuardDecision();
+    if (afkGuard.tripped) {
+      const text = `AFK safety guard: a disqualification followed a freeze (${afkGuard.minutes} min ago). AFK farming was turned off; keep-alive is left as it was.`;
+      if (typeof setBackgroundFarm === 'function') setBackgroundFarm(false);
+      storeNotice(text);
+      noteFlight('afk-guard', text);
+      log(text);
+      if (typeof notifyUser === 'function') notifyUser('Nitro Wraith: AFK safety guard', text, 'afk-guard');
+    }
 
     // A la cuarta se para: la quinta ya es el bloqueo del sitio. Dos o tres DQ
     // seguidas paran el tiempo suficiente para que algo se arregle (assets,

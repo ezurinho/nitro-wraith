@@ -439,6 +439,11 @@
     return { min: Math.min(min, max), max };
   }
 
+  // Version del objeto autoTyperPrefs. La lectura sigue aceptando objetos sin
+  // `schema` (instalaciones antiguas): los campos nuevos se rellenan con su
+  // valor seguro y el siguiente guardado ya escribe la version actual.
+  const PREFS_SCHEMA = 2;
+
   // Interruptores que antes vivian solo en CONFIG: apagar uno desde el panel se
   // perdia en la siguiente recarga. Ahora se guardan en autoTyperPrefs.
   function readPrefs() {
@@ -452,12 +457,18 @@
 
     const flag = (key) => (typeof saved[key] === 'boolean' ? saved[key] : true);
     return {
+      schema: Math.max(1, Number(saved.schema) || 1),
       breaks: flag('breaks'),
       mysteryBox: flag('mysteryBox'),
       stickers: flag('stickers'),
       guard: flag('guard'),
       backgroundFarm: saved.backgroundFarm === true,
       keepAlive: saved.keepAlive === true,
+      afkRequireKeepAlive: saved.afkRequireKeepAlive === true,
+      // Ausente en instalaciones viejas: se estrena activado porque solo actua
+      // ante la correlacion freeze -> DQ, no en una carrera normal.
+      afkFreezeGuard: saved.afkFreezeGuard !== false,
+      notifications: saved.notifications === true,
       useNitro: flag('useNitro'),
       nitroStrategy: normalizeNitroStrategy(saved.nitroStrategy),
       challenges: flag('challenges'),
@@ -471,12 +482,16 @@
 
   function savePrefs() {
     disk.set(KEYS.prefs, JSON.stringify({
+      schema: PREFS_SCHEMA,
       breaks: CONFIG.breaks.enabled !== false,
       mysteryBox: CONFIG.mysteryBox.enabled !== false,
       stickers: CONFIG.stickers.enabled !== false,
       guard: CONFIG.guard.enabled !== false,
       backgroundFarm: CONFIG.queue.backgroundFarm === true,
       keepAlive: CONFIG.queue.keepAlive === true,
+      afkRequireKeepAlive: CONFIG.queue.afkRequireKeepAlive === true,
+      afkFreezeGuard: CONFIG.queue.afkFreezeGuard !== false,
+      notifications: CONFIG.notifications.enabled === true,
       useNitro: CONFIG.useNitro !== false,
       nitroStrategy: normalizeNitroStrategy(CONFIG.nitroStrategy),
       challenges: CONFIG.challenges.enabled !== false,
@@ -497,9 +512,14 @@
     } catch {
       saved = {};
     }
+    // Se fusiona una sola clave para no pisar ajustes que la otra ventana
+    // conoce y esta no. El schema sube al guardar, sin tocar el resto.
+    saved.schema = PREFS_SCHEMA;
     saved[key] = next === true;
     try { disk.set(KEYS.prefs, JSON.stringify(saved)); } catch { /* modo privado */ }
   }
+
+  const savePrefFlag = saveQueuePref;
 
   function saveBackgroundFarmPref(next) {
     saveQueuePref('backgroundFarm', next);
@@ -520,6 +540,9 @@
     CONFIG.guard.enabled = prefs.guard;
     CONFIG.queue.backgroundFarm = prefs.backgroundFarm;
     CONFIG.queue.keepAlive = prefs.keepAlive;
+    CONFIG.queue.afkRequireKeepAlive = prefs.afkRequireKeepAlive;
+    CONFIG.queue.afkFreezeGuard = prefs.afkFreezeGuard;
+    CONFIG.notifications.enabled = prefs.notifications;
     CONFIG.useNitro = prefs.useNitro;
     CONFIG.nitroStrategy = prefs.nitroStrategy;
     CONFIG.challenges.enabled = prefs.challenges;

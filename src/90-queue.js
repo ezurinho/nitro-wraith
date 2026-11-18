@@ -591,6 +591,13 @@
     }
 
     function watchStuck() {
+      // El interlock AFK puede mantener la cola quieta a proposito: no es un
+      // marco muerto. Recargar aqui solo gastaria el presupuesto de recargas y
+      // volveria a abrir la carrera oculta que se acaba de bloquear.
+      if (hiddenBlocked()) {
+        noteProgress();
+        return;
+      }
       // «Clear ban» deja la cola pausada a proposito: no es un marco muerto ni
       // un atasco que haya que recargar. Solo un Resume/Alt+A manual la arma.
       if (banClearHeld()) {

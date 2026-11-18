@@ -6942,6 +6942,134 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && accountReset.identity === '555111' && accountReset.needsRead === true,
     accountReset);
 
+  // Bloque de seguridad: ajustes nuevos, grabador de vuelo e interlock AFK.
+  // Se ejecuta al final porque toca el estado AFK real y las prefs compartidas.
+  const safety = await cdp.evaluate(`(async () => {
+    const frame = document.querySelector('iframe');
+    const fd = frame && frame.contentWindow.__ntaDebug;
+    if (!fd || !fd.flight || !fd.prefs || !fd.afkGuardDecision) return { has: false };
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const rawPrefs = localStorage.getItem('autoTyperPrefs');
+    const rawFreeze = localStorage.getItem('nta:afkFreeze');
+    const oldBg = fd.backgroundFarm();
+    const oldStrict = fd.afkRequireKeepAlive();
+    const oldGuard = fd.afkFreezeGuard();
+
+    try {
+      // Una instalación vieja no tiene schema ni los campos nuevos: se leen con
+      // defaults seguros y el primer guardado sube a schema 2.
+      localStorage.setItem('autoTyperPrefs', JSON.stringify({ backgroundFarm: false }));
+      const oldPrefs = fd.prefs();
+      fd.setAfkRequireKeepAlive(true);
+      const migrated = JSON.parse(localStorage.getItem('autoTyperPrefs') || '{}');
+      fd.setAfkRequireKeepAlive(false);
+
+      // El grabador sanea un token y persiste el anillo sin romper el diagnóstico.
+      fd.clearFlight();
+      fd.noteFlight('test', 'token=SUPERSECRETO1234567890');
+      fd.flushFlight();
+      await wait(80);
+      const flight = fd.flight(20);
+      const flightStored = JSON.parse(localStorage.getItem('nta:flight') || '[]');
+      const diagnostic = fd.diagnostic();
+
+      // El interlock bloquea una pestaña oculta sin keep-alive; una visible no
+      // se bloquea nunca y AFK sin modo estricto conserva el comportamiento viejo.
+      fd.setBackgroundFarm(true);
+      fd.setAfkRequireKeepAlive(true);
+      const strictOff = fd.afkKeepAliveConfirmed();
+      const strictHidden = fd.afkHiddenBlocked(true);
+      const strictVisible = fd.afkHiddenBlocked(false);
+      fd.setAfkRequireKeepAlive(false);
+      const looseOff = fd.afkKeepAliveConfirmed();
+      const looseHidden = fd.afkHiddenBlocked(true);
+
+      // La decisión del guardián: freeze reciente + AFK + guardia = trip.
+      localStorage.setItem('nta:afkFreeze', JSON.stringify({ count: 1, lastAt: Date.now(), lastDurationMs: 1000, totalMs: 1000 }));
+      fd.setBackgroundFarm(true);
+      fd.setAfkFreezeGuard(true);
+      const tripped = fd.afkGuardDecision();
+      fd.setAfkFreezeGuard(false);
+      const guardOff = fd.afkGuardDecision();
+      fd.setAfkFreezeGuard(true);
+      localStorage.setItem('nta:afkFreeze', JSON.stringify({ count: 1, lastAt: Date.now() - 20 * 60000, lastDurationMs: 1000, totalMs: 1000 }));
+      const oldFreeze = fd.afkGuardDecision();
+      const notifications = fd.notifications();
+      const shadow = frame.contentWindow.document.getElementById('nt-autotyper-panel').shadowRoot;
+      const read = (field) => {
+        const node = shadow.querySelector('[data-field="' + field + '"]');
+        return node ? (node.textContent || '').trim() : null;
+      };
+      const health = {
+        summary: read('healthSummary'),
+        account: read('healthAccount'),
+        afk: read('healthAfk'),
+        update: read('healthUpdate'),
+        freeze: read('healthFreeze'),
+        note: read('healthNote'),
+      };
+
+      return {
+        health,
+        has: true,
+        oldPrefs: { schema: oldPrefs.schema, guard: oldPrefs.afkFreezeGuard, strict: oldPrefs.afkRequireKeepAlive },
+        migrated: { schema: migrated.schema, strict: migrated.afkRequireKeepAlive },
+        flight: {
+          count: flight.length,
+          stored: flightStored.length,
+          leaked: flight.some((row) => /SUPERSECRETO/.test(row.text)),
+          inDiagnostic: Array.isArray(diagnostic.flight) && diagnostic.flight.length > 0,
+        },
+        interlock: { strictOff, looseOff, strictHidden, strictVisible, looseHidden },
+        guard: { tripped: tripped.tripped, off: guardOff.tripped, old: oldFreeze.tripped },
+        notifications: { enabled: notifications.enabled, label: notifications.label },
+      };
+    } finally {
+      if (rawPrefs === null) localStorage.removeItem('autoTyperPrefs');
+      else localStorage.setItem('autoTyperPrefs', rawPrefs);
+      if (rawFreeze === null) localStorage.removeItem('nta:afkFreeze');
+      else localStorage.setItem('nta:afkFreeze', rawFreeze);
+      fd.setBackgroundFarm(oldBg);
+      fd.setAfkRequireKeepAlive(oldStrict);
+      fd.setAfkFreezeGuard(oldGuard);
+    }
+  })()`, true);
+  check('old preferences migrate to schema 2 with the safe AFK defaults',
+    safety.has === true
+      && safety.oldPrefs.schema === 1 && safety.oldPrefs.guard === true && safety.oldPrefs.strict === false
+      && safety.migrated.schema === 2 && safety.migrated.strict === true,
+    safety);
+  check('the flight recorder sanitizes secrets, survives a reload and reaches diagnostics',
+    safety.has === true
+      && safety.flight.count > 0 && safety.flight.stored > 0
+      && safety.flight.leaked === false && safety.flight.inDiagnostic === true,
+    safety);
+  check('the AFK interlock only confirms a hidden race with strict mode and a running keep-alive',
+    safety.has === true
+      && safety.interlock.strictOff === false
+      && safety.interlock.looseOff === true
+      && safety.interlock.strictHidden === true
+      && safety.interlock.strictVisible === false
+      && safety.interlock.looseHidden === false,
+    safety);
+  check('the AFK guard trips only for a recent freeze with AFK and the guard enabled',
+    safety.has === true
+      && safety.guard.tripped === true
+      && safety.guard.off === false
+      && safety.guard.old === false,
+    safety);
+  check('desktop alerts stay off until permission is requested and granted',
+    safety.has === true && safety.notifications.enabled === false
+      && ['off', 'ready', 'blocked', 'n/a'].includes(safety.notifications.label),
+    safety);
+  check('the health center shows account, AFK, update and freeze state in one card',
+    safety.has === true && safety.health
+      && ['all clear', '1 to review', '2 to review', '3 to review', '4 to review'].includes(safety.health.summary)
+      && Boolean(safety.health.account) && Boolean(safety.health.afk)
+      && Boolean(safety.health.update) && Boolean(safety.health.freeze)
+      && /Account|Review/.test(safety.health.note || ''),
+    safety);
+
   return results;
 }
 

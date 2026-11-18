@@ -257,6 +257,61 @@
   const NOTICE_RING = 16;
   const noticeRing = [];
 
+  // Grabador de vuelo: un anillo corto de eventos y avisos, persistido entre
+  // recargas. No lleva tokens ni HTML: solo hora, tipo y una linea saneada.
+  // Sirve para reconstruir «que paso justo antes» sin abrir la consola, sobre
+  // todo cuando el iframe se recarga o el freeze impide leerla.
+  const FLIGHT_KEY = 'nta:flight';
+  const FLIGHT_LIMIT = 240;
+  let flightRing = (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FLIGHT_KEY) || '[]');
+      return Array.isArray(saved)
+        ? saved.filter((row) => row && Number.isFinite(Number(row.at)) && row.text)
+          .slice(-FLIGHT_LIMIT)
+          .map((row) => ({ at: Number(row.at), kind: String(row.kind || 'event').slice(0, 24), text: String(row.text).slice(0, 240) }))
+        : [];
+    } catch { return []; }
+  })();
+  let flightSavedAt = 0;
+  let flightSaveTimer = 0;
+
+  function scrubFlightText(text) {
+    return String(text || '')
+      .replace(/((?:token|session|cookie|authorization)["'=:\s]+)[^\s,;"'}]+/gi, '$1***')
+      .replace(/[A-Za-z0-9+/=_-]{80,}/g, '***')
+      .slice(0, 240);
+  }
+
+  function saveFlightNow() {
+    flightSavedAt = Date.now();
+    if (flightSaveTimer) {
+      clearTimeout(flightSaveTimer);
+      flightSaveTimer = 0;
+    }
+    try { localStorage.setItem(FLIGHT_KEY, JSON.stringify(flightRing)); } catch { /* modo privado */ }
+  }
+
+  function noteFlight(kind, detail) {
+    const text = scrubFlightText(detail);
+    if (!text) return;
+    flightRing.push({ at: Date.now(), kind: String(kind || 'event').slice(0, 24), text });
+    if (flightRing.length > FLIGHT_LIMIT) flightRing.splice(0, flightRing.length - FLIGHT_LIMIT);
+    if (Date.now() - flightSavedAt > 1500) saveFlightNow();
+    else if (!flightSaveTimer) flightSaveTimer = setTimeout(saveFlightNow, 1500);
+  }
+
+  function flightEvents(limit = FLIGHT_LIMIT) {
+    const count = clamp(parseInt(limit, 10) || FLIGHT_LIMIT, 1, FLIGHT_LIMIT);
+    return flightRing.slice(-count).map((row) => ({ ...row }));
+  }
+
+  function clearFlight() {
+    flightRing = [];
+    saveFlightNow();
+    return true;
+  }
+
   const log = (...args) => {
     console.log('%c[NTAuto]', 'color:#7cc7ff;font-weight:bold', ...args);
 
@@ -267,6 +322,7 @@
     lastStatus = text;
     noticeRing.push({ at: Date.now(), text });
     if (noticeRing.length > NOTICE_RING) noticeRing.shift();
+    noteFlight('log', text);
     if (statusEl) setText(statusEl, text);
   };
 
