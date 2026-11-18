@@ -43,7 +43,26 @@ jobs:
         run: npm run check
 
       - name: Build the canary artifacts
+        env:
+          CANARY_SOURCE_REF: ${{ inputs.ref || github.ref }}
         run: node tools/canary.js prepare "${GITHUB_RUN_NUMBER}"
+
+      # El build sale del ref pedido, pero GITHUB_SHA sigue siendo el del evento.
+      # Se reescribe el manifiesto con el HEAD real para que un rollback antiguo
+      # (cuyo tools/canary.js aun no lo hacia) tambien diga de donde salio.
+      - name: Stamp the canary manifest
+        env:
+          CANARY_SOURCE_REF: ${{ inputs.ref || github.ref }}
+        run: |
+          SOURCE_SHA="$(git rev-parse HEAD)" node -e '
+            const fs = require("node:fs");
+            const file = "dist/canary/build.json";
+            const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+            manifest.commit = process.env.SOURCE_SHA;
+            manifest.sourceRef = process.env.CANARY_SOURCE_REF;
+            manifest.eventSha = process.env.GITHUB_SHA || "";
+            fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+          '
 
       - name: Publish the canary alias
         env:
