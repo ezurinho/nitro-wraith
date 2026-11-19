@@ -17,7 +17,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const { startFakeCdp } = require('./fake-cdp');
 const { HEADER, MAX_ROWS, trimHistory, parseHistory } = require('./history');
 const { buildArgs } = require('./chrome');
@@ -878,6 +878,75 @@ async function runCase(item) {
   } finally {
     fs.rmSync(canaryDir, { recursive: true, force: true });
   }
+
+  // Tag inmutable del canary: GitHub rechaza crear un ref cuyo arbol cambie
+  // .github/workflows con el token de Actions (justo lo que pasa al hacer un
+  // rollback a un tag viejo), asi que el plan debe omitir el tag sin fallar.
+  const tagRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'nta-tag-'));
+  const tagToolDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nta-tool-'));
+  const tagTool = path.join(tagToolDir, 'canary.js');
+  fs.copyFileSync(CANARY, tagTool);
+  try {
+    const git = (...args) => execFileSync('git', args, { cwd: tagRepo, stdio: 'ignore' });
+    const rev = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tagRepo, encoding: 'utf8' }).trim();
+    const write = (name, text) => {
+      const file = path.join(tagRepo, name);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+    };
+    // El workflow copia el helper de main a un temporal y lo ejecuta con
+    // --repo: el checkout de un rollback trae un tools/canary.js viejo.
+    const plan = async (args) => {
+      const result = await runNode(tagTool, ['tag-plan', '--repo', tagRepo, ...args]);
+      let data = null;
+      try { data = JSON.parse(result.output); } catch { data = null; }
+      return { code: result.code, output: result.output, data };
+    };
+
+    git('init', '-q');
+    git('config', 'user.name', 'Test');
+    git('config', 'user.email', 'test@example.com');
+    write('README.md', 'base\n');
+    git('add', '.');
+    git('commit', '-qm', 'base');
+    const base = rev();
+    write('.github/workflows/canary.yml', 'name: canary\n');
+    git('add', '.');
+    git('commit', '-qm', 'workflow');
+    const tip = rev();
+
+    const rollback = await plan(['--sha', tip, '--base', base, '--tag', 'canary-1.2.3.4']);
+    const current = await plan(['--sha', tip, '--base', tip, '--tag', 'canary-1.2.3.4']);
+    git('tag', 'canary-1.2.3.4', tip);
+    const existing = await plan(['--sha', tip, '--base', tip, '--tag', 'canary-1.2.3.4']);
+    git('tag', 'canary-1.2.3.5', base);
+    const conflict = await plan(['--sha', tip, '--base', tip, '--tag', 'canary-1.2.3.5']);
+
+    unit('canary skips the immutable tag on a rollback that would change workflows',
+      rollback.code === 0 && rollback.data
+        && rollback.data.push === false
+        && rollback.data.reason === 'workflows-differ'
+        && rollback.data.workflowsMatch === false
+        && current.data && current.data.push === true
+        && current.data.reason === 'workflows-match'
+        && existing.data && existing.data.push === false
+        && existing.data.reason === 'tag-exists'
+        && conflict.data && conflict.data.push === false
+        && conflict.data.reason === 'tag-conflict',
+      [rollback.output, current.output, existing.output, conflict.output].join(' | ').trim());
+  } finally {
+    fs.rmSync(tagRepo, { recursive: true, force: true });
+    fs.rmSync(tagToolDir, { recursive: true, force: true });
+  }
+
+  const canaryWorkflow = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'workflows', 'canary.yml'), 'utf8',
+  );
+  unit('the canary workflow takes the tag plan from main, not from the rollback checkout',
+    canaryWorkflow.includes('git show origin/main:tools/canary.js')
+      && canaryWorkflow.includes('tag-plan --repo "$GITHUB_WORKSPACE"')
+      && !canaryWorkflow.includes('node tools/canary.js tag-plan'),
+    'canary.yml tag-plan step');
 
   for (const item of CASES) {
     const result = await runCase(item);

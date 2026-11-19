@@ -226,7 +226,10 @@ Canary builds are versioned `<stable>.<build>` (for example `8.14.51.7`), so the
 update themselves from the canary alias, while the next stable release is newer
 and takes over when it ships. The workflow never edits the Gist, the stable tags
 or `releases/latest`; every publish also keeps an immutable `canary-<version>`
-tag.
+tag when its workflows match `main`. A rollback to an old tag skips that tag
+instead of failing, because the Actions token cannot create a ref that changes
+`.github/workflows`; the release's `build.json` records the exact commit, source
+ref and run.
 
 To roll the canary back, run the **canary** workflow (Actions → canary → Run
 workflow) with `ref` set to an earlier `canary-<version>` tag. It rebuilds that

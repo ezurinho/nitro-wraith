@@ -8,6 +8,13 @@
  * writes under dist/canary/ (or --out) and never edits the stable artifacts,
  * the Gist, the stable tags or `releases/latest`.
  *
+ * `tag-plan` decides whether the workflow may push the immutable
+ * `canary-<version>` tag. GitHub rejects a new ref whose tree changes
+ * `.github/workflows` unless the token has the `workflows` permission, and the
+ * Actions `GITHUB_TOKEN` cannot be granted it. A rollback to an old canary tag
+ * always hits that check, so the plan reports `push: false` and the workflow
+ * keeps the build identified by build.json instead of failing.
+ *
  * The canary version is <stable>.<build>: four numeric parts, which Tampermonkey
  * compares in order. A canary build updates itself from the fixed `canary`
  * release alias; when the next stable release lands it is newer again, so the
@@ -15,11 +22,12 @@
  *
  * Usage:
  *   node tools/canary.js prepare 42 [--out dist/canary]
+ *   node tools/canary.js tag-plan --tag canary-8.14.52.7 [--sha HEAD] [--base origin/main]
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const BUILD = path.join(__dirname, 'build.js');
@@ -35,12 +43,22 @@ function fail(message) {
   process.exit(1);
 }
 
-function gitValue(args) {
+function gitAt(cwd, args) {
   try {
-    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
+    return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
   } catch {
     return '';
   }
+}
+
+function gitValue(args) {
+  return gitAt(ROOT, args);
+}
+
+function gitExit(cwd, args) {
+  const result = spawnSync('git', args, { cwd, stdio: 'ignore' });
+  if (result.error) fail(`cannot run git: ${result.error.message}`);
+  return result.status;
 }
 
 function replaceOnce(text, pattern, replacement, label) {
@@ -111,18 +129,77 @@ function prepare(build, outDir) {
   console.log(`tag ${versionTag}`);
 }
 
+/*
+ * Plan del tag inmutable. Se compara el arbol de .github/workflows del commit
+ * construido con el de la rama por defecto: si difieren, GitHub rechazaria el
+ * push del tag con "without workflows permission" (el GITHUB_TOKEN de Actions
+ * no puede tener ese permiso). En ese caso el plan pide no empujarlo.
+ */
+function tagPlan(argv) {
+  const option = (name) => {
+    const at = argv.indexOf(name);
+    return at >= 0 ? (argv[at + 1] || '') : '';
+  };
+
+  const repo = path.resolve(option('--repo') || ROOT);
+  const tag = option('--tag');
+  const sha = option('--sha') || 'HEAD';
+  const base = option('--base')
+    || (gitAt(repo, ['rev-parse', '--verify', '--quiet', 'origin/main']) ? 'origin/main' : 'main');
+
+  const commit = gitAt(repo, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
+  if (!commit) fail(`cannot resolve ${sha} in ${repo}`);
+
+  const baseCommit = gitAt(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
+  if (!baseCommit) fail(`cannot resolve the base ref ${base} in ${repo}`);
+
+  const diff = gitExit(repo, ['diff', '--quiet', baseCommit, commit, '--', '.github/workflows']);
+  if (diff !== 0 && diff !== 1) fail('git diff failed while comparing .github/workflows');
+
+  const tagSha = tag
+    ? gitAt(repo, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`])
+    : '';
+
+  let push = false;
+  let reason = '';
+  if (tagSha && tagSha !== commit) {
+    reason = 'tag-conflict';
+  } else if (tagSha === commit) {
+    reason = 'tag-exists';
+  } else if (diff === 0) {
+    push = true;
+    reason = 'workflows-match';
+  } else {
+    reason = 'workflows-differ';
+  }
+
+  console.log(JSON.stringify({
+    tag,
+    commit,
+    baseRef: base,
+    baseCommit,
+    workflowsMatch: diff === 0,
+    tagSha,
+    push,
+    reason,
+  }, null, 2));
+}
+
 try {
   const argv = process.argv.slice(2);
   const command = argv[0] || '';
-  const outAt = argv.indexOf('--out');
-  const outDir = outAt >= 0 && argv[outAt + 1]
-    ? path.resolve(argv[outAt + 1])
-    : path.join(ROOT, 'dist', 'canary');
 
-  if (command !== 'prepare') {
-    throw new Error(`Unknown command: ${command || '(none)'}. Use: prepare <build> [--out <dir>]`);
+  if (command === 'prepare') {
+    const outAt = argv.indexOf('--out');
+    const outDir = outAt >= 0 && argv[outAt + 1]
+      ? path.resolve(argv[outAt + 1])
+      : path.join(ROOT, 'dist', 'canary');
+    prepare(argv[1], outDir);
+  } else if (command === 'tag-plan') {
+    tagPlan(argv.slice(1));
+  } else {
+    throw new Error(`Unknown command: ${command || '(none)'}. Use: prepare <build> [--out <dir>] | tag-plan [--tag <tag>] [--sha <rev>] [--base <ref>] [--repo <dir>]`);
   }
-  prepare(argv[1], outDir);
 } catch (error) {
   fail(error.message || String(error));
 }

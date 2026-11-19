@@ -64,7 +64,27 @@ jobs:
             fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
           '
 
+      # Estado de la release estable antes de publicar: se vuelve a leer al
+      # final para demostrar que el canal canary no la modifico.
+      - name: Snapshot the stable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          stable_tag="v$(node -p "require('./package.json').version")"
+          if gh release view "$stable_tag" >/dev/null 2>&1; then
+            gh release view "$stable_tag" \
+              --json tagName,isPrerelease,isDraft,assets \
+              --jq '{tagName: .tagName, isPrerelease: .isPrerelease, isDraft: .isDraft, assets: [.assets[] | {name: .name, size: .size}]}' \
+              > "$RUNNER_TEMP/stable-before.json"
+          else
+            echo '{}' > "$RUNNER_TEMP/stable-before.json"
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' \
+            > "$RUNNER_TEMP/latest-before.txt" 2>/dev/null || true
+          test -s "$RUNNER_TEMP/latest-before.txt" || echo none > "$RUNNER_TEMP/latest-before.txt"
+
       - name: Publish the canary alias
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -73,12 +93,53 @@ jobs:
           sha="$(git rev-parse HEAD)"
           notes="$(mktemp)"
 
+          # Un tag nuevo apunta al commit construido. GitHub rechaza con
+          # "without workflows permission" cualquier ref cuyo arbol cambie
+          # .github/workflows, y el GITHUB_TOKEN de Actions no puede recibir ese
+          # permiso. Un rollback a un tag viejo cae siempre en ese caso: se omite
+          # el tag (build.json identifica el build) en vez de romper el publish.
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          # El checkout es el ref del rollback: su tools/canary.js puede ser
+          # anterior a tag-plan. Se ejecuta el helper de main, que es el que
+          # define este workflow, apuntando al checkout con --repo.
+          git show origin/main:tools/canary.js > "$RUNNER_TEMP/canary-tag-plan.js"
+          plan="$RUNNER_TEMP/canary-tag-plan.json"
+          node "$RUNNER_TEMP/canary-tag-plan.js" tag-plan --repo "$GITHUB_WORKSPACE" --tag "$tag" --sha "$sha" --base origin/main > "$plan"
+          cat "$plan"
+          push="$(node -p "require('$plan').push")"
+          reason="$(node -p "require('$plan').reason")"
+          echo "push=$push" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+          if [ "$push" = "true" ]; then
+            git tag -f "$tag" "$sha"
+            git push origin "refs/tags/$tag" --force
+          else
+            echo "::notice::Immutable tag $tag not pushed ($reason); build.json keeps the exact commit."
+          fi
+
+          # El resultado del plan se publica dentro del propio manifiesto.
+          TAG_PUSHED="$push" TAG_REASON="$reason" node -e '
+            const fs = require("node:fs");
+            const file = "dist/canary/build.json";
+            const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+            manifest.tagPushed = process.env.TAG_PUSHED === "true";
+            manifest.tagReason = process.env.TAG_REASON;
+            fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+          '
+
           {
             echo "# NITRO WRAITH — canary ${version}"
             echo
             echo "Test build from \`${GITHUB_REPOSITORY}@${sha}\` (${GITHUB_REF_NAME}, run ${GITHUB_RUN_NUMBER})."
             echo
             echo "This is a GitHub pre-release. It never writes the stable Gist, the stable tags or \`releases/latest\`."
+            echo
+            if [ "$push" = "true" ]; then
+              echo "Immutable tag: \`${tag}\`."
+            else
+              echo "Immutable tag \`${tag}\` was not created (\`${reason}\`): the Actions token cannot add a ref that changes \`.github/workflows\`. \`build.json\` records this build's commit, source ref and run."
+            fi
             echo
             echo "## Install or update (canary)"
             echo
@@ -93,10 +154,6 @@ jobs:
             echo "Run the **canary** workflow with \`ref\` set to an earlier \`canary-<version>\` tag. The alias is republished from that commit with a new build number; the stable release is untouched."
           } > "$notes"
 
-          # Cada publicacion deja un tag inmutable para poder volver a ella.
-          git tag -f "$tag" "$sha"
-          git push origin "refs/tags/$tag" --force
-
           if gh release view canary >/dev/null 2>&1; then
             gh release upload canary \
               dist/canary/nitro-wraith.user.js \
@@ -105,10 +162,14 @@ jobs:
             gh release edit canary \
               --title "NITRO WRAITH — canary" \
               --notes-file "$notes" \
-              --prerelease
+              --prerelease \
+              --latest=false
           else
-            gh release create canary \
-              --target "$sha" \
+            # Sin tag inmutable tampoco se crea el tag `canary` sobre un commit
+            # con workflows distintos de main: la release usa main como target.
+            target=()
+            if [ "$push" = "true" ]; then target=(--target "$sha"); fi
+            gh release create canary "${target[@]}" \
               --prerelease \
               --latest=false \
               --title "NITRO WRAITH — canary" \
@@ -117,3 +178,87 @@ jobs:
               dist/canary/nitro-wraith.meta.js \
               dist/canary/build.json
           fi
+
+      - name: Verify the canary publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p "require('./dist/canary/build.json').version")"
+          tag="canary-${version}"
+          sha="$(git rev-parse HEAD)"
+          push="${{ steps.publish.outputs.push }}"
+          reason="${{ steps.publish.outputs.reason }}"
+          mkdir -p "$RUNNER_TEMP/verify"
+
+          VERSION="$version" TAG="$tag" SHA="$sha" PUSH="$push" REASON="$reason" node -e '
+            const manifest = require("./dist/canary/build.json");
+            const expected = {
+              channel: "canary",
+              version: process.env.VERSION,
+              tag: process.env.TAG,
+              commit: process.env.SHA,
+            };
+            for (const [key, value] of Object.entries(expected)) {
+              if (manifest[key] !== value) throw new Error(`manifest ${key} is ${manifest[key]}, expected ${value}`);
+            }
+            if (manifest.tagPushed !== (process.env.PUSH === "true")) {
+              throw new Error("manifest tagPushed does not match the publish plan");
+            }
+            if (manifest.tagReason !== process.env.REASON) {
+              throw new Error("manifest tagReason does not match the publish plan");
+            }
+          '
+
+          gh release download canary --pattern build.json --dir "$RUNNER_TEMP/verify" --clobber
+          node -e '
+            const local = require("./dist/canary/build.json");
+            const remote = require(process.argv[1]);
+            if (JSON.stringify(local) !== JSON.stringify(remote)) {
+              throw new Error("the published build.json differs from the verified build");
+            }
+          ' "$RUNNER_TEMP/verify/build.json"
+
+          assets="$(gh release view canary --json assets --jq '.assets[].name')"
+          for asset in nitro-wraith.user.js nitro-wraith.meta.js build.json; do
+            grep -qx "$asset" <<< "$assets" || { echo "::error::canary release is missing $asset"; exit 1; }
+          done
+          test "$(gh release view canary --json isPrerelease --jq '.isPrerelease')" = "true" \
+            || { echo "::error::canary is not a pre-release"; exit 1; }
+
+          remote_tag="$(git ls-remote origin "refs/tags/$tag" | cut -f1)"
+          case "$reason" in
+            workflows-match|tag-exists)
+              test "$remote_tag" = "$sha" || { echo "::error::$tag is not at $sha"; exit 1; }
+              ;;
+            workflows-differ)
+              test -z "$remote_tag" || { echo "::error::$tag unexpectedly exists"; exit 1; }
+              ;;
+            tag-conflict)
+              echo "::error::tag $tag already points to another commit"
+              exit 1
+              ;;
+            *)
+              echo "::error::unknown tag plan: $reason"
+              exit 1
+              ;;
+          esac
+
+          stable_tag="v$(node -p "require('./package.json').version")"
+          if gh release view "$stable_tag" >/dev/null 2>&1; then
+            gh release view "$stable_tag" \
+              --json tagName,isPrerelease,isDraft,assets \
+              --jq '{tagName: .tagName, isPrerelease: .isPrerelease, isDraft: .isDraft, assets: [.assets[] | {name: .name, size: .size}]}' \
+              > "$RUNNER_TEMP/stable-after.json"
+          else
+            echo '{}' > "$RUNNER_TEMP/stable-after.json"
+          fi
+          diff -u "$RUNNER_TEMP/stable-before.json" "$RUNNER_TEMP/stable-after.json" \
+            || { echo "::error::the stable release changed during the canary publish"; exit 1; }
+
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' \
+            > "$RUNNER_TEMP/latest-after.txt" 2>/dev/null || true
+          test -s "$RUNNER_TEMP/latest-after.txt" || echo none > "$RUNNER_TEMP/latest-after.txt"
+          diff -u "$RUNNER_TEMP/latest-before.txt" "$RUNNER_TEMP/latest-after.txt" \
+            || { echo "::error::releases/latest changed during the canary publish"; exit 1; }
+
+          echo "canary ${version} verified; ${stable_tag} untouched."
