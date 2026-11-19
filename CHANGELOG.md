@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.53 — 2026-11-19
+
+- feat: add a recent accuracy readout
+- test: refresh the visual baselines for 8.14.52
+
 ## 8.14.52 — 2026-11-18
 
 - feat: add panel visual regression and a live readout
