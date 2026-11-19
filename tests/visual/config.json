@@ -1,5 +1,7 @@
 {
   "themes": ["carbon", "aurora", "sunset", "ice", "violet", "rgb"],
+  "views": ["tune", "log", "garage"],
+  "states": ["idle", "racing", "stopped"],
   "maxDiffRatio": 0.0025,
   "channelTolerance": 12,
   "viewport": {

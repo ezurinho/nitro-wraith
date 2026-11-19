@@ -251,19 +251,24 @@ npm run build       # concatenate src/ into nitro-wraith.user.js and .meta.js
 npm run live:test   # CLI checks without opening Chrome
 npm run check       # synced build, syntax, release/README checks and harness
 npm test            # browser harness only
-npm run visual      # capture the six themes and compare them with the baselines
+npm run visual      # capture Live themes + Tune/Log/garage states and compare
 ```
 
 ### Visual regression
 
-`npm run visual` drives the harness through the same seeded live state and
-captures the six themes at 520×1200 (2×). The PNGs are compared against
-[`tests/visual/baselines/`](tests/visual/baselines/) pixel by pixel with the
-limits in [`tests/visual/config.json`](tests/visual/config.json): a channel
-tolerance of 12/255 absorbs antialiasing, and a theme fails when more than
-0.25% of its pixels differ. Captures freeze the clock and disable animations so
-the result is reproducible; a failing run writes `diff-<theme>.png` with the
-changed pixels in red next to `report.json` in `tests/visual/current/`.
+`npm run visual` drives the harness through the same seeded state and captures
+15 shots at 520×1200 (2×): the six Live themes plus Tune, Log and the garage
+panel in three states (waiting, racing and stopped). Tune and Log are captured
+with the whole card stack — the visual run expands the panel's internal 62vh
+scroll — so a layout change below the fold also fails. The PNGs are compared
+against [`tests/visual/baselines/`](tests/visual/baselines/) pixel by pixel
+with the limits in [`tests/visual/config.json`](tests/visual/config.json): a
+channel tolerance of 12/255 absorbs antialiasing, and a shot fails when more
+than 0.25% of its pixels differ. The matrix is configured by `themes`, `views`
+and `states` in that file. Captures freeze the clock and disable animations so
+the result is reproducible; a failing run writes `diff-<shot>.png` (for example
+`diff-view-tune-idle.png`) with the changed pixels in red next to `report.json`
+in `tests/visual/current/`.
 
 After an intentional UI change, review the new images and save them with
 `npm run visual:accept`. Baselines are tied to a browser and platform because

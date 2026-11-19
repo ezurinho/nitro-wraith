@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "capturedAt": "2026-11-18T20:35:52.640Z",
+  "version": 2,
+  "capturedAt": "2026-11-19T01:02:35.376Z",
   "engine": {
     "product": "Chrome/157.0.8103.80",
     "browser": "Chrome",
@@ -11,40 +11,95 @@
     "height": 1200,
     "deviceScaleFactor": 2
   },
+  "views": [
+    "tune",
+    "log",
+    "garage"
+  ],
+  "states": [
+    "idle",
+    "racing",
+    "stopped"
+  ],
   "thresholds": {
     "maxDiffRatio": 0.0025,
     "channelTolerance": 12
   },
   "images": {
     "theme-carbon.png": {
-      "sha256": "43ed7ddd98caf123146015a3aef94b601ea468a50ef83571de751b00055aec07",
+      "sha256": "013d1dcc6c38b86348095f0e3eec99d9ee972dbc3bcb1558947468d2f1d61e70",
       "width": 732,
       "height": 1880
     },
     "theme-aurora.png": {
-      "sha256": "1992841c295f855aff4c323028847a4bf7ac8c566c9c5ddb2408480dd20b6650",
+      "sha256": "74d3c0f68327d15dc74fa1550db800f556270366fd682717cef8ef61bd17a476",
       "width": 732,
       "height": 1880
     },
     "theme-sunset.png": {
-      "sha256": "4b2d5811393a6b21c5e23545c4a0305c8fbd5c5bff12050a00c2756fda6baa4d",
+      "sha256": "b70a9b5ed8741481127b8dbca3231cadc32737cc934a479d8ad340dc369e97bc",
       "width": 732,
       "height": 1880
     },
     "theme-ice.png": {
-      "sha256": "af0b1d6f766e4b57c1f1ed774253fbd55771d331e80f2cf1f6f848224feff796",
+      "sha256": "bca527e2e9ce7ca662a70a659539df2e64e49ebb0e7ead660bd824bf44061ef5",
       "width": 732,
       "height": 1880
     },
     "theme-violet.png": {
-      "sha256": "d55e8f244c93399e94892592060552cc7def09b44f81bbbaaf662e577bd57c3b",
+      "sha256": "d49dc8a043e71914b6708155e9505754a22a9730add4aed30154980040d93b55",
       "width": 732,
       "height": 1880
     },
     "theme-rgb.png": {
-      "sha256": "b201da48b007cbf0e4cd3bb6923075b50a1fd67192eafd23465dea8854d66c49",
+      "sha256": "2921d2d0b6a157380f742b2c7a8658bc760a2f68286300e8570d0ebe646818a6",
       "width": 732,
       "height": 1880
+    },
+    "view-tune-idle.png": {
+      "sha256": "896364f747d623371a3e973f31f481779e5aa47025385ccb09a9b36ef40586f1",
+      "width": 732,
+      "height": 4854
+    },
+    "view-tune-racing.png": {
+      "sha256": "bfd7256606533c052e45d17c51f2f23516ad00c19a590f0ac553bb55ca0fc49a",
+      "width": 732,
+      "height": 4854
+    },
+    "view-tune-stopped.png": {
+      "sha256": "b544c3c78e79fc875f0340b55c30467461ebf7f94140436bd0ef9d2c2531ddbd",
+      "width": 732,
+      "height": 4854
+    },
+    "view-log-idle.png": {
+      "sha256": "11c8c21c2fb330f817f7d36d1b5188ad0b56aa15fd5b50b5f3f6d79e1ed6b706",
+      "width": 732,
+      "height": 2264
+    },
+    "view-log-racing.png": {
+      "sha256": "cedb5e7c4565de5d501ac398110f9ac4908bec828a05e78ae3edd7821bd82a93",
+      "width": 732,
+      "height": 2264
+    },
+    "view-log-stopped.png": {
+      "sha256": "2c94dc5c9b66121953e2dc457888aac455e46083109d8dcf960b13c3c8b7646f",
+      "width": 732,
+      "height": 2264
+    },
+    "view-garage-idle.png": {
+      "sha256": "5adadd1ee8f08a0446b625b9755b9653434d4689746b442240319289ddda35a1",
+      "width": 656,
+      "height": 874
+    },
+    "view-garage-racing.png": {
+      "sha256": "786eb6f09936cd89de9891f9bf509f308e81f86ca7007361aa9c60fcf5393467",
+      "width": 656,
+      "height": 920
+    },
+    "view-garage-stopped.png": {
+      "sha256": "e380079fd63ebaef2e8cabe027c9c0f3bd0a287bf50529179a406e3c3fb060fc",
+      "width": 656,
+      "height": 1064
     }
   }
 }

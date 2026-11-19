@@ -4,10 +4,11 @@
 /*
  * Regresion visual del panel.
  *
- * Las capturas las produce el banco de pruebas con el estado sembrado y los
- * seis temas; este CLI las compara contra las baselines guardadas en
- * `tests/visual/baselines/` y falla cuando mas de un umbral de pixeles cambia.
- * No hay dependencias: PNG se decodifica con `zlib`, que viene con Node.
+ * Las capturas las produce el banco de pruebas con el estado sembrado: los seis
+ * temas de Live y Tune/Log/garaje en espera, en carrera y detenido. Este CLI
+ * las compara contra las baselines guardadas en `tests/visual/baselines/` y
+ * falla cuando mas de un umbral de pixeles cambia. No hay dependencias: PNG se
+ * decodifica con `zlib`, que viene con Node.
  *
  *   npm run visual         # captura + compara
  *   npm run visual:accept  # captura + guarda las baselines nuevas
@@ -57,7 +58,32 @@ function config() {
       ? Math.max(0, Math.min(255, Number(value.channelTolerance)))
       : 12,
     viewport: value.viewport || null,
+    views: Array.isArray(value.views)
+      ? value.views.filter((view) => typeof view === 'string' && view.trim())
+      : [],
+    states: Array.isArray(value.states)
+      ? value.states.filter((state) => typeof state === 'string' && state.trim())
+      : [],
   };
+}
+
+// Una captura por tema de Live y una por vista/estado fuera de Live. El nombre
+// del archivo es la identidad de la baseline: `theme-carbon.png` o
+// `view-tune-idle.png`.
+function shotList(cfg) {
+  const shots = cfg.themes.map((theme) => ({
+    id: `theme-${theme}`,
+    file: `theme-${theme}.png`,
+    label: theme,
+    theme,
+  }));
+  for (const view of cfg.views) {
+    for (const state of cfg.states) {
+      const id = `view-${view}-${state}`;
+      shots.push({ id, file: `${id}.png`, label: `${view} · ${state}`, view, state });
+    }
+  }
+  return shots;
 }
 
 /* --------------------------------------------------------------------------
@@ -289,7 +315,7 @@ function comparePair(baselineFile, currentFile, thresholds) {
 function capture() {
   fs.rmSync(CURRENT_DIR, { recursive: true, force: true });
   fs.mkdirSync(CURRENT_DIR, { recursive: true });
-  console.log('visual: capturing the six themes with the harness...');
+  console.log('visual: capturing Live themes plus Tune, Log and the garage with the harness...');
   const result = spawnSync(process.execPath, [path.join(ROOT, 'tests', 'live', 'run.js')], {
     cwd: ROOT,
     stdio: 'inherit',
@@ -327,11 +353,18 @@ function compare() {
   const results = [];
   let failed = 0;
 
-  for (const theme of cfg.themes) {
-    const name = `theme-${theme}.png`;
-    const baselineFile = path.join(BASELINE_DIR, name);
-    const currentFile = path.join(CURRENT_DIR, name);
-    const row = { theme, name, ok: false };
+  for (const shot of shotList(cfg)) {
+    const baselineFile = path.join(BASELINE_DIR, shot.file);
+    const currentFile = path.join(CURRENT_DIR, shot.file);
+    const row = {
+      shot: shot.id,
+      label: shot.label,
+      theme: shot.theme || null,
+      view: shot.view || null,
+      state: shot.state || null,
+      name: shot.file,
+      ok: false,
+    };
 
     if (!fs.existsSync(baselineFile)) {
       row.error = 'missing baseline';
@@ -351,7 +384,7 @@ function compare() {
           height: compared.height,
         });
         if (compared.overlay) {
-          const diffFile = path.join(CURRENT_DIR, `diff-${theme}.png`);
+          const diffFile = path.join(CURRENT_DIR, `diff-${shot.id}.png`);
           fs.writeFileSync(diffFile, encodePng(compared.width, compared.height, compared.overlay));
           row.diff = path.relative(ROOT, diffFile);
         }
@@ -375,48 +408,49 @@ function compare() {
 
   for (const row of results) {
     if (row.error) {
-      console.log(`visual: ${row.theme.padEnd(7)} FAIL  ${row.error}`);
+      console.log(`visual: ${row.label.padEnd(18)} FAIL  ${row.error}`);
       continue;
     }
     const pct = `${(row.ratio * 100).toFixed(3)}%`;
     const state = row.ok ? 'ok  ' : 'FAIL';
     const extra = row.ok ? '' : `  bbox ${row.bbox ? `${row.bbox.width}x${row.bbox.height}@${row.bbox.x},${row.bbox.y}` : 'n/a'}`;
-    console.log(`visual: ${row.theme.padEnd(7)} ${state} ${pct.padStart(8)} of ${row.pixels} px (${row.changed} changed)${extra}`);
+    console.log(`visual: ${row.label.padEnd(18)} ${state} ${pct.padStart(8)} of ${row.pixels} px (${row.changed} changed)${extra}`);
   }
   console.log(`visual: threshold ${(cfg.maxDiffRatio * 100).toFixed(2)}% · channel tolerance ${cfg.channelTolerance}/255`);
   console.log(`visual: report ${path.relative(ROOT, REPORT_FILE)}`);
 
   if (failed) {
-    console.error(`visual: ${failed}/${results.length} themes outside the threshold. Diff images are in ${path.relative(ROOT, CURRENT_DIR)}.`);
+    console.error(`visual: ${failed}/${results.length} shots outside the threshold. Diff images are in ${path.relative(ROOT, CURRENT_DIR)}.`);
     process.exitCode = 1;
     return false;
   }
-  console.log(`visual: ${results.length}/${results.length} themes within the threshold.`);
+  console.log(`visual: ${results.length}/${results.length} shots within the threshold.`);
   return true;
 }
 
 function accept() {
   const cfg = config();
   const fingerprint = readJson(path.join(CURRENT_DIR, 'fingerprint.json'), {});
+  const shots = shotList(cfg);
   const images = {};
+  const expected = new Set(shots.map((shot) => shot.file));
 
   fs.mkdirSync(BASELINE_DIR, { recursive: true });
-  // Solo se reemplazan los temas del config: una baseline vieja de un tema
-  // retirado se queda, pero no participa en la comparacion.
+  // Una baseline retirada del config se borra para que nadie la confunda con
+  // una captura viva; el resto del directorio no se toca.
   for (const file of fs.readdirSync(BASELINE_DIR)) {
-    if (/^theme-.*\.png$/.test(file) && !cfg.themes.includes(file.slice(6, -4))) {
+    if (/^(theme|view)-.*\.png$/.test(file) && !expected.has(file)) {
       fs.rmSync(path.join(BASELINE_DIR, file), { force: true });
     }
   }
 
-  for (const theme of cfg.themes) {
-    const name = `theme-${theme}.png`;
-    const from = path.join(CURRENT_DIR, name);
-    if (!fs.existsSync(from)) fail(`capture missing for ${theme}; run the capture first`);
+  for (const shot of shots) {
+    const from = path.join(CURRENT_DIR, shot.file);
+    if (!fs.existsSync(from)) fail(`capture missing for ${shot.id}; run the capture first`);
     const buffer = fs.readFileSync(from);
     const decoded = decodePng(buffer);
-    fs.writeFileSync(path.join(BASELINE_DIR, name), buffer);
-    images[name] = {
+    fs.writeFileSync(path.join(BASELINE_DIR, shot.file), buffer);
+    images[shot.file] = {
       sha256: sha256(buffer),
       width: decoded.width,
       height: decoded.height,
@@ -424,10 +458,12 @@ function accept() {
   }
 
   const manifest = {
-    version: 1,
+    version: 2,
     capturedAt: new Date().toISOString(),
     engine: fingerprint.engine || null,
     viewport: fingerprint.viewport || cfg.viewport,
+    views: cfg.views,
+    states: cfg.states,
     thresholds: {
       maxDiffRatio: cfg.maxDiffRatio,
       channelTolerance: cfg.channelTolerance,
@@ -435,7 +471,7 @@ function accept() {
     images,
   };
   fs.writeFileSync(MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`visual: ${cfg.themes.length} baselines saved in ${path.relative(ROOT, BASELINE_DIR)}`);
+  console.log(`visual: ${shots.length} baselines saved in ${path.relative(ROOT, BASELINE_DIR)}`);
 }
 
 function main() {
@@ -450,7 +486,8 @@ function main() {
   }
   if (command === 'accept') {
     // Aceptar sin capturas frescas seria guardar lo que hubiera en current.
-    if (!fs.existsSync(path.join(CURRENT_DIR, 'theme-carbon.png'))) {
+    const first = shotList(config())[0];
+    if (!first || !fs.existsSync(path.join(CURRENT_DIR, first.file))) {
       if (!capture()) return;
     }
     accept();

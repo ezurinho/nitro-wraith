@@ -25,6 +25,7 @@ const { PANEL_READ } = require('./panel-read');
 const ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURES = path.join(__dirname, 'fixtures');
 const SCRIPT = path.join(ROOT, 'nitro-wraith.user.js');
+const SCRIPT_VERSION = (fs.readFileSync(SCRIPT, 'utf8').match(/@version\s+(\S+)/) || [])[1] || '';
 const SHOT_DIR = process.env.SHOT_DIR ? path.resolve(ROOT, process.env.SHOT_DIR) : '';
 // La regresion visual necesita una foto reproducible: reloj congelado y sin
 // animaciones. El check normal no activa nada de esto.
@@ -257,6 +258,340 @@ async function captureShot(cdp, file, clip) {
   console.log(`screenshot: ${path.relative(ROOT, file)}`);
 }
 
+// TUNE y LOG en los tres estados. El panel crece con la vista (62vh solo deja
+// ver la primera tarjeta); el iframe crece con el panel y el viewport con el
+// iframe para que la captura cubra la vista entera, no solo el pliegue.
+async function captureViewStates(cdp) {
+  const expanded = await cdp.evaluate(`(() => {
+    const root = document.querySelector('iframe').contentWindow.document
+      .getElementById('nt-autotyper-panel').shadowRoot;
+    if (!root || root.getElementById('nta-visual-expand')) return false;
+    const style = document.createElement('style');
+    style.id = 'nta-visual-expand';
+    style.textContent = '.views{max-height:none!important;overflow:visible!important;}';
+    root.appendChild(style);
+    return true;
+  })()`);
+  if (!expanded) throw new Error('could not expand the views for screenshots');
+
+  // Carbon: las baselines de TUNE/LOG no pueden depender del ultimo tema que
+  // recorrio la galeria.
+  await cdp.evaluate(`(() => {
+    const root = document.querySelector('iframe').contentWindow.document
+      .getElementById('nt-autotyper-panel').shadowRoot;
+    const button = root.querySelector('[data-theme-btn="carbon"]');
+    if (button) button.click();
+    return Boolean(button);
+  })()`);
+
+  const views = ['tune', 'log'];
+  const states = ['idle', 'racing', 'stopped'];
+  for (const view of views) {
+    const shown = await cdp.evaluate(`(() => {
+      const root = document.querySelector('iframe').contentWindow.document
+        .getElementById('nt-autotyper-panel').shadowRoot;
+      const button = root.querySelector('[data-tab-btn="${view}"]');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    if (!shown) throw new Error(`tab not found: ${view}`);
+
+    for (const state of states) {
+      await cdp.evaluate(`(() => {
+        const w = document.querySelector('iframe').contentWindow;
+        const d = w.__ntaDebug;
+        const now = Date.now();
+        const stop = { at: now - 120000, reason: 'limit 50 races', holdMs: 600000 };
+        if ('${state}' === 'stopped') {
+          w.localStorage.setItem('ntQueue:stoppedAt', JSON.stringify(stop));
+          w.localStorage.setItem('ntQueue:lastStop', JSON.stringify({ ...stop, clearedAt: 0, clearedBy: '' }));
+          d.patchSession({
+            races: 128, raceLimit: 310, xp: 1240,
+            sumRaces: 128, sumWpm: 13696, sumTarget: 13696, sumAcc: 12633.6,
+            chars: 550, correct: 543, errors: 7,
+            startedAt: now - 60000, endedAt: now - 3000, clockDone: true,
+            typing: false, stopped: 1, closed: 1, lastAcceptedAt: now - 3000,
+          });
+        } else if ('${state}' === 'racing') {
+          w.localStorage.removeItem('ntQueue:stoppedAt');
+          w.localStorage.removeItem('ntQueue:lastStop');
+          d.patchSession({
+            races: 128, raceLimit: 310, xp: 1240,
+            sumRaces: 128, sumWpm: 13696, sumTarget: 13696, sumAcc: 12633.6,
+            chars: 550, correct: 543, errors: 7,
+            startedAt: now - 60000, endedAt: 0, clockDone: true,
+            typing: true, stopped: 0, closed: 0, lastAcceptedAt: now - 200,
+          });
+        } else {
+          w.localStorage.removeItem('ntQueue:stoppedAt');
+          w.localStorage.removeItem('ntQueue:lastStop');
+          d.patchSession({
+            races: 0, raceLimit: 310, xp: 0,
+            sumRaces: 0, sumWpm: 0, sumTarget: 0, sumAcc: 0,
+            chars: 0, correct: 0, errors: 0,
+            startedAt: 0, endedAt: 0, clockDone: false,
+            typing: false, stopped: 0, closed: 0, lastAcceptedAt: 0,
+          });
+        }
+        const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+        const status = shadow.querySelector('[data-field="status"]');
+        if (status) status.textContent = 'Live · auto pace';
+        d.paint(true);
+        return true;
+      })()`);
+      await sleep(120);
+
+      // Se mide el panel con la vista ya montada y se le da al iframe ese alto:
+      // el panel es fixed al borde inferior y, si el marco se queda corto, la
+      // cabecera saldria fuera de la foto.
+      const height = await cdp.evaluate(`(() => {
+        const frame = document.querySelector('iframe');
+        const panel = frame.contentWindow.document
+          .getElementById('nt-autotyper-panel').shadowRoot.querySelector('.panel');
+        return panel ? Math.ceil(panel.getBoundingClientRect().height) : 0;
+      })()`);
+      if (!height) throw new Error(`panel height not found: ${view}/${state}`);
+      const frameHeight = height + 48;
+      await cdp.evaluate(`(() => {
+        const frame = document.querySelector('iframe');
+        frame.style.height = '${frameHeight}px';
+        document.body.style.minHeight = '${frameHeight}px';
+        return true;
+      })()`);
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 520, height: Math.max(1200, frameHeight + 24), deviceScaleFactor: 2, mobile: false,
+      });
+      await sleep(150);
+      await cdp.evaluate('(() => document.querySelector(\'iframe\').contentWindow.__ntaDebug.paint(true))()');
+      await sleep(120);
+
+      const clip = await cdp.evaluate(`(() => {
+        const frame = document.querySelector('iframe');
+        const root = frame.contentWindow.document
+          .getElementById('nt-autotyper-panel').shadowRoot;
+        const panel = root.querySelector('.panel');
+        if (!panel) return null;
+        if (typeof panel.getAnimations === 'function') {
+          for (const anim of panel.getAnimations({ subtree: true })) {
+            try { anim.pause(); anim.currentTime = 0; } catch { /* ya cancelada */ }
+          }
+        }
+        const status = root.querySelector('[data-field="status"]');
+        if (status) status.textContent = 'Live · auto pace';
+        const f = frame.getBoundingClientRect();
+        const r = panel.getBoundingClientRect();
+        return {
+          x: Math.max(0, Math.round(f.left + r.left - 18)),
+          y: Math.max(0, Math.round(f.top + r.top - 18)),
+          width: Math.ceil(r.width + 36),
+          height: Math.ceil(r.height + 36),
+        };
+      })()`);
+      if (!clip) throw new Error(`panel clip not found: ${view}/${state}`);
+      await captureShot(cdp, path.join(SHOT_DIR, `view-${view}-${state}.png`), clip);
+    }
+  }
+}
+
+// El panel pequeno del garaje vive en la ventana de arriba. Se siembra un dia
+// fijo y se borra lo que dejaron las pruebas; despues se fuerzan los tres
+// estados de la cola: armed (en carrera), waiting (en espera) y stopped.
+async function captureGarageStates(cdp, appUrl) {
+  const garageUrl = new URL('/garage/', appUrl).toString();
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520, height: 1200, deviceScaleFactor: 2, mobile: false,
+  });
+
+  await cdp.evaluate(`(() => {
+    const now = ${VISUAL_FROZEN_AT};
+    const version = ${JSON.stringify(SCRIPT_VERSION)};
+    const frozen = new Date(now);
+    const todayKey = frozen.getFullYear() + '-'
+      + String(frozen.getMonth() + 1).padStart(2, '0') + '-'
+      + String(frozen.getDate()).padStart(2, '0');
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    for (const key of keys) {
+      if (!key) continue;
+      if (key.startsWith('ntQueue:todayPart:') || key.startsWith('ntQueue:dayHist:')
+        || key.startsWith('ntQueue:box')
+        || key === 'ntQueue:stoppedAt' || key === 'ntQueue:lastStop'
+        || key === 'ntQueue:stopHistory' || key === 'ntQueue:banClearHold'
+        || key === 'ntQueue:lastLogin' || key === 'ntQueue:notice'
+        || key === 'ntQueue:lastFail' || key === 'ntQueue:stuckAt'
+        || key === 'player_token') {
+        localStorage.removeItem(key);
+      }
+    }
+    sessionStorage.removeItem('ntQueue:armedAt');
+    localStorage.setItem('autoTyperPanelTheme', 'carbon');
+    localStorage.setItem('autoTyperCalibratedRange', JSON.stringify({ min: 103, max: 117 }));
+    localStorage.setItem('autoTyperCalibrationAt', String(now - 600000));
+    localStorage.setItem('autoTyperCalibrationVersion', version);
+    localStorage.setItem('persist:nt', JSON.stringify({
+      user: JSON.stringify({
+        username: 'visual', userID: 7,
+        avgSpeed: 110, avgAcc: 98.7, highestSpeed: 230, racesPlayed: 48756,
+      }),
+    }));
+    localStorage.setItem('autoTyperSeason', JSON.stringify({
+      v: 2, at: now, auto: true, source: 'user', seasonID: 73,
+      seasonName: 'Spirit Racers', tier: 6, nextTier: 7,
+      progress: 34, xp: 76701, currentXp: 70000, nextXp: 90000,
+      endsAt: now + 27 * 86400000, endsText: 'Nov 29',
+    }));
+    localStorage.setItem('nta:update', JSON.stringify({
+      at: now - 60000, status: 200, latest: version, via: 'gist',
+    }));
+    localStorage.setItem('ntQueue:todayPart:visual', JSON.stringify({
+      date: todayKey, races: 128, sumWpm: 14080, sumTarget: 14080,
+      boxes: 2, dq: 0, xp: 1240, clean: 120, firstAt: now - 7200000,
+      lastAt: now, dqAt: 0, updatedAt: now,
+    }));
+    return true;
+  })()`);
+
+  // El fixture del garaje no carga el userscript en la ventana de arriba: el
+  // banco lo inyecta. Se hace despues de navegar para que el panel pequeno
+  // tenga la ruta correcta desde su arranque.
+  const bootGarage = async () => {
+    await waitFor(async () => {
+      try {
+        return await cdp.evaluate(`location.pathname === '/garage/' && document.readyState === 'complete'`);
+      } catch {
+        return false;
+      }
+    }, 10000, 'the garage page');
+    await cdp.evaluate(fs.readFileSync(SCRIPT, 'utf8'));
+    await waitFor(async () => {
+      try {
+        return await cdp.evaluate(`(() => {
+          const host = document.getElementById('nt-queue-panel');
+          return Boolean(host && host.shadowRoot && host.shadowRoot.querySelector('.p'));
+        })()`);
+      } catch {
+        return false;
+      }
+    }, 15000, 'the garage panel for screenshots');
+    // El iframe de carrera del fixture no existe en el garaje real y su panel
+    // grande se asomaria por el margen de la foto. Se oculta (sus timers y su
+    // publicacion de __ntaFrame siguen vivos).
+    await cdp.evaluate(`(() => {
+      const frame = document.querySelector('iframe');
+      if (frame) frame.style.display = 'none';
+      return true;
+    })()`);
+  };
+
+  await cdp.send('Page.navigate', { url: garageUrl });
+  await bootGarage();
+  await waitFor(async () => {
+    try {
+      return await cdp.evaluate(`(() => {
+        const host = document.getElementById('nt-queue-panel');
+        const p = host && host.shadowRoot && host.shadowRoot.querySelector('.p');
+        return Boolean(p && p.dataset.armed === '1');
+      })()`);
+    } catch {
+      return false;
+    }
+  }, 10000, 'the garage queue to arm');
+
+  // Sin animacion de entrada ni transiciones de color: el LED cambia de estado
+  // entre capturas y una transicion a medio camino no es una regresion.
+  await cdp.evaluate(`(() => {
+    const root = document.getElementById('nt-queue-panel').shadowRoot;
+    if (!root || root.getElementById('nta-visual-freeze')) return false;
+    const style = document.createElement('style');
+    style.id = 'nta-visual-freeze';
+    style.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;}';
+    root.appendChild(style);
+    return true;
+  })()`);
+
+  const captureGarageShot = async (name) => {
+    await cdp.evaluate('(() => { if (window.__ntaDebug && window.__ntaDebug.garagePaint) window.__ntaDebug.garagePaint(); return true; })()');
+    await sleep(150);
+    const clip = await cdp.evaluate(`(() => {
+      const host = document.getElementById('nt-queue-panel');
+      const panel = host && host.shadowRoot && host.shadowRoot.querySelector('.p');
+      if (!panel) return null;
+      if (typeof panel.getAnimations === 'function') {
+        for (const anim of panel.getAnimations({ subtree: true })) {
+          try { anim.pause(); anim.currentTime = 0; } catch { /* ya cancelada */ }
+        }
+      }
+      const r = panel.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.round(r.left - 18)),
+        y: Math.max(0, Math.round(r.top - 18)),
+        width: Math.ceil(r.width + 36),
+        height: Math.ceil(r.height + 36),
+      };
+    })()`);
+    if (!clip) throw new Error(`garage clip not found: ${name}`);
+    await captureShot(cdp, path.join(SHOT_DIR, `view-garage-${name}.png`), clip);
+  };
+
+  await captureGarageShot('racing');
+
+  // En espera: el tipador del iframe se declara parado, que es la condicion que
+  // de verdad frena el rearme automatico del garaje, y se suelta el armed. Asi
+  // el LED queda ambar y el estado dice "waiting · starts by itself" sin una
+  // parada real ni una puerta inventada.
+  await cdp.evaluate(`(() => {
+    const frame = document.querySelector('iframe');
+    const typer = frame && frame.contentWindow && frame.contentWindow.__ntaDebug;
+    if (typer && typer.patchSession) typer.patchSession({ typing: 0, stopped: 1, endedAt: 0 });
+    const d = window.__ntaDebug;
+    if (d && d.armedReset) d.armedReset();
+    // El aviso de la cola dice "queue armed" de la captura anterior; en espera
+    // no hay nada que anunciar y la fila "why" se oculta sola.
+    try { sessionStorage.removeItem('ntQueue:why'); } catch { /* bloqueado */ }
+    if (d && d.garagePaint) d.garagePaint();
+    return true;
+  })()`);
+  await sleep(400);
+  await captureGarageShot('idle');
+
+  // Una parada en curso: la cola no se arma sola y el panel ensena las filas
+  // "waiting on" y "stopped". Se recarga para que garageAutoDone vuelva a
+  // empezar y respete la marca.
+  await cdp.evaluate(`(() => {
+    const now = Date.now();
+    const stop = { at: now - 120000, reason: 'limit 50 races', holdMs: 600000 };
+    localStorage.setItem('ntQueue:stoppedAt', JSON.stringify(stop));
+    localStorage.setItem('ntQueue:lastStop', JSON.stringify({ ...stop, clearedAt: 0, clearedBy: '' }));
+    return true;
+  })()`);
+  await cdp.send('Page.reload');
+  await bootGarage();
+  await waitFor(async () => {
+    try {
+      return await cdp.evaluate(`(() => {
+        const host = document.getElementById('nt-queue-panel');
+        const root = host && host.shadowRoot;
+        const p = root && root.querySelector('.p');
+        const row = root && root.querySelector('[data-f="stopRow"]');
+        return Boolean(p && p.dataset.armed === '0' && row && !row.hidden);
+      })()`);
+    } catch {
+      return false;
+    }
+  }, 10000, 'the stopped garage panel');
+  await cdp.evaluate(`(() => {
+    const root = document.getElementById('nt-queue-panel').shadowRoot;
+    if (!root || root.getElementById('nta-visual-freeze')) return false;
+    const style = document.createElement('style');
+    style.id = 'nta-visual-freeze';
+    style.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;}';
+    root.appendChild(style);
+    return true;
+  })()`);
+  await captureGarageShot('stopped');
+}
+
 // Genera la galeria que usa el README. Solo corre cuando el workflow manual
 // pasa SHOT_DIR; el check normal no escribe archivos ni cambia su resultado.
 async function capturePanelThemes(cdp, appUrl) {
@@ -302,6 +637,24 @@ async function capturePanelThemes(cdp, appUrl) {
     // con guiones donde deberia estar el XP real.
     if (${VISUAL_CAPTURE}) {
       const now = ${VISUAL_FROZEN_AT};
+      const version = ${JSON.stringify(SCRIPT_VERSION)};
+      // Las pruebas escriben dias, cajas y una calibracion con la hora real
+      // antes de llegar aqui. La foto visual necesita el mismo juego de datos
+      // en cada ejecucion, asi que se limpian esas claves y se siembran a mano.
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('ntQueue:todayPart:') || key.startsWith('ntQueue:dayHist:')
+          || key.startsWith('ntQueue:box'))) {
+          localStorage.removeItem(key);
+        }
+      }
+      localStorage.setItem('autoTyperCalibrationAt', String(now - 600000));
+      localStorage.setItem('autoTyperCalibrationVersion', version);
+      localStorage.setItem('nta:update', JSON.stringify({
+        at: now - 60000, status: 200, latest: version, via: 'gist',
+      }));
+      localStorage.setItem('autoTyperAccDeltas', JSON.stringify([0.3, -0.2, 0.1]));
+      localStorage.removeItem('nta:afkFreeze');
       localStorage.setItem('autoTyperSeason', JSON.stringify({
         v: 2, at: now, auto: true, source: 'user', seasonID: 73,
         seasonName: 'Spirit Racers', tier: 6, nextTier: 7,
@@ -317,6 +670,29 @@ async function capturePanelThemes(cdp, appUrl) {
         boxes: 2, dq: 0, xp: 1240, clean: 120, firstAt: now - 7200000,
         lastAt: now, dqAt: 0, updatedAt: now,
       }));
+      // La vista LOG dibuja la semana pasada; sin esto dependeria de las
+      // claves relativas del fixture, que caen fuera de la ventana congelada.
+      const week = [
+        { ago: 1, races: 42, wpm: 111, dq: 0, boxes: 1, xp: 5120 },
+        { ago: 2, races: 56, wpm: 110, dq: 1, boxes: 1, xp: 6480 },
+        { ago: 3, races: 38, wpm: 112, dq: 0, boxes: 0, xp: 4410 },
+        { ago: 4, races: 61, wpm: 109, dq: 0, boxes: 1, xp: 7020 },
+        { ago: 5, races: 47, wpm: 113, dq: 2, boxes: 0, xp: 5380 },
+        { ago: 6, races: 51, wpm: 110, dq: 0, boxes: 1, xp: 5940 },
+        { ago: 7, races: 44, wpm: 108, dq: 0, boxes: 1, xp: 4980 },
+      ];
+      for (const [index, day] of week.entries()) {
+        const stamp = new Date(now - day.ago * 86400000);
+        const dateKey = stamp.getFullYear() + '-'
+          + String(stamp.getMonth() + 1).padStart(2, '0') + '-'
+          + String(stamp.getDate()).padStart(2, '0');
+        localStorage.setItem('ntQueue:dayHist:' + dateKey + ':shot' + index, JSON.stringify({
+          date: dateKey, races: day.races, sumWpm: day.races * day.wpm,
+          sumTarget: day.races * 110, boxes: day.boxes, dq: day.dq, xp: day.xp,
+          clean: day.races - day.dq, firstAt: now - day.ago * 86400000 - 3600000,
+          lastAt: now - day.ago * 86400000, dqAt: 0, updatedAt: now,
+        }));
+      }
     }
     return true;
   })()`);
@@ -333,18 +709,10 @@ async function capturePanelThemes(cdp, appUrl) {
       return false;
     }
   }, 15000, 'the panel for screenshots');
-  // Deja que boot termine de cargar contadores antes de sembrar la demo; si no,
-  // el panel se queda con los ceros de la carga y la captura no sirve. El
-  // runAuto de boot se para primero para que no abra una tanda nueva encima de
-  // los contadores sembrados.
+  // Deja que boot termine de cargar contadores antes de sembrar la demo. No se
+  // llama a stop(): en este fixture no hay carrera que arrancar y la parada
+  // dejaria una tanda "debug stop" en la vista LOG que no es del usuario.
   await sleep(900);
-  await cdp.evaluate(`(() => {
-    const frame = document.querySelector('iframe');
-    const d = frame && frame.contentWindow && frame.contentWindow.__ntaDebug;
-    if (d && d.stop) d.stop();
-    return true;
-  })()`);
-  await sleep(300);
 
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 520, height: 1200, deviceScaleFactor: 2, mobile: false,
@@ -465,6 +833,10 @@ async function capturePanelThemes(cdp, appUrl) {
       if (!clip) throw new Error(`panel clip not found: ${theme}`);
       await captureShot(cdp, path.join(SHOT_DIR, `theme-${theme}.png`), clip);
     }
+
+    // Fuera de Live: las vistas y los estados que el usuario pidio cubrir.
+    await captureViewStates(cdp);
+    await captureGarageStates(cdp, appUrl);
   } finally {
     try { await cdp.send('Emulation.clearDeviceMetricsOverride'); } catch { /* ya cerro */ }
 
@@ -3769,10 +4141,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     registry.push({ id: 'peer-copy', at: Date.now(), since: Date.now() - 5000 });
     w.__ntaInstances = registry;
 
-    // El panel publica su estado (y pinta el guardia) cada 500 ms: hay que
-    // dejar pasar al menos un latido entero. Con 350 ms la prueba leia antes
-    // de que el latido ocurriera y fallaba de forma intermitente.
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    // El latido corre cada 500 ms, pero el repintado completo que publica el
+    // estado y el guardia espera 1-2 s (panelPaintEveryMs). Hay que dejar pasar
+    // ese repintado entero o la prueba lee el estado anterior y falla segun la
+    // carga de la maquina.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     const standby = d.role();
     const row = guardText();
     const attr = shadow.querySelector('.panel').dataset.standby;
@@ -3781,7 +4154,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     })();
 
     w.__ntaInstances = (w.__ntaInstances || []).filter((item) => item && item.id !== 'peer-copy');
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     const back = d.role();
 
     return {
