@@ -6919,14 +6919,16 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   const liveReadout = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     const d = w.__ntaDebug;
-    if (!d || !d.livePaceFrom || !d.liveReadout) return { has: false };
+    if (!d || !d.liveRecentFrom || !d.liveReadout) return { has: false };
     const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const read = (field) => {
       const node = shadow.querySelector('[data-field="' + field + '"]');
-      return node ? { text: (node.textContent || '').trim(), good: node.dataset.good || null } : null;
+      return node
+        ? { text: (node.textContent || '').trim(), good: node.dataset.good || null, title: node.title || '' }
+        : null;
     };
-    const pace = d.livePaceFrom([{ at: 0, typed: 0 }, { at: 6000, typed: 60 }]);
-    const short = d.livePaceFrom([{ at: 0, typed: 0 }, { at: 1000, typed: 8 }]);
+    const pace = d.liveRecentFrom([{ at: 0, typed: 0 }, { at: 6000, typed: 60 }]).pace;
+    const short = d.liveRecentFrom([{ at: 0, typed: 0 }, { at: 1000, typed: 8 }]);
     d.patchSession({
       typing: true, chars: 120, nitroChars: 0, correct: 120, errors: 0,
       startedAt: Date.now() - 12000, endedAt: 0, lastAcceptedAt: Date.now() - 3000,
@@ -6938,13 +6940,17 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       short,
       age: read('liveAge'),
       now: read('liveNow'),
+      nowAcc: read('liveNowAcc'),
       row: Boolean(shadow.querySelector('[data-field="liveNow"]')),
+      accRow: Boolean(shadow.querySelector('[data-field="liveNowAcc"]')),
       state: d.liveReadout(),
     };
     d.patchSession({
       typing: false, chars: 0, nitroChars: 0, correct: 0, errors: 0,
       startedAt: 0, endedAt: 0, pos: 0, lastAcceptedAt: 0,
     });
+    d.seedLiveRecent([]);
+    d.paint(true);
     return result;
   })()`);
   check('the live readout reports a rolling 6-second pace and flags a quiet race',
@@ -6953,10 +6959,109 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && liveReadout.short === null
       && liveReadout.age && liveReadout.age.text === 'stalled 3s' && liveReadout.age.good === '0'
       && liveReadout.now && liveReadout.now.text === '—'
+      && liveReadout.nowAcc && liveReadout.nowAcc.text === '—'
       && liveReadout.row === true
+      && liveReadout.accRow === true
       && liveReadout.state && liveReadout.state.stale === true
       && Math.abs(liveReadout.state.wpm - 120) < 0.5,
     liveReadout);
+
+  // La precision reciente comparte la ventana, la formula del juego y el mismo
+  // aviso de lectura congelada que el WPM reciente. Se siembran las muestras
+  // para ver el numero pintado sin teclear seis segundos.
+  const liveRecent = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.liveRecentFrom || !d.seedLiveRecent) return { has: false };
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const read = (field) => {
+      const node = shadow.querySelector('[data-field="' + field + '"]');
+      return node
+        ? { text: (node.textContent || '').trim(), good: node.dataset.good || null, title: node.title || '' }
+        : null;
+    };
+    const sample = d.liveRecentFrom([
+      { at: 0, typed: 0, errors: 0 },
+      { at: 6000, typed: 60, errors: 1 },
+    ]);
+    const short = d.liveRecentFrom([
+      { at: 0, typed: 0, errors: 0 },
+      { at: 1000, typed: 8, errors: 1 },
+    ]);
+    const at = Date.now();
+    d.patchSession({
+      typing: true, chars: 160, nitroChars: 0, correct: 159, errors: 1,
+      startedAt: at - 12000, endedAt: 0, lastAcceptedAt: at,
+    });
+    d.seedLiveRecent([
+      { at: at - 6000, typed: 100, errors: 0 },
+      { at, typed: 160, errors: 1 },
+    ]);
+    d.paint(true);
+    const live = {
+      now: read('liveNow'),
+      acc: read('liveNowAcc'),
+      age: read('liveAge'),
+      state: d.liveReadout(),
+    };
+    d.patchSession({ lastAcceptedAt: Date.now() - 3000 });
+    d.paint(true);
+    const frozen = {
+      now: read('liveNow'),
+      acc: read('liveNowAcc'),
+      age: read('liveAge'),
+      state: d.liveReadout(),
+    };
+    // Al volver una tecla el aviso se retira y las cifras reaparecen: el freeze
+    // solo tapa el display, no borra la ventana de muestras.
+    d.patchSession({ lastAcceptedAt: Date.now() });
+    d.paint(true);
+    const recovered = {
+      now: read('liveNow'),
+      acc: read('liveNowAcc'),
+      age: read('liveAge'),
+      state: d.liveReadout(),
+    };
+    d.patchSession({
+      typing: false, chars: 0, nitroChars: 0, correct: 0, errors: 0,
+      startedAt: 0, endedAt: 0, pos: 0, lastAcceptedAt: 0,
+    });
+    d.seedLiveRecent([]);
+    d.paint(true);
+    return { has: true, sample, short, live, frozen, recovered };
+  })()`);
+  check('the live readout shows a rolling 6-second accuracy next to the recent pace',
+    liveRecent.has === true
+      && liveRecent.sample && Math.abs(liveRecent.sample.pace - 120) < 0.01
+      && Math.abs(liveRecent.sample.accuracy - 98.3333) < 0.01
+      && liveRecent.short === null
+      && liveRecent.live.now && Math.abs(parseFloat(liveRecent.live.now.text) - 120) < 1
+      && liveRecent.live.acc && Math.abs(parseFloat(liveRecent.live.acc.text) - 98.3) < 0.1
+      && liveRecent.live.age && liveRecent.live.age.text !== 'stalled 3s'
+      && liveRecent.live.state && Math.abs(liveRecent.live.state.recentAccuracy - 98.3333) < 0.01,
+    liveRecent);
+  check('the recent accuracy is blanked by the same frozen-data warning when keys stop',
+    liveRecent.has === true
+      && liveRecent.frozen.now && liveRecent.frozen.now.text === '—'
+      && liveRecent.frozen.acc && liveRecent.frozen.acc.text === '—'
+      && liveRecent.frozen.now.good === '0'
+      && liveRecent.frozen.acc.good === '0'
+      && liveRecent.frozen.age && liveRecent.frozen.age.text === 'stalled 3s'
+      && /frozen, not current/.test(liveRecent.frozen.now.title)
+      && /frozen, not current/.test(liveRecent.frozen.acc.title)
+      && liveRecent.frozen.state && liveRecent.frozen.state.stale === true
+      && Math.abs(liveRecent.frozen.state.pace - 120) < 0.01
+      && Math.abs(liveRecent.frozen.state.recentAccuracy - 98.3333) < 0.01,
+    liveRecent.frozen);
+  check('the recent accuracy comes back intact when the race accepts keys again',
+    liveRecent.has === true
+      && liveRecent.recovered.now && Math.abs(parseFloat(liveRecent.recovered.now.text) - 120) < 1
+      && liveRecent.recovered.acc && Math.abs(parseFloat(liveRecent.recovered.acc.text) - 98.3) < 0.1
+      && liveRecent.recovered.age && liveRecent.recovered.age.text !== 'stalled 3s'
+      && liveRecent.recovered.state && liveRecent.recovered.state.stale === false
+      && !/frozen, not current/.test(liveRecent.recovered.now.title)
+      && !/frozen, not current/.test(liveRecent.recovered.acc.title),
+    liveRecent.recovered);
 
   // Un fallo del API no puede dejar la cuenta sin reintento hasta media hora:
   // el backoff corto se ve en el estado de la tarjeta y en el reloj expuesto.

@@ -1610,24 +1610,35 @@
   };
   // Lectura viva y formula del ritmo reciente: el banco comprueba el numero y
   // el aviso de carrera muda sin esperar a teclear una carrera entera.
+  const liveSamples = (samples = []) => (Array.isArray(samples) ? samples : [])
+    .map((item) => ({
+      at: Number(item && item.at),
+      typed: Number(item && item.typed),
+      errors: Number(item && item.errors),
+    }))
+    .filter((item) => Number.isFinite(item.at) && Number.isFinite(item.typed));
   window.__ntaDebug.liveReadout = () => {
     const measured = session.chars > 0;
     const acceptedAt = Number(session.lastAcceptedAt) || 0;
     const age = acceptedAt ? Math.max(0, Date.now() - acceptedAt) : null;
+    const recent = liveRecentNow();
     return {
       wpm: measured ? wpmNow() : 0,
       accuracy: measured ? accuracyNow() : 100,
-      pace: livePaceNow(),
+      pace: recent ? recent.pace : null,
+      recentAccuracy: recent ? recent.accuracy : null,
       age,
       stale: Boolean(session.typing && !session.endedAt && age !== null && age > 2500),
       typed: Math.max(0, session.chars - session.nitroChars),
     };
   };
-  window.__ntaDebug.livePaceFrom = (samples = []) => livePaceFrom(
-    (Array.isArray(samples) ? samples : [])
-      .map((item) => ({ at: Number(item && item.at), typed: Number(item && item.typed) }))
-      .filter((item) => Number.isFinite(item.at) && Number.isFinite(item.typed)),
-  );
+  window.__ntaDebug.liveRecentFrom = (samples = []) => liveRecentFrom(liveSamples(samples));
+  // El banco siembra la ventana corta para comprobar el numero pintado sin
+  // esperar seis segundos de tecleo real.
+  window.__ntaDebug.seedLiveRecent = (samples = []) => {
+    liveRecentKey = `${session.startedAt}:${session.endedAt}`;
+    liveRecentSamples = liveSamples(samples);
+  };
   window.__ntaDebug.calibrateClock = () => calibrateRaceClock(
     Date.now(), hudWpm(), Math.max(0, session.chars - session.nitroChars),
   );
@@ -2972,6 +2983,12 @@
         .row b { font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink-2); }
         .row b[data-good="1"] { color: var(--acc); }
         .row b[data-good="0"] { color: var(--warn); }
+        .recent-pair { display: inline-flex; align-items: baseline; }
+        .recent-pair i { font-style: normal; }
+        .recent-pair .recent-acc::before { content: '·'; margin: 0 5px; color: var(--dim-2); }
+        .recent-pair i[data-good="1"] { color: var(--acc); }
+        .recent-pair i[data-good="0"] { color: var(--warn); }
+        .recent-pair i.bump { animation: nt-bump .32s cubic-bezier(.34, 1.4, .5, 1); }
         .row .num { width: 58px; flex: none; padding: 2px 5px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0, 0, 0, .24); color: var(--ink-2); font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; text-align: right; color-scheme: dark; }
         .row .num:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; border-color: var(--acc); }
         .row .num::placeholder { color: var(--dim-2); }
@@ -3346,7 +3363,7 @@
            cortos: el muelle del interruptor y de los deslizadores es informacion
            (dice si algo esta encendido), no adorno. */
         @media (prefers-reduced-motion: reduce) {
-          .panel, .panel[data-fresh="1"] .card, .view, .stat b.bump, .prog::after,
+          .panel, .panel[data-fresh="1"] .card, .view, .stat b.bump, .recent-pair i.bump, .prog::after,
           .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title { animation: none !important; }
           /* El ciclo de tono no mueve nada: es color, no adorno. Se conserva
              para que RGB siga cambiando aunque el sistema pida menos animacion;
@@ -3412,7 +3429,7 @@
                 </svg>
                 <div class="rows">
                   <div class="row"><span>target</span><b data-field="target">—</b></div>
-                  <div class="row" title="Recent pace: WPM over the last 6 seconds of accepted keys, independent of the session average"><span>recent</span><b data-field="liveNow">—</b></div>
+                  <div class="row" title="Recent pace and accuracy: WPM and accuracy over the last 6 seconds of accepted keys, independent of the session averages"><span>recent</span><b class="recent-pair"><i data-field="liveNow">—</i><i class="recent-acc" data-field="liveNowAcc">—</i></b></div>
                   <div class="row race-row secondary" title="Race progress"><span>race</span><b data-field="progress">—</b></div>
                   <div class="row"><span>races</span><b data-field="races">0</b></div>
                   <div class="row day-xp-row" title="XP the game awarded today, read from the same daily summary as the 7-day card"><span>today</span><b data-field="dayXp">—</b></div>
@@ -3917,6 +3934,7 @@
       liveTag: pick('[data-field="liveTag"]'),
       liveAge: pick('[data-field="liveAge"]'),
       liveNow: pick('[data-field="liveNow"]'),
+      liveNowAcc: pick('[data-field="liveNowAcc"]'),
       footState: pick('[data-field="footState"]'),
       footMode: pick('[data-field="footMode"]'),
       footWpm: pick('[data-field="footWpm"]'),
@@ -5300,33 +5318,50 @@
   const LIVE_PACE_WINDOW_MS = 6000;
   const LIVE_PACE_MIN_MS = 3000;
   const LIVE_PACE_MIN_CHARS = 3;
-  let livePaceSamples = [];
-  let livePaceKey = '';
+  let liveRecentSamples = [];
+  let liveRecentKey = '';
 
-  // Puro: el banco comprueba la formula con muestras escritas a mano.
-  function livePaceFrom(samples) {
+  // Puro: las dos cifras salen de la misma ventana de muestras, asi que el WPM
+  // y la precision recientes siempre describen los mismos caracteres. La
+  // precision usa la formula del juego (errores / tecleados) y no la acumulada.
+  function liveRecentFrom(samples) {
     if (!Array.isArray(samples) || samples.length < 2) return null;
     const first = samples[0];
     const end = samples[samples.length - 1];
     const minutes = (end.at - first.at) / 60000;
-    const chars = end.typed - first.typed;
+    const typed = end.typed - first.typed;
     if (!(minutes > 0) || minutes < LIVE_PACE_MIN_MS / 60000) return null;
-    if (!(chars >= LIVE_PACE_MIN_CHARS)) return null;
-    return (chars / 5) / minutes;
+    if (!(typed >= LIVE_PACE_MIN_CHARS)) return null;
+    const errors = end.errors - first.errors;
+    return {
+      pace: (typed / 5) / minutes,
+      accuracy: Number.isFinite(errors)
+        ? clamp((1 - errors / typed) * 100, 0, 100)
+        : null,
+    };
   }
 
-  function livePaceNow(now = Date.now()) {
+  function liveRecentNow(now = Date.now()) {
     const key = `${session.startedAt}:${session.endedAt}`;
-    if (key !== livePaceKey) {
-      livePaceKey = key;
-      livePaceSamples = [];
+    if (key !== liveRecentKey) {
+      liveRecentKey = key;
+      liveRecentSamples = [];
     }
     const typed = Math.max(0, session.chars - session.nitroChars);
-    const last = livePaceSamples[livePaceSamples.length - 1];
-    if (!last || last.typed !== typed) livePaceSamples.push({ at: now, typed });
+    const errors = Math.max(0, Number(session.errors) || 0);
+    // Tras una pausa mas larga que la ventana no se arrastra la media vieja: la
+    // racha nueva empieza a medirse desde la primera tecla aceptada al volver.
+    if (liveRecentSamples.length
+      && now - liveRecentSamples[liveRecentSamples.length - 1].at > LIVE_PACE_WINDOW_MS) {
+      liveRecentSamples = [];
+    }
+    const last = liveRecentSamples[liveRecentSamples.length - 1];
+    if (!last || last.typed !== typed || last.errors !== errors) {
+      liveRecentSamples.push({ at: now, typed, errors });
+    }
     const horizon = now - LIVE_PACE_WINDOW_MS;
-    while (livePaceSamples.length > 2 && livePaceSamples[0].at < horizon) livePaceSamples.shift();
-    return livePaceFrom(livePaceSamples);
+    while (liveRecentSamples.length > 2 && liveRecentSamples[0].at < horizon) liveRecentSamples.shift();
+    return liveRecentFrom(liveRecentSamples);
   }
 
   function paintLiveNumbers(measured, wpm, acc) {
@@ -5335,21 +5370,38 @@
     setGood(panel.refs.live, measured ? wpm >= profile.targetWPM * 0.95 : null);
     setGood(panel.refs.acc, measured ? acc >= profile.accuracyGoal : null);
 
-    const pace = livePaceNow();
-    setText(panel.refs.liveNow, pace === null ? '—' : `${pace.toFixed(1)}`);
-    if (panel.refs.liveNow) {
-      panel.refs.liveNow.title = pace === null
-        ? `Recent pace: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
-        : `Recent pace: ${pace.toFixed(1)} WPM over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys. The session row is the cumulative average.`;
-    }
-
     // Frescura: cuanto hace que el juego acepto la ultima tecla. Si la carrera
-    // sigue viva pero el numero no se mueve, se dice en ambar en vez de dejar
-    // que un WPM congelado parezca telemetria en directo.
+    // sigue viva pero los numeros no se mueven, se dice en ambar y las dos
+    // cifras recientes se tapan en vez de dejar que parezcan telemetria viva.
     const racing = Boolean(session.typing && !session.endedAt);
     const acceptedAt = Number(session.lastAcceptedAt) || 0;
     const age = acceptedAt ? Math.max(0, Date.now() - acceptedAt) : null;
     const stale = racing && age !== null && age > 2500;
+    const frozenWarning = `No accepted key for ${(Math.max(0, age || 0) / 1000).toFixed(1)} s while the race is live: the readout is frozen, not current.`;
+
+    const recent = liveRecentNow();
+    const recentPace = recent ? recent.pace : null;
+    const recentAcc = recent ? recent.accuracy : null;
+    flashValue(panel.refs.liveNow, stale || recentPace === null ? '—' : recentPace.toFixed(1));
+    flashValue(panel.refs.liveNowAcc, stale || recentAcc === null ? '—' : `${recentAcc.toFixed(1)}%`);
+    setGood(panel.refs.liveNow, stale ? false : null);
+    setGood(panel.refs.liveNowAcc,
+      stale ? false : recentAcc === null ? null : recentAcc >= profile.accuracyGoal);
+    if (panel.refs.liveNow) {
+      panel.refs.liveNow.title = stale
+        ? frozenWarning
+        : recentPace === null
+          ? `Recent pace: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
+          : `Recent pace: ${recentPace.toFixed(1)} WPM over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys. The session row is the cumulative average.`;
+    }
+    if (panel.refs.liveNowAcc) {
+      panel.refs.liveNowAcc.title = stale
+        ? frozenWarning
+        : recentAcc === null
+          ? `Recent accuracy: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
+          : `Recent accuracy: ${recentAcc.toFixed(1)}% over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys (errors / typed, the game formula). The accuracy above is cumulative.`;
+    }
+
     let ageText = '—';
     if (session.endedAt) ageText = 'final';
     else if (age !== null && (racing || measured)) {
@@ -5359,7 +5411,7 @@
     setGood(panel.refs.liveAge, stale ? false : null);
     if (panel.refs.liveAge) {
       panel.refs.liveAge.title = stale
-        ? `No accepted key for ${(age / 1000).toFixed(1)} s while the race is live: the readout is frozen, not current.`
+        ? frozenWarning
         : 'Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.';
     }
   }
