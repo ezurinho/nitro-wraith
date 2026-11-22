@@ -46,6 +46,12 @@ function readModule(name) {
   return normalize(fs.readFileSync(path.join(ROOT, 'src', name), 'utf8'));
 }
 
+// `next.length` is the number of UTF-16 code units, not bytes: the bundle has
+// accented Spanish in the comments, so the two differ by about a kilobyte.
+function byteLength(text) {
+  return Buffer.byteLength(text, 'utf8');
+}
+
 function bundle() {
   return MODULES.map(readModule).join('');
 }
@@ -73,7 +79,7 @@ function write() {
   // fallar la comprobacion de artefactos estables del harness.
   if (next !== old) fs.writeFileSync(SCRIPT, next);
   if (meta !== oldMeta) fs.writeFileSync(META, meta);
-  console.log(`built ${MODULES.length} modules -> ${path.basename(SCRIPT)} (${next.length} bytes)`);
+  console.log(`built ${MODULES.length} modules -> ${path.basename(SCRIPT)} (${byteLength(next)} bytes)`);
 }
 
 function check() {
@@ -88,7 +94,7 @@ function check() {
   if (meta !== oldMeta) {
     throw new Error('nitro-wraith.meta.js is stale; run npm run build.');
   }
-  console.log(`build is in sync (${MODULES.length} modules, ${next.length} bytes)`);
+  console.log(`build is in sync (${MODULES.length} modules, ${byteLength(next)} bytes)`);
 }
 
 try {

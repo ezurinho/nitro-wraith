@@ -29,6 +29,8 @@ const TABS = path.join(__dirname, 'tabs.js');
 const REPORT = path.join(__dirname, 'report.js');
 const EXPORT = path.join(__dirname, '..', '..', 'tools', 'export-downloads.js');
 const CANARY = path.join(__dirname, '..', '..', 'tools', 'canary.js');
+const BUILD_TOOL = path.join(__dirname, '..', '..', 'tools', 'build.js');
+const SRC_DIR = path.join(__dirname, '..', '..', 'src');
 const SCRIPT_PATH = path.join(__dirname, '..', '..', 'nitro-wraith.user.js');
 const SPAWN_TIMEOUT_MS = 25000;
 
@@ -359,6 +361,30 @@ async function runCase(item) {
     results.push(Boolean(ok));
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  ${detail || ''}`}`);
   };
+
+  // El manifiesto del build es la unica lista que decide que acaba dentro del
+  // userscript: un fragmento nuevo en src/ que nadie anade a MODULES no se
+  // publica y no se nota (el build sigue "en sync"). Se comprueba en los dos
+  // sentidos, y que el orden coincida con la tabla de src/README.md, porque el
+  // orden es semantico: los fragmentos comparten un unico ambito lexico.
+  const buildSource = fs.readFileSync(BUILD_TOOL, 'utf8');
+  const manifestBlock = (buildSource.match(/const MODULES = \[([\s\S]*?)\];/) || [])[1] || '';
+  const modules = [...manifestBlock.matchAll(/'([^']+\.js)'/g)].map((match) => match[1]);
+  const onDisk = fs.readdirSync(SRC_DIR).filter((name) => name.endsWith('.js')).sort();
+  unit('the build manifest matches every file in src/',
+    modules.length > 0 && modules.slice().sort().join(',') === onDisk.join(','),
+    `MODULES ${modules.length} · src ${onDisk.length} · missing from MODULES: ${onDisk.filter((n) => !modules.includes(n)).join(', ') || 'none'}`
+      + ` · not on disk: ${modules.filter((n) => !onDisk.includes(n)).join(', ') || 'none'}`);
+
+  const srcReadme = fs.readFileSync(path.join(SRC_DIR, 'README.md'), 'utf8');
+  const documented = [...srcReadme.matchAll(/^\| `([^`]+\.js)` \|/gm)].map((match) => match[1]);
+  const orderProblems = [];
+  if (documented.length !== modules.length) orderProblems.push(`${documented.length} documented vs ${modules.length} modules`);
+  for (let i = 0; i < Math.min(documented.length, modules.length); i += 1) {
+    if (documented[i] !== modules[i]) orderProblems.push(`#${i + 1} ${documented[i]} != ${modules[i]}`);
+  }
+  unit('src/README.md lists the modules in concatenation order',
+    orderProblems.length === 0, orderProblems.join(' · '));
 
   // El lanzador se prueba por su comando, sin abrir un navegador de verdad.
   const args = buildArgs({ port: 9333, profile: 'C:\\profile test' });
