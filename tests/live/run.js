@@ -219,7 +219,18 @@ async function openTab(port, url) {
   const tab = await connect(target.webSocketDebuggerUrl);
   await tab.send('Page.enable');
   await tab.send('Runtime.enable');
-  return tab;
+  // Cerrar el websocket deja la pestaña viva: sigue ejecutando el userscript
+  // con el reloj real, pintando el panel y podando el almacenamiento del origen
+  // por detras de la captura visual (era lo que borraba el resumen del dia
+  // sembrado antes de las fotos). close() cierra la pestaña entera; el websocket
+  // muere con ella.
+  const closeTab = async () => {
+    try {
+      await fetch(`http://127.0.0.1:${port}/json/close/${target.id}`);
+    } catch { /* el navegador ya se cerro */ }
+    try { tab.close(); } catch { /* el websocket ya cerro */ }
+  };
+  return { ...tab, close: closeTab, closeTarget: closeTab };
 }
 
 // Despacha un clic nativo por CDP: no es un element.click(), asi que el evento
