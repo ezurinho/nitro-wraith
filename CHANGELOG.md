@@ -1,5 +1,16 @@
 # Changelog
 
+## 8.14.55 — 2026-11-22
+
+- refactor(panel): move the theme block and the storage bridges
+- test(source): gate loose equality, debugger and focused tests
+- refactor(panel): move the stylesheet into its own module
+- fix(tools): keep the launcher readable in any console
+- feat(tools): add the overnight launcher and the night runbook
+- fix(visual): seed the day on the frozen page and fail when it does not land
+- fix(harness): close the tab instead of leaking it
+- feat(visual): let accept and compare target a subset of shots
+
 ## 8.14.54 — 2026-11-22
 
 - fix(guard): keep the elected copy when the registry is trimmed
