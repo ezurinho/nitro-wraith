@@ -1571,8 +1571,9 @@
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
   // Prueba pura del gobernador sin tocar la carrera real: guarda y restaura
-  // los tres contadores que usa paceCapWait.
-  window.__ntaDebug.paceCapWaitFor = (startedAt, chars, nitroChars = 0) => {
+  // los tres contadores que usa paceCapWait. El reloj es opcional para que el
+  // harness pueda recorrer una carrera entera sin esperar en tiempo real.
+  window.__ntaDebug.paceCapWaitFor = (startedAt, chars, nitroChars = 0, now = Date.now()) => {
     const previous = {
       startedAt: session.startedAt,
       chars: session.chars,
@@ -1581,10 +1582,20 @@
     session.startedAt = Number(startedAt) || 0;
     session.chars = Number(chars) || 0;
     session.nitroChars = Number(nitroChars) || 0;
-    const wait = paceCapWait();
+    const wait = paceCapWait(Number(now) || Date.now());
     Object.assign(session, previous);
     return wait;
   };
+  // El nucleo puro, sin efectos: devuelve la retencion y la deuda sin recortar.
+  window.__ntaDebug.paceGovernorFor = (startedAt, typed, now) =>
+    paceGovernorAt(Number(startedAt) || 0, Number(typed) || 0, Number(now) || Date.now());
+  // Constantes del techo, para que el harness no repita los numeros magicos.
+  window.__ntaDebug.wpmCeiling = () => ({
+    cap: CONFIG.wpm.hardCap,
+    dqGuardMs: CONFIG.dqGuardMs,
+    maxHold: paceGovernorAt(1, 1, 1).maxHold,
+    msPerChar: 60000 / ((CONFIG.wpm.hardCap - 1) * 5),
+  });
   window.__ntaDebug.startup = () => ({
     nodes: panel.host && panel.host.shadowRoot
       ? panel.host.shadowRoot.querySelectorAll('*').length
@@ -2327,6 +2338,9 @@
         // Mayor recorte del gobernador en la carrera actual: si es grande, el
         // reporte ensena por que una carrera se arrastro sin abrir el log.
         capHoldMs: Math.round(session.capMaxWait || 0),
+        // Deuda que el recorte NO cubre: si supera capHoldMs el gobernador ya no
+        // pudo sujetar el techo. Cero en una carrera normal.
+        capDebtMs: Math.round(Math.max(0, (session.capDebt || 0) - (session.capMaxWait || 0))),
       },
       flags: {
         paused: session.paused,

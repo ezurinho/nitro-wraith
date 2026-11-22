@@ -3250,6 +3250,66 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && capWaitLimit.short >= 0 && capWaitLimit.short <= 5500,
     capWaitLimit);
 
+  // Invariante del techo, simulado con el nucleo puro del gobernador y el reloj
+  // inyectado: se teclea una carrera entera a distintas velocidades y se mira la
+  // media que el servidor ve DESPUES DE CADA TECLA, no solo al final. Es la
+  // promesa central del script (nunca 120 WPM) y hasta ahora no la comprobaba
+  // ningun test: solo se medía el tope de retencion.
+  const ceilingSim = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    const { cap, maxHold, msPerChar } = d.wpmCeiling();
+    const limit = cap - 1;
+    // keyDelay = ms entre teclas SIN gobernador (la velocidad del dedo).
+    const runRace = (keyDelay, keys, nitro = 0) => {
+      const startedAt = 1000000;
+      let now = startedAt;
+      let typed = 0;
+      let worstWpm = 0;
+      let worstHold = 0;
+      let worstDebt = 0;
+      for (let i = 0; i < keys; i += 1) {
+        // Mismo orden que el bucle real (72-results): primero la cadencia del
+        // dedo, despues el gobernador, y por ultimo la tecla.
+        now += keyDelay;
+        const g = d.paceGovernorFor(startedAt, typed, now);
+        worstHold = Math.max(worstHold, g.wait);
+        worstDebt = Math.max(worstDebt, g.debt);
+        now += g.wait;
+        typed += 1;
+        worstWpm = Math.max(worstWpm, (typed / 5) / ((now - startedAt) / 60000));
+      }
+      return { keyDelay, worstWpm: Number(worstWpm.toFixed(2)), worstHold: Math.round(worstHold),
+        worstDebt: Math.round(worstDebt), finalWpm: Number(((typed / 5) / ((now - startedAt) / 60000)).toFixed(2)) };
+    };
+    // 600, 200, 133, 119 y 86 WPM de dedo: las tres primeras van por encima del
+    // techo y el gobernador tiene que sujetarlas; la cuarta es el ritmo
+    // planificado y la quinta un dia lento, donde no debe retener nada.
+    const races = [20, 60, 90, 101, 140].map((delay) => runRace(delay, 300));
+    // Carrera que YA se paso: 100 teclas enviadas en 100 ms (1200 WPM). Es lo
+    // que pasa si otra copia del script teclea en la misma carrera. Aqui el
+    // recorte de 5,5 s no llega, y eso tiene que ser VISIBLE.
+    const overshot = d.paceGovernorFor(1000000 - 100, 100, 1000000);
+    return { cap, limit, maxHold, msPerChar: Number(msPerChar.toFixed(2)), races, overshot };
+  })()`);
+
+  check('the pace ceiling holds after every single keystroke, even a 600 WPM finger',
+    ceilingSim.races.every((race) => race.worstWpm <= ceilingSim.limit + 0.05),
+    ceilingSim.races.map((race) => `${race.keyDelay}ms->${race.worstWpm}wpm`).join(' · '));
+  check('the governor never needs more than the inactivity-safe hold',
+    ceilingSim.races.every((race) => race.worstDebt <= ceilingSim.maxHold),
+    `maxHold ${ceilingSim.maxHold} · ${ceilingSim.races.map((race) => `${race.keyDelay}ms->debt ${race.worstDebt}`).join(' · ')}`);
+  check('a pace slow enough to be legal is not slowed down any further',
+    ceilingSim.races.filter((race) => race.keyDelay > ceilingSim.msPerChar)
+      .every((race) => race.worstHold === 0),
+    `msPerChar ${ceilingSim.msPerChar} · ${ceilingSim.races.map((race) => `${race.keyDelay}ms->hold ${race.worstHold}`).join(' · ')}`);
+  // Documenta el unico agujero que queda: si la carrera ya se paso (otra copia
+  // tecleando, o un nitro enorme), la deuda supera el tope de 5,5 s y el techo
+  // se escapa. El gobernador no puede arreglar lo que ya paso; lo que si hace
+  // es decirlo, y por eso se guarda la deuda sin recortar.
+  check('a race that already overshot is reported instead of silently clamped',
+    ceilingSim.overshot.wait === ceilingSim.maxHold && ceilingSim.overshot.debt > ceilingSim.maxHold,
+    ceilingSim.overshot);
+
   // La media corta puede estar en 38 mientras el top sigue en 230. El suelo de
   // recuperacion usa el top solo cuando la diferencia es grande y creible; una
   // cuenta principiante con top 50 no se dispara.

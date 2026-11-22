@@ -4607,6 +4607,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     stopManual: false,    // la parada la pidio el usuario, no el guardia
     capLogged: false,     // ya se aviso del recorte del gobernador en esta carrera
     capMaxWait: 0,        // mayor recorte del gobernador en la carrera (diagnostico)
+    capDebt: 0,           // mayor deuda SIN recortar: si pasa de capMaxWait, el techo se escapo
     pauseEndsAt: 0,       // fin de la pausa en carrera (cuenta atras del panel)
     typing: false,
     chars: 0,
@@ -5309,6 +5310,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     session.inactivityRescues = 0;
     session.capLogged = false;
     session.capMaxWait = 0;
+    session.capDebt = 0;
     // El reloj se calibra una vez por carrera con el HUD del juego.
     session.clockSamples = [];
     session.clockDone = false;
@@ -5387,31 +5389,52 @@ All of this only aims at believable statistics. It is your call and your risk.
     return Number.isFinite(cap) && cap > 2 ? cap - 2 : Infinity;
   }
 
+  // Nucleo puro del gobernador: sin estado y con el reloj inyectado, para que el
+  // harness pueda simular una carrera entera y comprobar el techo de verdad en
+  // vez de confiar en la revision. Devuelve tambien la deuda SIN recortar: si
+  // `debt` supera `maxHold` el gobernador ya no puede sujetar el techo y quien
+  // llama tiene que poder decirlo.
+  function paceGovernorAt(startedAt, typed, now, cap = CONFIG.wpm.hardCap, dqGuardMs = CONFIG.dqGuardMs) {
+    if (!Number.isFinite(cap) || cap <= 1 || !startedAt || typed < 0) {
+      return { wait: 0, debt: 0, maxHold: 0, msPerChar: 0, cap };
+    }
+
+    const msPerChar = 60000 / ((cap - 1) * 5);
+    // The key about to be sent counts as well. With only the keys already sent,
+    // the average could sit one keystroke ahead of the budget, which is exactly
+    // the overshoot the bench caught: a race that ends at 119 WPM but reads 130
+    // during its first seconds, right when the game's HUD first refreshes.
+    //
+    // typed === 0 (la primera tecla) tambien pasa por aqui: sin esto la media de
+    // la carrera empezaba en el primer caracter a la velocidad del dedo (600 WPM
+    // en 20 ms), y era el unico tramo del carrera sin tope. Como el retardo
+    // normal ya ronda el msPerChar, en la practica la retencion sale 0.
+    const dueAt = startedAt + (typed + 1) * msPerChar;
+    // Nunca retener 15 s: el servidor descalifica por inactividad a los ~12 s y
+    // una espera larga del gobernador es indistinguible de un bot colgado.
+    // 5.5 s deja margen incluso con el guard de 6 s.
+    const maxHold = Math.max(1000, Math.min(6000, Number(dqGuardMs) || 6000) - 500);
+    const debt = dueAt - now;
+    return { wait: clamp(debt, 0, maxHold), debt, maxHold, msPerChar, cap };
+  }
+
   // Hard ceiling governor. Nitro Type measures WPM as characters per five over
   // the time since the light goes out, so a race's running average can be capped
   // exactly: this returns how long to hold before the next keystroke so that this
   // race can never average past CONFIG.wpm.hardCap - 1. It counts every character
   // already sent (wrong ones included), so it matches the game's own math.
-  function paceCapWait() {
-    const cap = CONFIG.wpm.hardCap;
+  function paceCapWait(now = Date.now()) {
     // Solo las teclas de esta copia: lo que el nitro salto no se tecleo, y el
     // coste ya va repartido en nitroSpread. Contarlo aqui frenaba la carrera
     // entera de golpe justo despues de usarlo.
     const typed = session.chars - session.nitroChars;
-    if (!Number.isFinite(cap) || cap <= 1 || !session.startedAt || typed <= 0) return 0;
+    const governor = paceGovernorAt(session.startedAt, typed, now);
 
-    const msPerChar = 60000 / ((cap - 1) * 5);
-
-    // The key about to be sent counts as well. With only the keys already sent,
-    // the average could sit one keystroke ahead of the budget, which is exactly
-    // the overshoot the bench caught: a race that ends at 119 WPM but reads 130
-    // during its first seconds, right when the game's HUD first refreshes.
-    const dueAt = session.startedAt + (typed + 1) * msPerChar;
-    // Nunca retener 15 s: el servidor descalifica por inactividad a los ~12 s y
-    // una espera larga del gobernador es indistinguible de un bot colgado.
-    // 5.5 s deja margen incluso con el guard de 6 s.
-    const maxHold = Math.max(1000, Math.min(6000, Number(CONFIG.dqGuardMs) || 6000) - 500);
-    return clamp(dueAt - Date.now(), 0, maxHold);
+    // La deuda que el recorte no cubre es la unica forma de que una carrera se
+    // pase del techo: se anota entera (sin recortar) para que el diagnostico no
+    // diga "retuve 5,5 s" cuando en realidad hacia falta medio minuto.
+    if (governor.debt > session.capDebt) session.capDebt = Math.round(governor.debt);
+    return governor.wait;
   }
 
 
@@ -10089,8 +10112,9 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
   // Prueba pura del gobernador sin tocar la carrera real: guarda y restaura
-  // los tres contadores que usa paceCapWait.
-  window.__ntaDebug.paceCapWaitFor = (startedAt, chars, nitroChars = 0) => {
+  // los tres contadores que usa paceCapWait. El reloj es opcional para que el
+  // harness pueda recorrer una carrera entera sin esperar en tiempo real.
+  window.__ntaDebug.paceCapWaitFor = (startedAt, chars, nitroChars = 0, now = Date.now()) => {
     const previous = {
       startedAt: session.startedAt,
       chars: session.chars,
@@ -10099,10 +10123,20 @@ All of this only aims at believable statistics. It is your call and your risk.
     session.startedAt = Number(startedAt) || 0;
     session.chars = Number(chars) || 0;
     session.nitroChars = Number(nitroChars) || 0;
-    const wait = paceCapWait();
+    const wait = paceCapWait(Number(now) || Date.now());
     Object.assign(session, previous);
     return wait;
   };
+  // El nucleo puro, sin efectos: devuelve la retencion y la deuda sin recortar.
+  window.__ntaDebug.paceGovernorFor = (startedAt, typed, now) =>
+    paceGovernorAt(Number(startedAt) || 0, Number(typed) || 0, Number(now) || Date.now());
+  // Constantes del techo, para que el harness no repita los numeros magicos.
+  window.__ntaDebug.wpmCeiling = () => ({
+    cap: CONFIG.wpm.hardCap,
+    dqGuardMs: CONFIG.dqGuardMs,
+    maxHold: paceGovernorAt(1, 1, 1).maxHold,
+    msPerChar: 60000 / ((CONFIG.wpm.hardCap - 1) * 5),
+  });
   window.__ntaDebug.startup = () => ({
     nodes: panel.host && panel.host.shadowRoot
       ? panel.host.shadowRoot.querySelectorAll('*').length
@@ -10845,6 +10879,9 @@ All of this only aims at believable statistics. It is your call and your risk.
         // Mayor recorte del gobernador en la carrera actual: si es grande, el
         // reporte ensena por que una carrera se arrastro sin abrir el log.
         capHoldMs: Math.round(session.capMaxWait || 0),
+        // Deuda que el recorte NO cubre: si supera capHoldMs el gobernador ya no
+        // pudo sujetar el techo. Cero en una carrera normal.
+        capDebtMs: Math.round(Math.max(0, (session.capDebt || 0) - (session.capMaxWait || 0))),
       },
       flags: {
         paused: session.paused,
