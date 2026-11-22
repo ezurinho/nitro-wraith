@@ -11,6 +11,31 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 00:32 · backlog 7 · la deriva de las capturas, medida
+
+- hecho: la deriva no era ruido y no eran animaciones. Son **dos bandas**: el
+  número de versión en la cabecera (`8.14.52` en la baseline) y la línea de
+  ritmo que pinta el panel (`110 · 97.0%` → `105 · 98.7%`). Esa línea sale de
+  `dynamicWpmValues`, una serie **sorteada por perfil** con perfil temporal nuevo
+  en cada corrida, más el contador `typingWpmSessionCount` que avanzan las
+  carreras del propio banco.
+- decisión: **no** se fija la serie. La firma que la valida depende del rango
+  calibrado, que el panel reescribe en caliente (`balanced:10:103:117` vs
+  `104:117`), así que una firma adivinada cae en un sorteo nuevo; y forzarla con
+  el override de WPM manual documentaría un modo manual en una foto de modo auto.
+  Se midió: el pin de precisión sí entró (97), el de WPM no (104 en vez de 110).
+- hecho: la captura escribe `version` y `target` en `fingerprint.json`, `accept`
+  los guarda por imagen, y `compare` los cita en la línea del fallo:
+  `[version 0.0.1 -> 8.14.56 · target 999 · 99.9% -> 105 · 98.7%]`.
+- verificación: `npm test` 80/80 · `npm run check` 367/367 · `npm run visual`
+  15/15 · control con manifiesto falseado y umbral a 0.00001 (nota impresa) y
+  restaurado con `git checkout -- tests/visual`.
+- commit: `fcad994` feat(visual): record the two values that change by themselves
+- siguiente: `createPanel` (724) y `updatePanel` (665) ya piden leer, no mover.
+  Alternativa: backlog 4, partir `tests/live/run.js` (~7,9 k líneas).
+- nota: la release 8.14.57 volvió a caer durante el ciclo; la regla de rebase del
+  runbook se usó otra vez, sin `--force`.
+
 ## 00:14 · backlog 2 · plantilla del panel fuera de `createPanel`
 
 - hecho: las 485 líneas de HTML del shadow root pasan a
