@@ -1,0 +1,31 @@
+# Line endings.
+#
+# nitro-wraith.user.js is published byte for byte as tools/build.js writes it,
+# and that writer emits LF. Storing and checking out every text file with LF
+# keeps the working tree identical on Windows, macOS and Linux, so a checkout
+# never shows as dirty and the harness can compare the artifact exactly.
+#
+# The rules spell `text` out per extension instead of relying on `text=auto`:
+# git's binary heuristic (non-printable bytes * 128 > size) flags the Spanish
+# comments in src/*.js as binary, and `text=auto` silently skips those files.
+* text=auto eol=lf
+
+*.js   text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.svg  text eol=lf
+
+# Images are reference files (artwork and visual baselines): never convert them.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
