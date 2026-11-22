@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.57 — 2026-11-22
+
+- refactor(panel): move the shadow-root markup out of createPanel
+- feat(tools): map a module before splitting it
+
 ## 8.14.56 — 2026-11-22
 
 - refactor(panel): move the rail and the slider fills
