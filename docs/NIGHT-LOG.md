@@ -11,6 +11,23 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 23:40 · backlog 2 · partir `80-panel.js` por vistas (segundo bloque)
+
+- hecho: la sección del rail (`TAB_ORDER`, `hydrateView`, `showTab`) y el relleno
+  de los cinco deslizadores pasan a `src/82-panel-rail.js`, 147 líneas.
+  `80-panel.js` queda en 5187 (venía de 5333). `TAB_ORDER` viaja con su único
+  lector, `showTab`: nada más en el árbol lo referencia.
+- verificación: `npm test` 80/80 · `npm run check` 367/367 · `npm run visual`
+  15/15 · build de 18 módulos, 998077 bytes. Artefacto nuevo contra el anterior:
+  7 líneas de comentario, **ninguna línea de código distinta**.
+- commit: `0f6c81a` refactor(panel): move the rail and the slider fills
+- siguiente: "Daily Challenges" (2158 líneas, el bloque más grande que queda) o
+  el delta de precisión (590) o `90-queue.js`.
+- nota: el corte anterior dejó a mano el borde del bloque (la línea 978 es un
+  salto, no el `}`), y las tres ediciones de manifiesto fallaron por CRLF en
+  `tools/build.js` y `src/README.md`. Se detectó por las aserciones y se rehízo
+  con el borde correcto; el artefacto confirma que no se perdió nada.
+
 ## 23:32 · backlog 2 · partir `80-panel.js` por vistas
 
 - hecho: el bloque de tema (`paintTheme`, `setTheme`, `cycleTheme`) y los cinco

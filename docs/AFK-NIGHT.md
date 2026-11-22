@@ -32,6 +32,11 @@ Reglas que el ciclo no cruza:
   perfil de Chrome del usuario.
 - Dos fallos seguidos en el mismo elemento: `blocked` en `NIGHT-LOG.md` y a por
   el siguiente. `git checkout -- .` antes de terminar el ciclo.
+- Si al empezar el árbol tiene cambios sin commitear que no vienen de una entrada
+  de `NIGHT-LOG.md` (un ciclo cortado a mitad por un reinicio de la app), no se
+  commitean a ciegas: `git stash push -m "ciclo cortado HH:MM"`, se anota en el
+  registro y se sigue con el siguiente elemento. Un árbol sucio al arrancar es la
+  forma más fácil de que la noche se descarrile en silencio.
 
 ## Backlog, en orden
 
