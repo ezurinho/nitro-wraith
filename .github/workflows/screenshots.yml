@@ -28,7 +28,7 @@ jobs:
       - name: Capture panel themes
         env:
           SHOT_DIR: screenshots/current
-        run: npm test
+        run: npm run test:live
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
