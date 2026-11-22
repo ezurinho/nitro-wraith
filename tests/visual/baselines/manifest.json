@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "capturedAt": "2026-11-19T01:02:35.376Z",
+  "capturedAt": "2026-11-22T04:55:34.481Z",
   "engine": {
     "product": "Chrome/157.0.8103.80",
     "browser": "Chrome",
@@ -87,7 +87,7 @@
       "height": 2264
     },
     "view-garage-idle.png": {
-      "sha256": "5adadd1ee8f08a0446b625b9755b9653434d4689746b442240319289ddda35a1",
+      "sha256": "e3dcbfb206248198c56c462223354bcb828c14243eb7157180888213f75d2bc2",
       "width": 656,
       "height": 874
     },
@@ -97,7 +97,7 @@
       "height": 920
     },
     "view-garage-stopped.png": {
-      "sha256": "e380079fd63ebaef2e8cabe027c9c0f3bd0a287bf50529179a406e3c3fb060fc",
+      "sha256": "38dc36a2fe5f41e90d98bb2fcf0862b8c363d368a9e9e6e7ec5b1ee5c6300267",
       "width": 656,
       "height": 1064
     }
