@@ -37,6 +37,11 @@ Reglas que el ciclo no cruza:
   commitean a ciegas: `git stash push -m "ciclo cortado HH:MM"`, se anota en el
   registro y se sigue con el siguiente elemento. Un árbol sucio al arrancar es la
   forma más fácil de que la noche se descarrile en silencio.
+- Si el `push` lo rechaza el remoto (otra mano publicó una release mientras el
+  ciclo trabajaba): `git fetch origin`, `git rebase origin/main`, `npm test` y
+  `node tools/build.js --check` otra vez —una release del remoto reescribe la
+  versión y el artefacto, así que lo que estaba en verde puede dejar de estarlo—
+  y se empuja de nuevo. Nunca `--force`.
 
 ## Backlog, en orden
 
