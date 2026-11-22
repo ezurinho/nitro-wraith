@@ -898,9 +898,27 @@ async function capturePanelThemes(cdp, appUrl) {
     // La huella dice con que navegador y plataforma se tomaron las fotos: las
     // fuentes no son iguales en todas partes y el informe lo avisa antes de
     // mandar a nadie a mirar un diff que solo es texto con otra tipografia.
+    //
+    // Ademas guarda los dos valores que cambian solos de una corrida a otra y
+    // que no son regresiones: la version del script (sube con cada release, se
+    // ve en el panel) y el objetivo de ritmo que el panel pinta ("110 · 97.0%"),
+    // que sale de una serie sorteada por perfil mas el contador de sesion que
+    // avanzan las carreras del banco. Con esto el informe puede decir "la linea
+    // de ritmo cambio de 110 a 104" en vez de mandar a recortar PNGs.
     if (VISUAL_CAPTURE) {
       try {
         const version = await cdp.send('Browser.getVersion');
+        let target = null;
+        try {
+          target = await cdp.evaluate(`(() => {
+            const frame = document.querySelector('iframe');
+            const w = frame && frame.contentWindow;
+            const host = w && w.document.getElementById('nt-autotyper-panel');
+            const root = host && host.shadowRoot;
+            const el = root && root.querySelector('[data-field="target"]');
+            return el ? el.textContent.trim() : null;
+          })()`);
+        } catch { /* la vista ya no esta montada */ }
         fs.mkdirSync(SHOT_DIR, { recursive: true });
         fs.writeFileSync(path.join(SHOT_DIR, 'fingerprint.json'), `${JSON.stringify({
           at: new Date().toISOString(),
@@ -910,6 +928,7 @@ async function capturePanelThemes(cdp, appUrl) {
             platform: `${process.platform} ${os.release()}`,
           },
           viewport: { width: 520, height: 1200, deviceScaleFactor: 2 },
+          state: { version: SCRIPT_VERSION, target },
         }, null, 2)}\n`);
       } catch { /* la captura ya esta hecha */ }
     }

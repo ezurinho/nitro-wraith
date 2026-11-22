@@ -404,6 +404,24 @@ function compare() {
           width: compared.width,
           height: compared.height,
         });
+        // La version y el objetivo de ritmo se ven en la foto y cambian solos:
+        // una release sube el numero de version, y el objetivo. Cuando la
+        // baseline se acepto con otros valores, el aviso lo dice en la misma
+        // linea del fallo en vez de dejarlo a que alguien recorte el PNG.
+        if (!row.ok) {
+          const was = (manifest.images && manifest.images[shot.file] && manifest.images[shot.file].state) || null;
+          const now = fingerprint.state || null;
+          if (was && now) {
+            const moved = [];
+            if (was.version && now.version && was.version !== now.version) {
+              moved.push(`version ${was.version} -> ${now.version}`);
+            }
+            if (was.target && now.target && was.target !== now.target) {
+              moved.push(`target ${was.target} -> ${now.target}`);
+            }
+            if (moved.length) row.stateNote = moved.join(' · ');
+          }
+        }
         if (compared.overlay) {
           const diffFile = path.join(CURRENT_DIR, `diff-${shot.id}.png`);
           fs.writeFileSync(diffFile, encodePng(compared.width, compared.height, compared.overlay));
@@ -435,7 +453,8 @@ function compare() {
     const pct = `${(row.ratio * 100).toFixed(3)}%`;
     const state = row.ok ? 'ok  ' : 'FAIL';
     const extra = row.ok ? '' : `  bbox ${row.bbox ? `${row.bbox.width}x${row.bbox.height}@${row.bbox.x},${row.bbox.y}` : 'n/a'}`;
-    console.log(`visual: ${row.label.padEnd(18)} ${state} ${pct.padStart(8)} of ${row.pixels} px (${row.changed} changed)${extra}`);
+    const note = row.stateNote ? `  [${row.stateNote}]` : '';
+    console.log(`visual: ${row.label.padEnd(18)} ${state} ${pct.padStart(8)} of ${row.pixels} px (${row.changed} changed)${extra}${note}`);
   }
   console.log(`visual: threshold ${(cfg.maxDiffRatio * 100).toFixed(2)}% · channel tolerance ${cfg.channelTolerance}/255`);
   console.log(`visual: report ${path.relative(ROOT, REPORT_FILE)}`);
@@ -482,6 +501,7 @@ function accept() {
       sha256: sha256(buffer),
       width: decoded.width,
       height: decoded.height,
+      state: fingerprint.state || null,
     };
   }
 
