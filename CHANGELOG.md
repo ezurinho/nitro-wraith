@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.56 — 2026-11-22
+
+- refactor(panel): move the rail and the slider fills
+
 ## 8.14.55 — 2026-11-22
 
 - refactor(panel): move the theme block and the storage bridges
