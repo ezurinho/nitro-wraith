@@ -47,8 +47,10 @@ Reglas que el ciclo no cruza:
 
 1. ~~Partir el CSS de `src/80-panel.js`~~ — hecho: `src/79-panel-css.js`, CSS
    idéntico byte a byte.
-2. Partir el resto de `src/80-panel.js` (~5,5 k líneas) por vistas: garaje, TUNE,
-   LOG, salud y controles.
+2. Partir `80-panel.js` (~5,2 k líneas) **por funciones, no por títulos**: el
+   grueso es `createPanel` (1210 líneas) y `updatePanel` (665). Ahí dentro viven
+   la plantilla HTML y el cableado de eventos, así que las "vistas" no son
+   fronteras. El mapa está en `docs/PANEL-MAP.md` (`node tools/panel-map.js`).
 3. Partir `src/90-queue.js` (~5 k líneas).
 4. Partir `tests/live/run.js` (~7,9 k líneas).
 5. ESLint (`no-undef`, `no-unused-vars`, `eqeqeq`) sobre `tools/` y `tests/`, con

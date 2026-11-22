@@ -11,6 +11,25 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 00:02 · backlog 2 · mapa antes de más cirugía
+
+- hecho: `tools/panel-map.js` lista cada declaración de primer nivel con su
+  línea, tipo y hueco hasta la siguiente, y `docs/PANEL-MAP.md` guarda el
+  resultado de `80-panel.js` (279 filas, 5187 líneas, 386 funciones y 266
+  declaraciones de estado en todo `src/`). Añadido a `npm run check`.
+- hallazgo: los títulos de sección **no** son fronteras. `createPanel` son 1210
+  líneas y `updatePanel` 665: entre las dos, 1875 de 5187, y las vistas (garaje,
+  TUNE, LOG) viven dentro, con la plantilla HTML y el cableado de eventos. Partir
+  "por vistas" mueve código ajeno; el primer intento lo hizo (tema arrastraba
+  filtros de TUNE, salud y configuración; temporada arrastra el bucle de refresco
+  del panel y el pace vivo). El backlog queda reescrito: partir por funciones.
+- verificación: `npm test` 80/80 · `npm run check` 367/367 · build sin tocar
+  (18 módulos, 998077 bytes) · `node tools/panel-map.js` cierra con 5183 líneas
+  cubiertas de 5187, sin filas fuera del archivo.
+- commit: pendiente en este mismo ciclo
+- siguiente: partir `createPanel` por lo que de verdad contiene (plantilla HTML
+  primero, que es lo más mecánico).
+
 ## 23:40 · backlog 2 · partir `80-panel.js` por vistas (segundo bloque)
 
 - hecho: la sección del rail (`TAB_ORDER`, `hydrateView`, `showTab`) y el relleno
