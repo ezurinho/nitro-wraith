@@ -1,7 +1,7 @@
 <#
   Lanza la sesion nocturna del userscript en el navegador de verdad.
 
-  Chrome congela los temporizadores de una pestaña en segundo plano, la descarta
+  Chrome congela los temporizadores de una pestana en segundo plano, la descarta
   cuando anda bajo de memoria y pausa requestAnimationFrame cuando la ventana
   queda tapada. Los tres matan una noche de carreras: el tipador se queda
   esperando un frame que no llega y el juego lo da por inactivo a los 12 s. Las
@@ -11,7 +11,7 @@
     pwsh -File tools/afk-night.ps1              # detecta el navegador y lanza
     pwsh -File tools/afk-night.ps1 -DryRun      # solo muestra la linea de comando
     pwsh -File tools/afk-night.ps1 -Browser brave
-    pwsh -File tools/afk-night.ps1 -Reuse       # ya hay uno abierto: solo abre la pestaña
+    pwsh -File tools/afk-night.ps1 -Reuse       # ya hay uno abierto: solo abre la pestana
 
   Deja la ventana a la vista. Minimizarla no rompe nada con estas banderas, pero
   taparla con otra ventana a pantalla completa es justo el caso que Chrome trata
@@ -63,7 +63,7 @@ $profileRoot = switch ($chosen) {
 }
 
 $flags = @(
-  '--disable-background-timer-throttling'   # temporizadores de pestaña oculta
+  '--disable-background-timer-throttling'   # temporizadores de pestana oculta
   '--disable-backgrounding-occluded-windows' # ventanas tapadas
   '--disable-renderer-backgrounding'         # prioridad del renderer
   '--disable-features=CalculateNativeWinOcclusion,MemorySaverMode'
@@ -73,7 +73,7 @@ $flags = @(
 
 $running = @(Get-Process -Name $chosen -ErrorAction SilentlyContinue)
 if ($running.Count -gt 0 -and -not $Reuse) {
-  Write-Warning "$chosen ya esta abierto ($($running.Count) procesos): una segunda instancia reusa la primera y descarta las banderas. Cierra $chosen y vuelve a lanzar, o usa -Reuse para abrir solo la pestaña."
+  Write-Warning "$chosen ya esta abierto ($($running.Count) procesos): una segunda instancia reusa la primera y descarta las banderas. Cierra $chosen y vuelve a lanzar, o usa -Reuse para abrir solo la pestana."
 }
 
 if (-not (Test-Path -LiteralPath $profileRoot)) {
@@ -84,24 +84,25 @@ if (-not (Test-Path -LiteralPath $profileRoot)) {
   Write-Host '   3. inicia sesion en nitrotype.com con la cuenta del userscript' -ForegroundColor Yellow
 }
 
-if ($Install) {
-  $raw = 'https://raw.githubusercontent.com/ezurinho/nitro-wraith/main/nitro-wraith.user.js'
-  Write-Host "abriendo la instalacion del userscript: $raw"
-  if (-not $DryRun) { Start-Process -FilePath $exe -ArgumentList @($raw) | Out-Null }
-  return
-}
-
 if ($Reuse) {
   Write-Host "abriendo $Url en la instancia ya abierta de $chosen"
   if (-not $DryRun) { Start-Process -FilePath $exe -ArgumentList @($Url) | Out-Null }
   return
 }
 
-$args = $flags + @($Url)
+# -Install abre la pagina de instalacion en la misma ventana con banderas, para
+# no tener que cerrar el navegador despues de instalar.
+$targets = @()
+if ($Install) {
+  $targets += 'https://raw.githubusercontent.com/ezurinho/nitro-wraith/main/nitro-wraith.user.js'
+}
+$targets += $Url
+
+$args = $flags + $targets
 Write-Host ("{0} -> {1}" -f $chosen, $exe)
 Write-Host ("argumentos: {0}" -f ($args -join ' '))
 if ($DryRun) { return }
 
 $proc = Start-Process -FilePath $exe -ArgumentList $args -PassThru
-Write-Host "pid $($proc.Id)  ·  la ventana queda a la vista; no la cierres hasta la mañana" -ForegroundColor Green
-Write-Host 'Comprobacion en 30 s: el panel tiene que decir  state  waiting · starts by itself' -ForegroundColor DarkGray
+Write-Host "pid $($proc.Id)  -  la ventana queda a la vista; no la cierres hasta la manana" -ForegroundColor Green
+Write-Host 'Comprobacion en 30 s: el panel tiene que decir  state  waiting - starts by itself' -ForegroundColor DarkGray

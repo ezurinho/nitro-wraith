@@ -22,6 +22,13 @@ espera un frame que Chrome no entrega y el juego lo da por inactivo a los 12 s.
 
 Deja la ventana a la vista. Cerrarla termina la noche.
 
+Para confirmar que el script quedo instalado de verdad (Tampermonkey guarda sus
+scripts en leveldb, no en un archivo de texto):
+
+```powershell
+pwsh -Command "$d = Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Local Extension Settings\dhdgffkkebhmkfjojejmpbldmpobfkfo'; Select-String -Path (Join-Path $d '*.log') -Pattern 'nitro-wraith' | Select-Object -First 1"
+```
+
 ## Qué puede parar la pista A
 
 | Parada | Señal en el panel | Remedio |
