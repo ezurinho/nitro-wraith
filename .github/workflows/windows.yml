@@ -1,0 +1,47 @@
+name: windows
+
+# The rest of the workflows run on ubuntu-latest. The userscript ships to Windows
+# users, the checkout there uses core.autocrlf=true, and the harness compares the
+# built artifact by content: a line-ending regression passes on Linux and breaks
+# on Windows. This job is the only place that path is exercised.
+#
+# It runs the offline gate only (`npm test`: build sync + tests/live/live.test.js)
+# so it needs no browser and finishes in well under a minute.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Check the checkout uses LF
+        shell: pwsh
+        run: |
+          # The artifact is published byte for byte as tools/build.js writes it
+          # (LF). .gitattributes has to keep the Windows checkout identical.
+          $file = 'nitro-wraith.user.js'
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $file))
+          $cr = ($bytes | Where-Object { $_ -eq 13 }).Count
+          Write-Host "$file : $($bytes.Length) bytes, $cr CR bytes"
+          if ($cr -ne 0) {
+            Write-Error "CRLF in the working tree: .gitattributes is not being applied"
+            exit 1
+          }
+      - name: Run the offline checks
+        run: npm test
