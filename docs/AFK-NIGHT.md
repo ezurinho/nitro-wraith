@@ -43,10 +43,14 @@ quieres una noche sin freno, déjalos en `0` y `raceLimit` en `0` (tanda libre).
 
 ## Pista B — el repositorio
 
-Un ciclo cada 45 minutos, en este mismo hilo, con el backlog de abajo: **un
+Un ciclo cada 10 minutos, en este mismo hilo, con el backlog de abajo: **un
 arreglo por ciclo**, `npm test` en verde, un commit y push a `main`. Cada ciclo
 anota lo que hizo en `docs/NIGHT-LOG.md`, así que el estado vive en disco y no en
 la memoria del chat.
+
+El banco de navegador corre `--headless=new` con un perfil temporal: **no abre
+ventana**, así que `npm run check` y `npm run visual` se pueden usar. Lo que no se
+abre nunca es un navegador visible, y el userscript no se ejecuta fuera del banco.
 
 Reglas que el ciclo no cruza:
 
@@ -60,13 +64,14 @@ Reglas que el ciclo no cruza:
 
 Backlog, en orden:
 
-1. Partir `src/80-panel.js` (6,2 k líneas) en módulos con el guard de `MODULES`.
-2. Partir `src/90-queue.js` (5 k líneas).
-3. Partir `tests/live/run.js` (~7,9 k líneas).
-4. ESLint (`no-undef`, `no-unused-vars`, `eqeqeq`) sobre `tools/` y `tests/`, con
+1. ~~Partir el CSS de `src/80-panel.js`~~ — hecho: `src/79-panel-css.js`.
+2. Partir el resto de `src/80-panel.js` (~5,5 k líneas).
+3. Partir `src/90-queue.js` (5 k líneas).
+4. Partir `tests/live/run.js` (~7,9 k líneas).
+5. ESLint (`no-undef`, `no-unused-vars`, `eqeqeq`) sobre `tools/` y `tests/`, con
    gate en `npm test`.
-5. Job de CI para `npm run visual` en ubuntu, con baselines generadas ahí.
-6. Deriva de ~300 px entre corridas en las 6 capturas de tema y en `log · idle`:
+6. Job de CI para `npm run visual` en ubuntu, con baselines generadas ahí.
+7. Deriva de ~300 px entre corridas en las 6 capturas de tema y en `log · idle`:
    identificar el valor que cambia y congelarlo.
 
 ## Mañana
