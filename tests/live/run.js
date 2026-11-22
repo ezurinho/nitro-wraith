@@ -25,6 +25,7 @@ const { PANEL_READ } = require('./panel-read');
 const ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURES = path.join(__dirname, 'fixtures');
 const SCRIPT = path.join(ROOT, 'nitro-wraith.user.js');
+const BUILD_TOOL = path.join(ROOT, 'tools', 'build.js');
 const SCRIPT_VERSION = (fs.readFileSync(SCRIPT, 'utf8').match(/@version\s+(\S+)/) || [])[1] || '';
 const SHOT_DIR = process.env.SHOT_DIR ? path.resolve(ROOT, process.env.SHOT_DIR) : '';
 // La regresion visual necesita una foto reproducible: reloj congelado y sin
@@ -1129,11 +1130,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
 
   // El artefacto instalable se genera desde fragmentos ordenados; esta prueba
   // compara el contenido completo para que un build olvidado no llegue al Gist.
-  const sourceOrder = [
-    '00-header.js', '10-config.js', '20-utils.js', '30-profile.js', '32-history.js',
-    '40-dom.js', '50-state.js', '60-pacing.js', '70-session.js', '72-results.js',
-    '80-panel.js', '90-queue.js', '95-stickers.js', '96-guard.js', '97-boot.js',
-  ];
+  // El orden se lee del manifiesto de tools/build.js y no de una copia local:
+  // la copia se desincronizo en silencio al partir el tema del panel, y esta
+  // prueba siguio comparando quince modulos contra un artefacto de diecisiete.
+  const buildManifest = (fs.readFileSync(BUILD_TOOL, 'utf8').match(/const MODULES = \[([\s\S]*?)\];/) || [])[1] || '';
+  const sourceOrder = [...buildManifest.matchAll(/'([^']+\.js)'/g)].map((match) => match[1]);
   const sourceDir = path.join(ROOT, 'src');
   const sourceText = sourceOrder
     .filter((name) => fs.existsSync(path.join(sourceDir, name)))
@@ -1141,8 +1142,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     .join('');
   const renderedSource = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n?/g, '\n');
   check('the userscript is rebuilt from the ordered internal modules',
-    sourceText.length > 0 && sourceText === renderedSource,
-    { modules: sourceOrder.length, bytes: sourceText.length });
+    sourceOrder.length > 0 && sourceText !== undefined && sourceText === renderedSource,
+    { modules: sourceOrder.length, bytes: sourceText.length,
+      missing: sourceOrder.filter((name) => !fs.existsSync(path.join(sourceDir, name))) });
 
   // Auto-update barato: el @updateURL apunta al meta pequeno del Gist y el
   // @downloadURL al script completo. Sin SHA en la URL, para que no se congele.

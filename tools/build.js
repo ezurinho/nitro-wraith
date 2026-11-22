@@ -31,6 +31,7 @@ const MODULES = [
   '72-results.js',
   '79-panel-css.js',
   '80-panel.js',
+  '81-panel-theme.js',
   '90-queue.js',
   '95-stickers.js',
   '96-guard.js',
