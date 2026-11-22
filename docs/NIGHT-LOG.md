@@ -11,6 +11,22 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 00:14 · backlog 2 · plantilla del panel fuera de `createPanel`
+
+- hecho: las 485 líneas de HTML del shadow root pasan a
+  `src/83-panel-html.js` como `PANEL_HTML`; `createPanel` solo asigna. Interpola
+  cuatro constantes de módulo (`PANEL_CSS`, `CHANNEL`, dos URLs) y **ninguna
+  variable local**, así que el texto viaja literal. El módulo se evalúa después
+  de `79-panel-css.js` porque `PANEL_CSS` tiene que existir al armar la cadena.
+  `createPanel` 1210 → **724** líneas; `80-panel.js` 5187 → **4701**.
+- verificación: `npm test` 80/80 · `npm run check` 367/367 · `npm run visual`
+  15/15 · build de 19 módulos, 998746 bytes · cadena HTML idéntica byte a byte
+  (**51278** caracteres en los dos artefactos).
+- commit: `e1b5665` refactor(panel): move the shadow-root markup out of createPanel
+- siguiente: `createPanel` sigue con 724 líneas (cableado de eventos y refs).
+  `updatePanel` son 665 y no se ha tocado: o se parte su cuerpo por bloques de
+  repintado, o se sigue con `90-queue.js` (backlog 3).
+
 ## 00:02 · backlog 2 · mapa antes de más cirugía
 
 - hecho: `tools/panel-map.js` lista cada declaración de primer nivel con su
