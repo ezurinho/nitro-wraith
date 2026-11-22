@@ -29,6 +29,7 @@ const MODULES = [
   '60-pacing.js',
   '70-session.js',
   '72-results.js',
+  '79-panel-css.js',
   '80-panel.js',
   '90-queue.js',
   '95-stickers.js',

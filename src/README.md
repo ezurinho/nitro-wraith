@@ -20,7 +20,8 @@ listed in `tools/build.js`:
 | `60-pacing.js` | Typing model, accuracy, nitro and logs |
 | `70-session.js` | Session control and the main race loop |
 | `72-results.js` | Race results, rewards and optional sounds |
-| `80-panel.js` | Panel, garage, TUNE, AFK controls and styles |
+| `79-panel-css.js` | Panel stylesheet (one `<style>` block, no interpolation) |
+| `80-panel.js` | Panel, garage, TUNE, AFK controls |
 | `90-queue.js` | Queue, navigation and recovery |
 | `95-stickers.js` | Sticker selection |
 | `96-guard.js` | WPM guard and duplicate-instance protection |

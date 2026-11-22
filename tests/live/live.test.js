@@ -34,6 +34,24 @@ const SRC_DIR = path.join(__dirname, '..', '..', 'src');
 const SCRIPT_PATH = path.join(__dirname, '..', '..', 'nitro-wraith.user.js');
 const SPAWN_TIMEOUT_MS = 25000;
 
+// El CSS del panel vive en su propio modulo y el artefacto lo inyecta con una
+// plantilla, asi que buscarlo entre las etiquetas devuelve vacio. Se resuelve la
+// interpolacion igual que lo hara el navegador, y si algun dia el CSS vuelve a
+// ir en linea se acepta esa forma tambien: lo que no se acepta es un CSS que no
+// se puede leer, porque entonces las comprobaciones de paleta y contraste
+// pasarian a mirar una cadena vacia y dirian que todo esta bien.
+function panelCssFrom(script) {
+  const marker = 'const PANEL_CSS = `';
+  const at = script.indexOf(marker);
+  if (at >= 0 && script.includes('<style>${PANEL_CSS}</style>')) {
+    const end = script.indexOf('`;\n', at + marker.length);
+    return end < 0 ? '' : script.slice(at + marker.length, end);
+  }
+  const open = script.indexOf('      <style>');
+  const close = open < 0 ? -1 : script.indexOf('      </style>', open);
+  return close < 0 ? '' : script.slice(open, close);
+}
+
 // Los artefactos se comparan sin finales de linea: el contrato es que el build
 // de prueba no cambie su CONTENIDO, y en un checkout CRLF (core.autocrlf sin
 // .gitattributes aplicado) una igualdad byte a byte daba un falso negativo.
@@ -789,7 +807,7 @@ async function runCase(item) {
   // lista todas, la eleccion se guarda con su propia clave y el panel pequeno
   // del garaje recibe la misma piel.
   const themeScript = fs.readFileSync(SCRIPT_PATH, 'utf8');
-  const themeCss = themeScript.slice(themeScript.indexOf('      <style>'), themeScript.indexOf('      </style>'));
+  const themeCss = panelCssFrom(themeScript);
   const themeNames = ['carbon', 'aurora', 'sunset', 'ice', 'violet', 'rgb'];
   unit('every panel theme has a palette, a tile and a saved key',
     themeNames.every((name) => themeCss.includes(`.panel[data-theme="${name}"]`)
