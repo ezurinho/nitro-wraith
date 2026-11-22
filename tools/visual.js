@@ -38,6 +38,26 @@ function fail(message) {
   process.exit(1);
 }
 
+// `--only <texto>` limita la orden a las capturas cuyo id, archivo o etiqueta
+// contenga ese texto. Sin el, `accept` sobrescribe las quince baselines de una
+// vez y un cambio de layout arrastra consigo las regresiones que vinieron con
+// el: aceptar `log` no tiene por que aceptar `garage`.
+function onlyFilter() {
+  const at = process.argv.indexOf('--only');
+  if (at < 0) return '';
+  const value = String(process.argv[at + 1] || '').trim().toLowerCase();
+  if (!value) fail('--only needs a value, for example --only log');
+  return value;
+}
+
+function selectShots(shots) {
+  const only = onlyFilter();
+  if (!only) return shots;
+  const matched = shots.filter((shot) => `${shot.id} ${shot.file} ${shot.label}`.toLowerCase().includes(only));
+  if (!matched.length) fail(`--only ${only} matches no shot`);
+  return matched;
+}
+
 function readJson(file, fallback = null) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -352,8 +372,9 @@ function compare() {
 
   const results = [];
   let failed = 0;
+  const shots = selectShots(shotList(cfg));
 
-  for (const shot of shotList(cfg)) {
+  for (const shot of shots) {
     const baselineFile = path.join(BASELINE_DIR, shot.file);
     const currentFile = path.join(CURRENT_DIR, shot.file);
     const row = {
@@ -418,6 +439,9 @@ function compare() {
   }
   console.log(`visual: threshold ${(cfg.maxDiffRatio * 100).toFixed(2)}% · channel tolerance ${cfg.channelTolerance}/255`);
   console.log(`visual: report ${path.relative(ROOT, REPORT_FILE)}`);
+  if (shots.length !== shotList(cfg).length) {
+    console.log(`visual: compared ${shots.length} of ${shotList(cfg).length} shots (--only)`);
+  }
 
   if (failed) {
     console.error(`visual: ${failed}/${results.length} shots outside the threshold. Diff images are in ${path.relative(ROOT, CURRENT_DIR)}.`);
@@ -431,16 +455,20 @@ function compare() {
 function accept() {
   const cfg = config();
   const fingerprint = readJson(path.join(CURRENT_DIR, 'fingerprint.json'), {});
-  const shots = shotList(cfg);
+  const only = onlyFilter();
+  const shots = selectShots(shotList(cfg));
   const images = {};
-  const expected = new Set(shots.map((shot) => shot.file));
+  const expected = new Set(shotList(cfg).map((shot) => shot.file));
 
   fs.mkdirSync(BASELINE_DIR, { recursive: true });
   // Una baseline retirada del config se borra para que nadie la confunda con
-  // una captura viva; el resto del directorio no se toca.
-  for (const file of fs.readdirSync(BASELINE_DIR)) {
-    if (/^(theme|view)-.*\.png$/.test(file) && !expected.has(file)) {
-      fs.rmSync(path.join(BASELINE_DIR, file), { force: true });
+  // una captura viva; el resto del directorio no se toca. Con --only no se
+  // poda nada: lo que no se acepto sigue siendo baseline valida.
+  if (!only) {
+    for (const file of fs.readdirSync(BASELINE_DIR)) {
+      if (/^(theme|view)-.*\.png$/.test(file) && !expected.has(file)) {
+        fs.rmSync(path.join(BASELINE_DIR, file), { force: true });
+      }
     }
   }
 
@@ -457,6 +485,9 @@ function accept() {
     };
   }
 
+  // Con --only el manifiesto se fusiona: las baselines que no se aceptaron
+  // siguen siendo las mismas y no pueden desaparecer del indice.
+  const previous = readJson(MANIFEST_FILE, {});
   const manifest = {
     version: 2,
     capturedAt: new Date().toISOString(),
@@ -468,10 +499,10 @@ function accept() {
       maxDiffRatio: cfg.maxDiffRatio,
       channelTolerance: cfg.channelTolerance,
     },
-    images,
+    images: only ? { ...(previous.images || {}), ...images } : images,
   };
   fs.writeFileSync(MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`visual: ${shots.length} baselines saved in ${path.relative(ROOT, BASELINE_DIR)}`);
+  console.log(`visual: ${shots.length} baseline(s) saved in ${path.relative(ROOT, BASELINE_DIR)}${only ? ` (--only ${only})` : ''}`);
 }
 
 function main() {
@@ -486,7 +517,7 @@ function main() {
   }
   if (command === 'accept') {
     // Aceptar sin capturas frescas seria guardar lo que hubiera en current.
-    const first = shotList(config())[0];
+    const first = selectShots(shotList(config()))[0];
     if (!first || !fs.existsSync(path.join(CURRENT_DIR, first.file))) {
       if (!capture()) return;
     }
@@ -497,7 +528,7 @@ function main() {
     if (capture()) compare();
     return;
   }
-  console.error('usage: node tools/visual.js [run|capture|compare|accept]');
+  console.error('usage: node tools/visual.js [run|capture|compare|accept] [--only <text>]');
   process.exit(2);
 }
 
