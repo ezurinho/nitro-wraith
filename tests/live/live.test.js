@@ -30,8 +30,9 @@ const REPORT = path.join(__dirname, 'report.js');
 const EXPORT = path.join(__dirname, '..', '..', 'tools', 'export-downloads.js');
 const CANARY = path.join(__dirname, '..', '..', 'tools', 'canary.js');
 const BUILD_TOOL = path.join(__dirname, '..', '..', 'tools', 'build.js');
-const SRC_DIR = path.join(__dirname, '..', '..', 'src');
-const SCRIPT_PATH = path.join(__dirname, '..', '..', 'nitro-wraith.user.js');
+const ROOT_DIR = path.join(__dirname, '..', '..');
+const SRC_DIR = path.join(ROOT_DIR, 'src');
+const SCRIPT_PATH = path.join(ROOT_DIR, 'nitro-wraith.user.js');
 const SPAWN_TIMEOUT_MS = 25000;
 
 // El CSS del panel vive en su propio modulo y el artefacto lo inyecta con una
@@ -403,6 +404,50 @@ async function runCase(item) {
   }
   unit('src/README.md lists the modules in concatenation order',
     orderProblems.length === 0, orderProblems.join(' · '));
+
+  // Gate de estilo sin dependencias. Tres reglas que ya costaron un bug real y
+  // que se pueden comprobar sobre el codigo fuente, donde el aviso apunta al
+  // archivo y a la linea, en vez de sobre el artefacto concatenado.
+  //   - `==` y `!=` solo contra null: es el unico uso que no esconde una
+  //     conversion de tipo (un `'0' == 0` convertido en bug de conteo).
+  //   - nada de `debugger;` que se cuele en una release.
+  //   - ni `.only(` ni `.skip(` en los tests: un foco olvidado encoge el gate y
+  //     lo deja verde con la mitad de las comprobaciones.
+  const looseEquality = [];
+  const debuggers = [];
+  for (const name of onDisk) {
+    const lines = readNormalized(path.join(SRC_DIR, name)).split('\n');
+    lines.forEach((line, index) => {
+      const code = line.replace(/\/\/.*$/, '');
+      const loose = code.match(/[^=!<>](?:==|!=)(?!=|=)\s*([^;)\s]*)/);
+      if (loose && !/^null\b/.test(loose[1] || '')) {
+        looseEquality.push(`${name}:${index + 1} ${line.trim().slice(0, 70)}`);
+      }
+      if (/\bdebugger\b/.test(code)) debuggers.push(`${name}:${index + 1}`);
+    });
+  }
+  unit('source compares with === everywhere except a null check',
+    looseEquality.length === 0, looseEquality.slice(0, 4).join(' · '));
+  unit('source ships no debugger statement',
+    debuggers.length === 0, debuggers.join(', '));
+
+  const focusedTests = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!entry.name.endsWith('.js')) continue;
+      readNormalized(full).split('\n').forEach((line, index) => {
+        if (/\.(only|skip)\(/.test(line.replace(/\/\/.*$/, ''))) {
+          focusedTests.push(`${path.relative(ROOT_DIR, full)}:${index + 1}`);
+        }
+      });
+    }
+  };
+  for (const dir of ['tests', 'tools']) walk(path.join(ROOT_DIR, dir));
+  unit('no test file leaves a focused or skipped case behind',
+    focusedTests.length === 0, focusedTests.join(', '));
 
   // El lanzador se prueba por su comando, sin abrir un navegador de verdad.
   const args = buildArgs({ port: 9333, profile: 'C:\\profile test' });
