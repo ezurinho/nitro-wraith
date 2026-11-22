@@ -1,5 +1,14 @@
 # Changelog
 
+## 8.14.54 — 2026-11-22
+
+- fix(guard): keep the elected copy when the registry is trimmed
+- fix(pace): hold the ceiling from the first keystroke and prove it in the harness
+- test: fail when src/ and the build manifest disagree
+- fix(test): make npm test the synced offline gate and keep the harness apart
+- fix(build): stop rewriting the artifacts on line-ending drift
+- test: cover the tune, log and garage views in the visual regression
+
 ## 8.14.53 — 2026-11-19
 
 - feat: add a recent accuracy readout
