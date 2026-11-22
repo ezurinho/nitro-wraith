@@ -14,21 +14,20 @@ dist/
 Nitro Type userscript.txt
 NITRO WRAITH*.txt
 *.log
+
+# Every PNG is a local capture unless a rule below says otherwise. The `**`
+# patterns are what make the exceptions recursive: a plain `!dir/` does not
+# re-include files inside subdirectories, so a new baselines folder was ignored
+# without warning.
 *.png
+!assets/**/*.png
+!tests/visual/baselines/**/*.png
+tests/visual/current/
+tests/visual/diff/
 
 # Generated test data (may contain account names)
 tests/live/live-history.csv
 tests/live/live-history.json
-
-# Repository artwork (the global *.png rule is for local screenshots)
-!assets/
-!assets/*.png
-
-# Visual regression baselines are reference files, not local captures.
-!tests/visual/baselines/
-!tests/visual/baselines/*.png
-tests/visual/current/
-tests/visual/diff/
 
 # Historical working copies and archives
 archive/
