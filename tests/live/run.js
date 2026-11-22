@@ -509,6 +509,31 @@ async function captureGarageStates(cdp, appUrl) {
     }
   }, 10000, 'the garage queue to arm');
 
+  if (SHOT_DIR) {
+    // El garaje se fotografia con el resumen del dia sembrado. Si el seed no
+    // llega, la foto sigue siendo valida pero sale vacia: las baselines dejan
+    // de significar lo mismo y el gate visual se queda ciego sin avisar. Falla
+    // aqui, con el motivo, en vez de guardar una foto que no documenta nada.
+    const state = await cdp.evaluate(`(() => {
+      const day = window.__ntaDebug && window.__ntaDebug.diagnostic
+        ? (window.__ntaDebug.diagnostic().day || null) : null;
+      const host = document.getElementById('nt-queue-panel');
+      const root = host && host.shadowRoot;
+      const row = root ? root.querySelector('[data-f="dayRow"]') : null;
+      const parts = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('ntQueue:todayPart:')) parts.push(key);
+      }
+      return { day, hidden: row ? row.hidden : null, parts };
+    })()`);
+    const races = state.day ? Number(state.day.races) : -1;
+    if (races !== 128 || state.hidden !== false) {
+      throw new Error('the visual seed did not reach the garage panel'
+        + ` (races ${races}, dayRow hidden ${state.hidden}, parts ${JSON.stringify(state.parts)})`);
+    }
+  }
+
   // Sin animacion de entrada ni transiciones de color: el LED cambia de estado
   // entre capturas y una transicion a medio camino no es una regresion.
   await cdp.evaluate(`(() => {
@@ -636,6 +661,28 @@ async function capturePanelThemes(cdp, appUrl) {
   // La captura documenta la funcion nueva: una cuenta de 110 WPM con top 230.
   // Se deja la calibracion y el perfil en el almacenamiento antes de navegar
   // para que el panel arranque como en una instalacion real, sin esperar al API.
+  //
+  // Se navega ANTES de sembrar: el documento que dejo vivo el resto del banco
+  // corre con el reloj real, y leer un resumen fechado en el instante congelado
+  // lo toma por de otro dia y lo borra (era el motivo de que las fotos del
+  // garaje y del log salieran sin races, boxes ni alerts). Con la navegacion
+  // delante, el que siembra ya es un documento con el reloj congelado, y el
+  // segundo salto deja al panel arrancando sobre el estado sembrado: las caches
+  // de 1,5 s no caducan con el reloj fijo, asi que no basta con hidratar.
+  const panelReady = `(() => {
+    const frame = document.querySelector('iframe');
+    return Boolean(frame && frame.contentWindow.__ntaDebug
+      && frame.contentWindow.document.getElementById('nt-autotyper-panel'));
+  })()`;
+  await cdp.send('Page.navigate', { url: appUrl });
+  await waitFor(async () => {
+    try {
+      return await cdp.evaluate(panelReady);
+    } catch {
+      return false;
+    }
+  }, 15000, 'the page for screenshots');
+
   await cdp.evaluate(`(() => {
     localStorage.setItem('autoTyperCalibratedRange', JSON.stringify({ min: 103, max: 117 }));
     localStorage.setItem('persist:nt', JSON.stringify({
@@ -708,14 +755,10 @@ async function capturePanelThemes(cdp, appUrl) {
     return true;
   })()`);
 
-  await cdp.send('Page.navigate', { url: appUrl });
+  await cdp.send('Page.reload');
   await waitFor(async () => {
     try {
-      return await cdp.evaluate(`(() => {
-        const frame = document.querySelector('iframe');
-        return Boolean(frame && frame.contentWindow.__ntaDebug
-          && frame.contentWindow.document.getElementById('nt-autotyper-panel'));
-      })()`);
+      return await cdp.evaluate(panelReady);
     } catch {
       return false;
     }
