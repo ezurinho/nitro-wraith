@@ -23,6 +23,7 @@ listed in `tools/build.js`:
 | `79-panel-css.js` | Panel stylesheet (one `<style>` block, no interpolation) |
 | `80-panel.js` | Panel, garage, TUNE, AFK controls |
 | `81-panel-theme.js` | Theme paint/set/cycle and the cross-window storage bridges |
+| `82-panel-rail.js` | Rail tabs, view mounting and slider fills |
 | `90-queue.js` | Queue, navigation and recovery |
 | `95-stickers.js` | Sticker selection |
 | `96-guard.js` | WPM guard and duplicate-instance protection |
