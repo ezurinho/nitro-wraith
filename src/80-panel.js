@@ -1744,6 +1744,9 @@
     held: typingLockHeld,
   });
   window.__ntaDebug.dropTabLease = () => releaseTabLease(true);
+  // La eleccion de copia, sobre un registro de mentira: el harness comprueba
+  // que con seis copias el turno no cambia solo cuando el registro se recorta.
+  window.__ntaDebug.electInstance = (key, id, since, staleMs) => electInstance(key, id, since, staleMs);
   // Liberacion normal (sin force), para el banco: comprueba que una pestaña
   // suelta el lease aunque lo haya escrito su otra mitad.
   window.__ntaDebug.releaseLease = () => releaseTabLease();

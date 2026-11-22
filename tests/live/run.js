@@ -3310,6 +3310,45 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     ceilingSim.overshot.wait === ceilingSim.maxHold && ceilingSim.overshot.debt > ceilingSim.maxHold,
     ceilingSim.overshot);
 
+  // Seis copias del script vivas en la misma pagina es justo el caso que una vez
+  // llevo el contador del juego a 6696 WPM: lo que importa no es solo quien
+  // manda, sino que el registro que se comparte no pueda cambiar de lider por
+  // recortarse. Antes se tiraba por orden de insercion y se caia la copia con el
+  // turno.
+  const election = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const key = '__ntaElectProbe';
+    const stale = 10000;
+    const now = Date.now();
+    // Copia lider: la mas antigua. Las otras cinco llegan despues.
+    const ids = ['leader', 'c2', 'c3', 'c4', 'c5', 'c6'];
+    for (let round = 0; round < ids.length; round += 1) {
+      d.electInstance(key, ids[round], now - (ids.length - round) * 1000, stale);
+    }
+    const last = d.electInstance(key, 'c6', now - 1000, stale);
+    const registry = (w[key] || []).map((item) => item.id);
+    // Una copia que deja de latir sale del registro y la siguiente hereda.
+    const before = registry.length;
+    w[key] = (w[key] || []).filter((item) => item.id !== 'leader');
+    const after = d.electInstance(key, 'c6', now - 1000, stale);
+    return {
+      leaderId: last.leader && last.leader.id,
+      primaryForLeader: d.electInstance(key, 'leader', now - 6000, stale).primary,
+      registry,
+      keptLeader: registry.includes('leader'),
+      before,
+      successor: after.leader && after.leader.id,
+    };
+  })()`);
+  check('six live copies keep the elected copy in the registry',
+    election.keptLeader && election.leaderId === 'leader' && election.registry.length === 5,
+    election);
+  check('the elected copy is the only one that types when six are registered',
+    election.primaryForLeader === true, election);
+  check('a copy that stops beating hands the turn to the next oldest',
+    election.successor === 'c2', election);
+
   // La media corta puede estar en 38 mientras el top sigue en 230. El suelo de
   // recuperacion usa el top solo cuando la diferencia es grande y creible; una
   // cuenta principiante con top 50 no se dispara.

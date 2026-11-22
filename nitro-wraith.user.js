@@ -1720,20 +1720,30 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (mine) mine.at = now;
     else list.push({ id, at: now, since: since || now });
 
+    // El registro se recorta DESPUES de ordenar y conservando la cabeza: antes
+    // se hacia `list.slice(-5)`, que tira por orden de insercion, no de
+    // antiguedad. Con seis copias vivas se caia justo la que lleva el turno, el
+    // lider cambiaba solo y el relevo se paseaba entre copias a mitad de
+    // carrera. El desempate es el mismo que decide el turno (since y luego id),
+    // asi que lo que sobrevive es siempre lo que manda.
+    const ranked = list.slice().sort(compareInstances);
+
     try {
-      window[registryKey] = list.slice(-5);
+      window[registryKey] = ranked.slice(0, 5);
     } catch { /* sin acceso: el aviso de duplicadas no se puede dar */ }
 
-    if (list.length < 2) return { count: list.length, primary: true, leader: list[0] || null };
-
-    const ranked = list.slice().sort((a, b) => {
-      const as = a.since || a.at;
-      const bs = b.since || b.at;
-      if (as !== bs) return as - bs;
-      return a.id < b.id ? -1 : 1;
-    });
+    if (list.length < 2) return { count: list.length, primary: true, leader: ranked[0] || null };
 
     return { count: list.length, primary: ranked[0].id === id, leader: ranked[0] };
+  }
+
+  // Mas antiguo primero; a igualdad de arranque, el id menor. Determinista en
+  // todas las copias, que es lo unico que impide que dos se crean dueñas.
+  function compareInstances(a, b) {
+    const as = a.since || a.at;
+    const bs = b.since || b.at;
+    if (as !== bs) return as - bs;
+    return a.id < b.id ? -1 : 1;
   }
 
   // El modal de DQ del juego: "Uh oh! You have been disqualified..." (y el
@@ -10285,6 +10295,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     held: typingLockHeld,
   });
   window.__ntaDebug.dropTabLease = () => releaseTabLease(true);
+  // La eleccion de copia, sobre un registro de mentira: el harness comprueba
+  // que con seis copias el turno no cambia solo cuando el registro se recorta.
+  window.__ntaDebug.electInstance = (key, id, since, staleMs) => electInstance(key, id, since, staleMs);
   // Liberacion normal (sin force), para el banco: comprueba que una pestaña
   // suelta el lease aunque lo haya escrito su otra mitad.
   window.__ntaDebug.releaseLease = () => releaseTabLease();
