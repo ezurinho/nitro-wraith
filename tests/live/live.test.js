@@ -32,6 +32,13 @@ const CANARY = path.join(__dirname, '..', '..', 'tools', 'canary.js');
 const SCRIPT_PATH = path.join(__dirname, '..', '..', 'nitro-wraith.user.js');
 const SPAWN_TIMEOUT_MS = 25000;
 
+// Los artefactos se comparan sin finales de linea: el contrato es que el build
+// de prueba no cambie su CONTENIDO, y en un checkout CRLF (core.autocrlf sin
+// .gitattributes aplicado) una igualdad byte a byte daba un falso negativo.
+function readNormalized(file) {
+  return fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n');
+}
+
 function runNode(script, args = [], env = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [script, ...args], {
@@ -836,8 +843,8 @@ async function runCase(item) {
   // vuelta al Gist), sin tocar los artefactos que se publican en main.
   const canaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nta-canary-'));
   try {
-    const stableScript = fs.readFileSync(SCRIPT_PATH, 'utf8');
-    const stableMeta = fs.readFileSync(path.join(__dirname, '..', '..', 'nitro-wraith.meta.js'), 'utf8');
+    const stableScript = readNormalized(SCRIPT_PATH);
+    const stableMeta = readNormalized(path.join(__dirname, '..', '..', 'nitro-wraith.meta.js'));
     const stableVersion = (stableScript.match(/@version\s+(\S+)/) || [])[1];
     const canary = await runNode(CANARY, ['prepare', '17', '--out', canaryDir]);
     const canaryUser = fs.existsSync(path.join(canaryDir, 'nitro-wraith.user.js'))
@@ -871,8 +878,8 @@ async function runCase(item) {
       JSON.stringify(manifest));
 
     unit('preparing canary leaves the stable artifacts untouched',
-      fs.readFileSync(SCRIPT_PATH, 'utf8') === stableScript
-        && fs.readFileSync(path.join(__dirname, '..', '..', 'nitro-wraith.meta.js'), 'utf8') === stableMeta
+      readNormalized(SCRIPT_PATH) === stableScript
+        && readNormalized(path.join(__dirname, '..', '..', 'nitro-wraith.meta.js')) === stableMeta
         && stableScript.includes("const CHANNEL = 'stable';"),
       'stable files changed');
   } finally {

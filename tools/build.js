@@ -66,10 +66,13 @@ function write() {
   const old = normalize(raw);
   const oldMeta = normalize(rawMeta);
 
-  // Escribe tambien cuando solo cambian los finales de linea: asi el checkout
-  // de Windows queda en LF y las comprobaciones exactas del harness coinciden.
-  if (next !== old || next !== raw) fs.writeFileSync(SCRIPT, next);
-  if (meta !== oldMeta || meta !== rawMeta) fs.writeFileSync(META, meta);
+  // Solo se reescribe cuando cambia el CONTENIDO. Los finales de linea son
+  // cosa de .gitattributes (`*.js text eol=lf`), que ya deja el checkout en LF
+  // en cualquier plataforma: reescribir por una diferencia de CRLF/LF movia el
+  // archivo bajo los pies de quien lo estuviera leyendo, que es lo que hacia
+  // fallar la comprobacion de artefactos estables del harness.
+  if (next !== old) fs.writeFileSync(SCRIPT, next);
+  if (meta !== oldMeta) fs.writeFileSync(META, meta);
   console.log(`built ${MODULES.length} modules -> ${path.basename(SCRIPT)} (${next.length} bytes)`);
 }
 
