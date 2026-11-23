@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.14.58 — 2026-11-23
+
+- refactor(queue): move the 16 helpers that carry no queue state out of runQueue
+- refactor(tests): move the visual capture out of run.js
+- feat(visual): record the two values that change by themselves
+
 ## 8.14.57 — 2026-11-22
 
 - refactor(panel): move the shadow-root markup out of createPanel
