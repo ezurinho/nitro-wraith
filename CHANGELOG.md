@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.60 — 2026-11-23
+
+- feat(pace): aim at the account's own top speed, not at its average
+
 ## 8.14.59 — 2026-11-23
 
 - feat(panel): keep every WPM a whole number

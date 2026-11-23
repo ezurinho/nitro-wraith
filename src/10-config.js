@@ -353,7 +353,7 @@
 
   };
 
-  const VERSION = '8.14.59';
+  const VERSION = '8.14.60';
 
   // Canal de publicacion: el build estable apunta al Gist; el canary se genera
   // aparte con tools/canary.js. Solo ese artefacto cambia CHANNEL, su version y
