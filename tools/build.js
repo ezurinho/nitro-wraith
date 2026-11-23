@@ -34,6 +34,7 @@ const MODULES = [
   '81-panel-theme.js',
   '82-panel-rail.js',
   '83-panel-html.js',
+  '85-queue-helpers.js',
   '90-queue.js',
   '95-stickers.js',
   '96-guard.js',
