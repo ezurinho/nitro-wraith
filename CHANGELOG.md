@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.14.63 — 2026-11-23
+
+- feat(panel): the account card says when it will race and when it will rest
+- feat(calendar): give the account rest days and a night curve
+- feat(pace): give every race its own pace and accuracy inside the band
+
 ## 8.14.62 — 2026-11-23
 
 - feat(panel): readable labels, reduced motion and a spoken race state
