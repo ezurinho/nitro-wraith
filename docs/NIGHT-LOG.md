@@ -11,6 +11,31 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 00:52 · backlog 4 · la captura visual fuera de `run.js`
+
+- nota de arranque: el árbol venía sucio con el split de `visual-capture.js` y
+  sin entrada en este registro. La regla dice `git stash`; no se aplicó porque
+  el cambio era **un solo** commit coherente y verificable, no restos de un
+  intento a medias: se verificó entero antes de commitear y salió verde. El
+  `stash` habría tirado 707 líneas ya terminadas. Si el árbol llega sucio otra
+  vez sin entrada, se vuelve a mirar el diff antes de decidir.
+- hecho: las 683 líneas de captura (galería de temas, TUNE/LOG en tres estados
+  y el garaje) salen a `tests/live/visual-capture.js` como **factoría con
+  dependencias explícitas** — `createCapture({ fs, os, path, sleep, waitFor,
+  captureShot, SCRIPT, SCRIPT_VERSION, SHOT_DIR, VISUAL_CAPTURE,
+  VISUAL_FROZEN_AT })`. No comparte estado con las comprobaciones, así que el
+  cuerpo de las funciones viaja tal cual, sin reescribir una línea. `run.js`
+  queda con **un** punto de llamada, `capturePanelThemes`, en el mismo sitio.
+  `package.json` gana `node --check tests/live/visual-capture.js` para que un
+  error de sintaxis en la captura no se escape del gate offline.
+- verificación: `npm test` 80/80 · `npm run check` 367/367 · `npm run visual`
+  15/15 (peor desvío 0.069% en `tune · idle`, umbral 0.25%) · `run.js`
+  7955 → **7279** líneas, `visual-capture.js` **707**.
+- commit: `976c893` refactor(tests): move the visual capture out of run.js
+- siguiente: backlog 3, `src/90-queue.js` — una sola función `runQueue` de
+  ~5 k líneas, sin corte mecánico; antes hay que mapearla como se hizo con el
+  panel (`tools/panel-map.js` sirve para cualquier módulo).
+
 ## 00:32 · backlog 7 · la deriva de las capturas, medida
 
 - hecho: la deriva no era ruido y no eran animaciones. Son **dos bandas**: el
