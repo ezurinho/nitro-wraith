@@ -11,6 +11,39 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 01:10 · petición directa · el ritmo apunta al top de la cuenta
+
+- desvío de la pista: el dueño pidió, en mitad de la noche, dos cosas que no
+  estaban en el backlog y mandan sobre él: **WPM sin decimales** y que el bot no
+  escriba a 104 cuando su top es 230. Se hicieron las dos antes de seguir.
+- hecho (`ab760ab`): `wpmInt` redondea todo WPM que el bot planifica o pinta
+  (centro de calibración, cuenta, fila de sesión cerrada, semana, hoy, live,
+  registro). Precisión y desviaciones conservan su decimal, y el CSV queda como
+  dato. Baselines `log` y `aurora` regeneradas con `--only` tras mirar las fotos.
+- hecho (`a63d370`): el techo duro ya no es la constante 120 — `ceilingFor(top)`
+  = 97% del top de la cuenta, suelo 120, máximo 300 — y el centro se apunta al
+  85% del top (`topPaceTarget`). Con 83 de media y 230 de top: 196 de objetivo y
+  223 de techo, en vez de 104/120. El trinquete de subida limita cada
+  calibración a 1.25x el centro anterior, así que 104 → 196 son tres lecturas
+  (cada 30 min o 25 carreras y no un salto de 2x en una carrera. Un top menor de
+  80 no entra: ahí el top no demuestra nada. El techo se guarda con el top del
+  que salió, se re-deriva al arrancar y se borra al cambiar de cuenta, y el
+  tripwire del guardia lo sigue (antes la primera carrera rápida habría abortado).
+- hallazgo: el motor **no llegaba** al ritmo pedido. `baseDelay` restaba 8,8 ms
+  fijos de pausas por tecla, que es el 8% del presupuesto a 110 WPM y el 14% a
+  196: medido con el nuevo `paceSample`, 110 pedidos daban 119,7 y 196 daban
+  228,6, y el trim no absorbe más del 10%. Las pausas ya se suman tecla a tecla,
+  así que el descuento fijo sobraba. Ahora 110 → 110,3 · 150 → 150,1 · 196 → 193,7.
+- hallazgo: con el techo en 223, `nitroFits` apagaba el nitro del todo (exigía
+  repartir 25 ms por tecla incluso cuando el objetivo ya dejaba ese hueco).
+  Ahora, si el regalo cabe en el margen del plan, se usa.
+- verificación: `npm test` 80/80 · `npm run check` **371/371** (2 checks nuevos:
+  techo del top y cadencia real del motor) · `npm run visual` 15/15, dos
+  corridas seguidas · build 20 módulos en sync. La release 8.14.59 cayó durante
+  el ciclo: rebase, re-verificación y push, sin `--force`.
+- siguiente: backlog 3 (`90-queue.js`, ya con 16 helpers fuera y el mapa
+  `--nested` en `tools/panel-map.js`) o backlog 6 (CI de `npm run visual`).
+
 ## 00:52 · backlog 4 · la captura visual fuera de `run.js`
 
 - nota de arranque: el árbol venía sucio con el split de `visual-capture.js` y
