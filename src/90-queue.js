@@ -385,6 +385,11 @@
       const hours = activeGate(now);
       if (hours) gates.push({ key: 'hours', label: hours.label, left: hours.left });
 
+      // Dia de descanso: la cuenta no corre hoy. La puerta se cierra sola a
+      // medianoche; no deja marca de parada ni cuenta como fallo.
+      const rest = restGate(now);
+      if (rest) gates.push({ key: 'rest', label: rest.label, left: rest.left });
+
       const stop = stoppedInfo();
       if (stop) {
         const hold = Math.min(Number(stop.holdMs) || 0, 24 * 3600000) || CONFIG.queue.stopHoldMs;
@@ -2818,6 +2823,7 @@
       if (banClearHeld()) return 'paused · ban cleared';
       if (blockedMin > 0) return `hold · site block ${blockedMin}m`;
       if (!onlineNow()) return 'waiting · offline';
+      if (restGate()) return 'waiting · rest day';
       if (activeGate()) return 'waiting · active hours';
       if (armed) return 'on · armed';
       if (stop) {

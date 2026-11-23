@@ -115,6 +115,14 @@
       longChance: 0.15,
     },
 
+    // Calendario del que teclea. Un humano no corre 24/7 y no rinde igual a
+    // las 03:00 que a las 13:00; las dos cosas son rasgo de actividad, no de
+    // tecleo, y por eso viven aparte de `queue`. `restDaysPerWeek = 0` apaga el
+    // descanso y deja la cuenta corriendo todos los dias.
+    calendar: {
+      restDaysPerWeek: 1,
+    },
+
     // Queue and navigation. This lives in the TOP window, not in the race frame.
     queue: {
       enabled: true,

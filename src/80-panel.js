@@ -1186,7 +1186,10 @@
     return window.__ntaDebug.trimState();
   };
   window.__ntaDebug.trimState = () => {
-    const target = Number(profile.targetWPM);
+    // El objetivo contra el que se corrige el trim es el de la carrera (con la
+    // curva del dia), no el centro de la tanda: es el numero con el que se
+    // tecleo esta carrera y contra el que se mide el paquete oficial.
+    const target = raceWpm();
     return {
       trim: Math.round(session.trim * 10000) / 10000,
       at: session.trimAt,
@@ -1242,6 +1245,9 @@
   // que el harness compruebe que dos carreras no son la misma foto.
   window.__ntaDebug.raceTarget = () => ({
     wpm: raceWpm(),
+    planned: plannedRaceWpm(),
+    band: wpmRangeFor(profile.targetWPM),
+    curve: dayCurveAt(),
     accuracy: raceAccuracyGoal(),
     sessionWpm: profile.targetWPM,
     sessionAccuracy: profile.accuracyGoal,
@@ -1249,6 +1255,17 @@
     accDrift: Number(session.raceAccDrift) || 0,
   });
   window.__ntaDebug.raceWpmFor = (base, drift) => raceWpmAt(base, drift);
+  // Calendario: descanso y curva diurna. `at` explicito para que el harness
+  // pueda preguntar por un dia y una hora sin tocar el reloj de la maquina.
+  window.__ntaDebug.calendar = (at = Date.now()) => ({
+    restDay: isRestDay(at),
+    restPerWeek: restDaysPerWeek(),
+    gate: restGate(at),
+    curve: dayCurveAt(at),
+  });
+  window.__ntaDebug.isRestDay = (at) => isRestDay(at);
+  window.__ntaDebug.dayCurve = (hour) => dayCurve(hour);
+  window.__ntaDebug.localDayKey = (at) => localDayKey(at);
   window.__ntaDebug.rollRaceDrift = () => rollRaceDrift();
   window.__ntaDebug.paceSample = (target, keys = 2000) => {
     const text = 'the quick brown fox jumps over the lazy dog and then some more words to type ';
@@ -1259,14 +1276,23 @@
     // motor y no lo que hoy pida la sesion.
     const savedTrim = session.trim;
     const savedCareful = session.carefulRaces;
+    const savedSpread = session.nitroSpread;
+    const savedFatigue = fatigueAt;
     let total = 0;
     session.trim = 1;
     session.carefulRaces = 0;
+    // La deuda del nitro y la fatiga tampoco son el modelo: suman milisegundos
+    // fijos por tecla, y un fijo pesa mas cuanto mas rapido se pide (medido: 3%
+    // a 196 WPM, 1% a 110). Medir el motor es medir sin ellas.
+    session.nitroSpread = 0;
+    fatigueAt = 0;
     try {
       for (let i = 1; i < count; i++) total += nextDelay(text, i % (text.length - 1), wpm);
     } finally {
       session.trim = savedTrim;
       session.carefulRaces = savedCareful;
+      session.nitroSpread = savedSpread;
+      fatigueAt = savedFatigue;
     }
     const msPerChar = total / (count - 1);
     return {
@@ -4000,7 +4026,9 @@
     paintPace();
     seasonRefreshFromUser();
     paintSeason();
-    setText(panel.refs.target, `${profile.targetWPM} · ${profile.accuracyGoal.toFixed(1)}%`);
+    // El objetivo que se pinta es el de ESTA carrera (curva del dia y desvio
+    // incluidos); el centro de la tanda sigue en la tarjeta de la cuenta.
+    setText(panel.refs.target, `${raceWpm()} · ${raceAccuracyGoal().toFixed(1)}%`);
     // Los dos numeros grandes golpean la escala cuando cambian de verdad (parte
     // entera), que es lo que se mira durante la carrera. El mismo pintado corre
     // a 4 Hz entre repintados completos (updateLiveReadout).

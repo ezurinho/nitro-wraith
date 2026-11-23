@@ -2846,9 +2846,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   // El motor es lo que de verdad limita la velocidad. Si la cadencia no llega,
   // subir el techo solo cambia el numero del panel: se mide la cadencia pura a
   // tres objetivos y se compara el WPM implicado con el pedido.
+  //
+  // 40 000 teclas, no 2 000: la log-logistica del modelo tiene cola derecha
+  // pesada, asi que su media muestral converge despacio y con dos mil teclas el
+  // propio muestreo movia el resultado un 3-5% (daba 187 donde se pedia 196).
+  // No era el motor: era el tamano de la muestra.
   const paceSamples = await cdp.evaluate(`(() => {
     const d = document.querySelector('iframe').contentWindow.__ntaDebug;
-    return [110, 150, 196].map((target) => d.paceSample(target));
+    return [110, 150, 196].map((target) => d.paceSample(target, 40000));
   })()`);
   check('the typing engine really reaches the top-based pace, not just the label',
     paceSamples.every((sample) => Math.abs(sample.wpm - sample.target) <= sample.target * 0.04),
@@ -2868,7 +2873,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     for (let i = 0; i < 60; i++) draws.push(d.rollRaceDrift());
     return {
       band,
-      state: d.raceTarget(),
+      state: { ...d.raceTarget(), curve: d.calendar().curve },
       drifts: [...new Set(draws.map((draw) => draw.wpmDrift))].sort((a, b) => a - b),
       accDrifts: [...new Set(draws.map((draw) => draw.accDrift))].sort((a, b) => a - b),
       clampHigh: d.raceWpmFor(band.max, 2),
@@ -2881,10 +2886,54 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && raceDrift.samples.join(',') === '194,196,198'
       && raceDrift.clampHigh === raceDrift.band.max
       && raceDrift.clampLow === raceDrift.band.min
-      && Math.abs(raceDrift.state.wpm - raceDrift.state.sessionWpm) <= 2
+      // El desvio se recorta en la banda (si la carrera ya esta en el suelo, un
+      // -2 no la saca), asi que se compara con margen y se exige la banda.
+      && Math.abs(raceDrift.state.wpm
+        - (raceDrift.state.planned + raceDrift.state.drift)) <= 2
+      && raceDrift.state.planned >= raceDrift.band.min
+      && raceDrift.state.planned <= raceDrift.band.max
       && raceDrift.state.wpm >= raceDrift.band.min
       && raceDrift.state.wpm <= raceDrift.band.max,
     raceDrift);
+
+  // Actividad humana: ni 24/7 ni el mismo ritmo a las 03:00 que a las 13:00.
+  // El descanso sale de la fecha (hash), no de Math.random, asi que el mismo dia
+  // da lo mismo en cualquier pestana y este check es determinista.
+  const calendar = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    const start = new Date(2026, 0, 1, 9, 0, 0).getTime();
+    const day = 24 * 60 * 60 * 1000;
+    let rest = 0;
+    for (let i = 0; i < 365; i++) if (d.isRestDay(start + i * day)) rest++;
+    const today = start + 30 * day;
+    return {
+      rest,
+      stable: d.isRestDay(today) === d.isRestDay(today + 11 * 3600000)
+        && d.localDayKey(today) === d.localDayKey(today + 11 * 3600000),
+      gate: d.calendar(today).gate,
+      curveNight: d.dayCurve(1.5),
+      curveNoon: d.dayCurve(13.5),
+      curveRange: [d.dayCurve(0), d.dayCurve(6), d.dayCurve(20), d.dayCurve(23)],
+      now: d.calendar(),
+      band: d.autoPace().range,
+      race: d.raceTarget(),
+    };
+  })()`);
+  check('a rest day lands one day in seven and does not move during the day',
+    calendar.rest >= 45 && calendar.rest <= 60 && calendar.stable === true
+      && (calendar.gate === null || calendar.gate.left > 0)
+    , calendar);
+  check('the day curve costs five percent at night and nothing at midday',
+    calendar.curveNight === 0.95 && calendar.curveNoon === 1
+      && calendar.curveRange.every((value) => value >= 0.95 && value <= 1),
+    calendar.curveRange);
+  check('the race target follows the clock, the session target does not',
+    calendar.race.planned
+      === Math.min(calendar.race.band.max,
+        Math.max(calendar.race.band.min,
+          Math.round(calendar.race.sessionWpm * calendar.now.curve)))
+      && calendar.race.curve < 1,
+    `${calendar.race.sessionWpm} -> ${calendar.race.wpm} at curve ${calendar.now.curve}`);
 
   // Cuando el trinquete conserva un rango mas alto, la fila no puede seguir
   // enseñando la media corta como si fuera el objetivo: avg, target y top van

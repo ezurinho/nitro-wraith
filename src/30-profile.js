@@ -735,8 +735,21 @@
     return clamp(Math.round(value + (Number(drift) || 0)), Math.max(1, min), max);
   }
 
+  // Objetivo de la carrera sin el desvio del dia: centro de la tanda por la
+  // curva horaria, recortado a la banda que el panel declara para la cuenta.
+  // El recorte importa: de noche la curva pide un 5% menos y sin el la carrera
+  // saldria de la banda calibrada, que es justo el numero que el usuario lee.
+  function plannedRaceWpm() {
+    const curved = Math.round(profile.targetWPM * dayCurveAt());
+    const band = wpmRangeFor(profile.targetWPM);
+    return band ? clamp(curved, band.min, band.max) : curved;
+  }
+
   function raceWpm() {
-    return raceWpmAt(profile.targetWPM, session.raceWpmDrift);
+    // La hora del dia entra aqui y no en el objetivo de la tanda: la tanda se
+    // calibra una vez y la curva cambia cada hora, asi que el centro sigue
+    // siendo el de la cuenta y lo que se mueve es lo que se teclea ahora.
+    return raceWpmAt(plannedRaceWpm(), session.raceWpmDrift);
   }
 
   function raceAccuracyGoal() {

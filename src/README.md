@@ -15,6 +15,7 @@ listed in `tools/build.js`:
 | `20-utils.js` | Small pure helpers, logging, timing |
 | `30-profile.js` | Pace profile, calibration and preferences |
 | `32-history.js` | Race history and tanda log |
+| `35-calendar.js` | Rest days and the day curve (activity realism) |
 | `40-dom.js` | React/game DOM discovery |
 | `50-state.js` | Runtime state and session helpers |
 | `60-pacing.js` | Typing model, accuracy, nitro and logs |

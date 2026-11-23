@@ -24,6 +24,7 @@ const MODULES = [
   '20-utils.js',
   '30-profile.js',
   '32-history.js',
+  '35-calendar.js',
   '40-dom.js',
   '50-state.js',
   '60-pacing.js',
