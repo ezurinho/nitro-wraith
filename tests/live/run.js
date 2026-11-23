@@ -2857,6 +2857,35 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     paceSamples.every((sample) => sample.msPerChar > 20),
     paceSamples.map((sample) => `${sample.target} -> ${sample.msPerChar} ms`).join(' · '));
 
+  // El anti-cheat del sitio mira una velocidad demasiado plana (docs/RESEARCH.md,
+  // seccion 1). La tanda comparte objetivo entre sus carreras; el desvio por
+  // carrera existe para que dos carreras seguidas no sean la misma foto, y se
+  // queda dentro de la banda calibrada para no mover la media de la tanda.
+  const raceDrift = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    const band = d.autoPace().range;
+    const draws = [];
+    for (let i = 0; i < 60; i++) draws.push(d.rollRaceDrift());
+    return {
+      band,
+      state: d.raceTarget(),
+      drifts: [...new Set(draws.map((draw) => draw.wpmDrift))].sort((a, b) => a - b),
+      accDrifts: [...new Set(draws.map((draw) => draw.accDrift))].sort((a, b) => a - b),
+      clampHigh: d.raceWpmFor(band.max, 2),
+      clampLow: d.raceWpmFor(band.min, -2),
+      samples: [d.raceWpmFor(196, -2), d.raceWpmFor(196, 0), d.raceWpmFor(196, 2)],
+    };
+  })()`);
+  check('two races in a row do not share the same pace and accuracy',
+    raceDrift.drifts.length >= 3 && raceDrift.accDrifts.length >= 2
+      && raceDrift.samples.join(',') === '194,196,198'
+      && raceDrift.clampHigh === raceDrift.band.max
+      && raceDrift.clampLow === raceDrift.band.min
+      && Math.abs(raceDrift.state.wpm - raceDrift.state.sessionWpm) <= 2
+      && raceDrift.state.wpm >= raceDrift.band.min
+      && raceDrift.state.wpm <= raceDrift.band.max,
+    raceDrift);
+
   // Cuando el trinquete conserva un rango mas alto, la fila no puede seguir
   // enseñando la media corta como si fuera el objetivo: avg, target y top van
   // juntos y el target es el centro del rango que de verdad se teclea.

@@ -13,7 +13,7 @@
   // `forWpm` permite medir la cadencia de un objetivo sin tocar la sesion: el
   // harness pregunta "a 196 WPM, cuanto pides por tecla?" y el motor responde
   // sin cambiar lo que esta tecleando la carrera en curso.
-  function baseDelay(forWpm = profile.targetWPM) {
+  function baseDelay(forWpm = raceWpm()) {
     // T is the time per CORRECT character that targetWPM implies.
     const correctMs = 60000 / (forWpm * 5);
 
@@ -21,7 +21,7 @@
     // correction pause. With p mistakes per correct character, T = d(1 + p) + p*c,
     // hence d = (T - p*c) / (1 + p). Without this the measured WPM drops ~8% at
     // 97% accuracy, because the old discount was a flat 1%.
-    const p = clamp(1 - profile.accuracyGoal / 100, 0, 0.3);
+    const p = clamp(1 - raceAccuracyGoal() / 100, 0, 0.3);
     const correction = average(CONFIG.humanize.correctionMs);
     // trim: auto-calibration factor (see autocalibrate). 1 = as configured.
     // Mismo suelo que en autocalibrate y por el mismo motivo: como el trim
@@ -193,7 +193,7 @@
 
   const MODEL_STATS = modelStats(REFERENCE_TEXT);
 
-  function nextDelay(content, index, forWpm = profile.targetWPM) {
+  function nextDelay(content, index, forWpm = raceWpm()) {
     const expected = content ? content[index] || '' : '';
     const previous = content && index > 0 ? content[index - 1] : '';
     const { pos, length } = wordContext(content, index);
@@ -265,7 +265,7 @@
     if (!chars) return false;
 
     if (!session.errorBudget) {
-      session.errorBudget = Math.max(1, Math.round((1 - profile.accuracyGoal / 100) * chars));
+      session.errorBudget = Math.max(1, Math.round((1 - raceAccuracyGoal() / 100) * chars));
       session.errors = 0;
     }
     if (session.errors >= session.errorBudget) return false;
@@ -415,6 +415,6 @@
 
     const wpm = wpmNow();
     if (!wpm) return;
-    log(`WPM ${wpmInt(wpm)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}% · ${session.chars} keys`);
+    log(`WPM ${wpmInt(wpm)}/${raceWpm()} · accuracy ${accuracyNow().toFixed(1)}%/${raceAccuracyGoal().toFixed(1)}% · ${session.chars} keys`);
   }
 

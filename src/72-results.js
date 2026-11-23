@@ -349,7 +349,7 @@
       log('Race lost before the finish line; it is not counted.');
     } else {
       counted = countRace();
-      log(`Race finished · WPM ${wpmInt(wpmNow())}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}%`);
+      log(`Race finished · WPM ${wpmInt(wpmNow())}/${raceWpm()} · accuracy ${accuracyNow().toFixed(1)}%/${raceAccuracyGoal().toFixed(1)}%`);
       // La fila recien apuntada, para que la calibracion sepa a que carrera
       // pertenece y pueda rehacerse cuando llegue su WPM oficial.
       autocalibrate(counted ? raceHistory[raceHistory.length - 1] : null);

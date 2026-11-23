@@ -1238,6 +1238,18 @@
   // Muestra de cadencia pura: cuanto tarda el motor por tecla a un objetivo
   // dado. Subir el techo solo cambia el numero del panel si la cadencia no
   // llega, asi que el harness mide el motor y no la etiqueta.
+  // Objetivo de la carrera en curso y la banda de desvio que puede sortear, para
+  // que el harness compruebe que dos carreras no son la misma foto.
+  window.__ntaDebug.raceTarget = () => ({
+    wpm: raceWpm(),
+    accuracy: raceAccuracyGoal(),
+    sessionWpm: profile.targetWPM,
+    sessionAccuracy: profile.accuracyGoal,
+    drift: Number(session.raceWpmDrift) || 0,
+    accDrift: Number(session.raceAccDrift) || 0,
+  });
+  window.__ntaDebug.raceWpmFor = (base, drift) => raceWpmAt(base, drift);
+  window.__ntaDebug.rollRaceDrift = () => rollRaceDrift();
   window.__ntaDebug.paceSample = (target, keys = 2000) => {
     const text = 'the quick brown fox jumps over the lazy dog and then some more words to type ';
     const count = Math.max(2, Math.round(Number(keys) || 2000));

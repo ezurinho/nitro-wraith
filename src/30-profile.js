@@ -722,6 +722,36 @@
     },
   };
 
+  // Ritmo y precision de ESTA carrera. La tanda sortea un objetivo y lo comparte
+  // con sus diez carreras; una persona no clava el mismo numero dos veces
+  // seguidas, y una velocidad demasiado plana es justo lo que el anti-cheat del
+  // sitio mira (docs/RESEARCH.md, seccion 1). El desvio se sortea por carrera
+  // dentro de la banda calibrada, asi que la media de la tanda no se mueve.
+  function raceWpmAt(base, drift) {
+    const value = Number(base);
+    if (!Number.isFinite(value)) return 0;
+    const min = Math.min(Number(CONFIG.wpm.min) || value, value);
+    const max = Math.max(Number(CONFIG.wpm.max) || value, value);
+    return clamp(Math.round(value + (Number(drift) || 0)), Math.max(1, min), max);
+  }
+
+  function raceWpm() {
+    return raceWpmAt(profile.targetWPM, session.raceWpmDrift);
+  }
+
+  function raceAccuracyGoal() {
+    const drift = Number(session.raceAccDrift) || 0;
+    return clamp(profile.accuracyGoal + drift, CONFIG.accuracy.min, 100);
+  }
+
+  function rollRaceDrift() {
+    // +-2 WPM (1% a 196, 2% a 104) y medio punto de precision: suficiente para
+    // que dos carreras no sean la misma foto, pequeño para no mover la tanda.
+    session.raceWpmDrift = randInt(-2, 2);
+    session.raceAccDrift = randInt(-1, 1) / 2;
+    return { wpm: raceWpm(), accuracy: raceAccuracyGoal(), wpmDrift: session.raceWpmDrift, accDrift: session.raceAccDrift };
+  }
+
   function advanceSessions() {
     const bump = (key, max) => {
       const next = readCount(key) + 1;

@@ -1336,7 +1336,11 @@
         session.lastKeyAt = Date.now();
         session.lastAcceptedAt = Date.now();
         session.typing = true;
-        log(`Race started. Target: ${profile.targetWPM} WPM / ${profile.accuracyGoal.toFixed(1)}%`);
+        // Variacion por carrera, sorteada aqui: la tanda mantiene su objetivo y
+        // esta carrera es un poco mas rapida o mas lenta que la anterior.
+        const race = rollRaceDrift();
+        log(`Race started. Target: ${race.wpm} WPM / ${race.accuracy.toFixed(1)}%`
+          + ` (session ${profile.targetWPM} WPM / ${profile.accuracyGoal.toFixed(1)}%, drift ${race.wpmDrift >= 0 ? '+' : ''}${race.wpmDrift})`);
         return true;
       }
 
@@ -1496,7 +1500,7 @@
   // `achieved` el WPM que se corrige (modelo al cerrar, oficial si ya llego) y
   // `target` el objetivo de ESA carrera. No vale el actual: la cola avanza la
   // serie al cerrar, asi que cuando llega el paquete ya es el de la siguiente.
-  function trimFor(achieved, base, target = profile.targetWPM) {
+  function trimFor(achieved, base, target = raceWpm()) {
     if (!Number.isFinite(achieved) || achieved <= 0) return base;
     if (!Number.isFinite(target) || target <= 0) return base;
     // trim multiplica el RETARDO (ver baseDelay), asi que un trim pequeno
@@ -1524,7 +1528,10 @@
     const sample = Number.isFinite(official) && official > 0 ? official : achieved;
 
     const base = session.trim;
-    const target = profile.targetWPM;
+    // El objetivo contra el que se corrige es el de ESTA carrera, no el de la
+    // tanda: si la carrera salio con +2 de desvio, comparar contra el centro
+    // convertiria esa variacion en un error del modelo.
+    const target = raceWpm();
     const next = trimFor(sample, base, target);
     if (Math.abs(next - base) >= 0.002) {
       session.trim = next;

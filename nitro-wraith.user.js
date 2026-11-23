@@ -2672,6 +2672,36 @@ All of this only aims at believable statistics. It is your call and your risk.
     },
   };
 
+  // Ritmo y precision de ESTA carrera. La tanda sortea un objetivo y lo comparte
+  // con sus diez carreras; una persona no clava el mismo numero dos veces
+  // seguidas, y una velocidad demasiado plana es justo lo que el anti-cheat del
+  // sitio mira (docs/RESEARCH.md, seccion 1). El desvio se sortea por carrera
+  // dentro de la banda calibrada, asi que la media de la tanda no se mueve.
+  function raceWpmAt(base, drift) {
+    const value = Number(base);
+    if (!Number.isFinite(value)) return 0;
+    const min = Math.min(Number(CONFIG.wpm.min) || value, value);
+    const max = Math.max(Number(CONFIG.wpm.max) || value, value);
+    return clamp(Math.round(value + (Number(drift) || 0)), Math.max(1, min), max);
+  }
+
+  function raceWpm() {
+    return raceWpmAt(profile.targetWPM, session.raceWpmDrift);
+  }
+
+  function raceAccuracyGoal() {
+    const drift = Number(session.raceAccDrift) || 0;
+    return clamp(profile.accuracyGoal + drift, CONFIG.accuracy.min, 100);
+  }
+
+  function rollRaceDrift() {
+    // +-2 WPM (1% a 196, 2% a 104) y medio punto de precision: suficiente para
+    // que dos carreras no sean la misma foto, pequeño para no mover la tanda.
+    session.raceWpmDrift = randInt(-2, 2);
+    session.raceAccDrift = randInt(-1, 1) / 2;
+    return { wpm: raceWpm(), accuracy: raceAccuracyGoal(), wpmDrift: session.raceWpmDrift, accDrift: session.raceAccDrift };
+  }
+
   function advanceSessions() {
     const bump = (key, max) => {
       const next = readCount(key) + 1;
@@ -5596,7 +5626,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // `forWpm` permite medir la cadencia de un objetivo sin tocar la sesion: el
   // harness pregunta "a 196 WPM, cuanto pides por tecla?" y el motor responde
   // sin cambiar lo que esta tecleando la carrera en curso.
-  function baseDelay(forWpm = profile.targetWPM) {
+  function baseDelay(forWpm = raceWpm()) {
     // T is the time per CORRECT character that targetWPM implies.
     const correctMs = 60000 / (forWpm * 5);
 
@@ -5604,7 +5634,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     // correction pause. With p mistakes per correct character, T = d(1 + p) + p*c,
     // hence d = (T - p*c) / (1 + p). Without this the measured WPM drops ~8% at
     // 97% accuracy, because the old discount was a flat 1%.
-    const p = clamp(1 - profile.accuracyGoal / 100, 0, 0.3);
+    const p = clamp(1 - raceAccuracyGoal() / 100, 0, 0.3);
     const correction = average(CONFIG.humanize.correctionMs);
     // trim: auto-calibration factor (see autocalibrate). 1 = as configured.
     // Mismo suelo que en autocalibrate y por el mismo motivo: como el trim
@@ -5776,7 +5806,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   const MODEL_STATS = modelStats(REFERENCE_TEXT);
 
-  function nextDelay(content, index, forWpm = profile.targetWPM) {
+  function nextDelay(content, index, forWpm = raceWpm()) {
     const expected = content ? content[index] || '' : '';
     const previous = content && index > 0 ? content[index - 1] : '';
     const { pos, length } = wordContext(content, index);
@@ -5848,7 +5878,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (!chars) return false;
 
     if (!session.errorBudget) {
-      session.errorBudget = Math.max(1, Math.round((1 - profile.accuracyGoal / 100) * chars));
+      session.errorBudget = Math.max(1, Math.round((1 - raceAccuracyGoal() / 100) * chars));
       session.errors = 0;
     }
     if (session.errors >= session.errorBudget) return false;
@@ -5998,7 +6028,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const wpm = wpmNow();
     if (!wpm) return;
-    log(`WPM ${wpmInt(wpm)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}% · ${session.chars} keys`);
+    log(`WPM ${wpmInt(wpm)}/${raceWpm()} · accuracy ${accuracyNow().toFixed(1)}%/${raceAccuracyGoal().toFixed(1)}% · ${session.chars} keys`);
   }
 
 
@@ -7339,7 +7369,11 @@ All of this only aims at believable statistics. It is your call and your risk.
         session.lastKeyAt = Date.now();
         session.lastAcceptedAt = Date.now();
         session.typing = true;
-        log(`Race started. Target: ${profile.targetWPM} WPM / ${profile.accuracyGoal.toFixed(1)}%`);
+        // Variacion por carrera, sorteada aqui: la tanda mantiene su objetivo y
+        // esta carrera es un poco mas rapida o mas lenta que la anterior.
+        const race = rollRaceDrift();
+        log(`Race started. Target: ${race.wpm} WPM / ${race.accuracy.toFixed(1)}%`
+          + ` (session ${profile.targetWPM} WPM / ${profile.accuracyGoal.toFixed(1)}%, drift ${race.wpmDrift >= 0 ? '+' : ''}${race.wpmDrift})`);
         return true;
       }
 
@@ -7499,7 +7533,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // `achieved` el WPM que se corrige (modelo al cerrar, oficial si ya llego) y
   // `target` el objetivo de ESA carrera. No vale el actual: la cola avanza la
   // serie al cerrar, asi que cuando llega el paquete ya es el de la siguiente.
-  function trimFor(achieved, base, target = profile.targetWPM) {
+  function trimFor(achieved, base, target = raceWpm()) {
     if (!Number.isFinite(achieved) || achieved <= 0) return base;
     if (!Number.isFinite(target) || target <= 0) return base;
     // trim multiplica el RETARDO (ver baseDelay), asi que un trim pequeno
@@ -7527,7 +7561,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     const sample = Number.isFinite(official) && official > 0 ? official : achieved;
 
     const base = session.trim;
-    const target = profile.targetWPM;
+    // El objetivo contra el que se corrige es el de ESTA carrera, no el de la
+    // tanda: si la carrera salio con +2 de desvio, comparar contra el centro
+    // convertiria esa variacion en un error del modelo.
+    const target = raceWpm();
     const next = trimFor(sample, base, target);
     if (Math.abs(next - base) >= 0.002) {
       session.trim = next;
@@ -7975,7 +8012,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       log('Race lost before the finish line; it is not counted.');
     } else {
       counted = countRace();
-      log(`Race finished · WPM ${wpmInt(wpmNow())}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}%`);
+      log(`Race finished · WPM ${wpmInt(wpmNow())}/${raceWpm()} · accuracy ${accuracyNow().toFixed(1)}%/${raceAccuracyGoal().toFixed(1)}%`);
       // La fila recien apuntada, para que la calibracion sepa a que carrera
       // pertenece y pueda rehacerse cuando llegue su WPM oficial.
       autocalibrate(counted ? raceHistory[raceHistory.length - 1] : null);
@@ -10726,6 +10763,18 @@ All of this only aims at believable statistics. It is your call and your risk.
   // Muestra de cadencia pura: cuanto tarda el motor por tecla a un objetivo
   // dado. Subir el techo solo cambia el numero del panel si la cadencia no
   // llega, asi que el harness mide el motor y no la etiqueta.
+  // Objetivo de la carrera en curso y la banda de desvio que puede sortear, para
+  // que el harness compruebe que dos carreras no son la misma foto.
+  window.__ntaDebug.raceTarget = () => ({
+    wpm: raceWpm(),
+    accuracy: raceAccuracyGoal(),
+    sessionWpm: profile.targetWPM,
+    sessionAccuracy: profile.accuracyGoal,
+    drift: Number(session.raceWpmDrift) || 0,
+    accDrift: Number(session.raceAccDrift) || 0,
+  });
+  window.__ntaDebug.raceWpmFor = (base, drift) => raceWpmAt(base, drift);
+  window.__ntaDebug.rollRaceDrift = () => rollRaceDrift();
   window.__ntaDebug.paceSample = (target, keys = 2000) => {
     const text = 'the quick brown fox jumps over the lazy dog and then some more words to type ';
     const count = Math.max(2, Math.round(Number(keys) || 2000));
