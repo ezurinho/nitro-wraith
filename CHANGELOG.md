@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.62 — 2026-11-23
+
+- feat(panel): readable labels, reduced motion and a spoken race state
+
 ## 8.14.61 — 2026-11-23
 
 - feat(pace): make the top-share rule depend on each account, not on a number
