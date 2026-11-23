@@ -8716,6 +8716,19 @@ All of this only aims at believable statistics. It is your call and your risk.
            ==================================================================== */
         * { box-sizing: border-box; }
 
+        /* Movimiento reducido (WCAG 2.3.3): quien lo pide en el sistema no
+           necesita ver la entrada del panel, el muelle del interruptor ni el
+           parpadeo de un numero. El panel se queda quieto y sigue funcionando
+           igual: nada de lo de abajo oculta ni retrasa datos. */
+        @media (prefers-reduced-motion: reduce) {
+          .panel *, .panel *::before, .panel *::after {
+            animation-duration: .001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: .001ms !important;
+            scroll-behavior: auto !important;
+          }
+        }
+
         .panel {
           /* Una sola piel se cambia con data-theme: todo lo de abajo es el
              contrato que comparten los seis temas. El borde, el halo y los
@@ -9136,7 +9149,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         .hist-row .wpm { white-space: nowrap; }
         .hist-row .wpm .model { margin-left: 5px; font: 700 8px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-2); }
         .hist-row:first-child .wpm .model { color: var(--acc-2); }
-        .hist-row .nitro-tag { margin-right: 4px; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc); font-style: normal; font-size: 7.5px; letter-spacing: .06em; vertical-align: 1px; }
+        .hist-row .nitro-tag { margin-right: 4px; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc); font-style: normal; font-size: 9px; letter-spacing: .06em; vertical-align: 1px; }
         .hist-row .place { color: var(--dim); }
         .hist-row .place[data-medal="1"] { color: #ffd166; }
         .hist-row .place[data-medal="2"] { color: #d7dee8; }
@@ -9301,9 +9314,9 @@ All of this only aims at believable statistics. It is your call and your risk.
         .mark { width: 27px; height: 27px; border-radius: 8px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
         .mark svg { width: 19px; height: 19px; filter: none; }
         .title { font-size: 13px; letter-spacing: .1em; text-shadow: none; }
-        .sub { margin-top: 3px; font-size: 8px; letter-spacing: .08em; color: var(--dim); }
+        .sub { margin-top: 3px; font-size: 9px; letter-spacing: .08em; color: var(--dim); }
         .chips-row { flex-wrap: wrap; row-gap: 5px; padding: 0 11px 9px; }
-        .pace, .mode, .cap { padding: 4px 7px; border-radius: 6px; font-size: 8px; letter-spacing: .08em; }
+        .pace, .mode, .cap { padding: 4px 7px; border-radius: 6px; font-size: 9px; letter-spacing: .08em; }
         .cap { flex: 0 1 auto; }
 
         .main { border-top-color: var(--line); }
@@ -9312,22 +9325,22 @@ All of this only aims at believable statistics. It is your call and your risk.
         .rail-btn { width: 30px; height: 30px; border-radius: 7px; }
         .views { padding: 10px 11px 11px; }
         .view-head { align-items: center; margin-bottom: 9px; padding-bottom: 7px; border-bottom-color: var(--line); }
-        .view-head span { gap: 6px; font-size: 8px; letter-spacing: .13em; color: var(--dim); }
+        .view-head span { gap: 6px; font-size: 9px; letter-spacing: .13em; color: var(--dim); }
         .view-head span::before { width: 5px; height: 5px; border-radius: 2px; box-shadow: none; }
-        .view-head b { font-size: 8px; color: var(--dim-2); }
+        .view-head b { font-size: 9px; color: var(--dim-2); }
 
         .card { margin-bottom: 8px; padding: 10px; border-radius: 9px; background: var(--card); border-color: var(--line); transition: none; }
         .card:hover { border-color: var(--line); box-shadow: none; }
         .card::before, .card > .ghost { display: none; }
         .card-h { align-items: center; margin-bottom: 7px; }
         .card-t { font-size: 9px; letter-spacing: .13em; color: var(--ink-2); }
-        .card-s { font-size: 8px; color: var(--dim); }
+        .card-s { font-size: 9px; color: var(--dim); }
         .hero { padding: 10px 0 9px; }
         .stat b { font-size: 28px; text-shadow: none; }
         .stat b[data-good="1"] { text-shadow: none; }
         .stat b[data-good="0"] { text-shadow: none; }
-        .stat span { margin-top: 5px; font-size: 7.5px; letter-spacing: .13em; color: var(--dim); }
-        .auto-pace { margin-top: 3px; padding: 3px 7px; border-color: var(--line); background: transparent; color: var(--dim); font-size: 7.5px; letter-spacing: .05em; }
+        .stat span { margin-top: 5px; font-size: 9px; letter-spacing: .13em; color: var(--dim); }
+        .auto-pace { margin-top: 3px; padding: 3px 7px; border-color: var(--line); background: transparent; color: var(--dim); font-size: 9px; letter-spacing: .05em; }
         .auto-pace::before { width: 4px; height: 4px; box-shadow: none; }
 
         /* Las metricas de Live y Season se leen como una cuadricula, no como
@@ -9338,7 +9351,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         .v-stats .live-card .rows .row,
         .v-stats .season-card .rows .row { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px; min-width: 0; padding: 7px 8px; border: 0; background: rgba(0, 0, 0, .16); }
         .v-stats .live-card .rows .row > span,
-        .v-stats .season-card .rows .row > span { font-size: 7.5px; letter-spacing: .08em; color: var(--dim-2); }
+        .v-stats .season-card .rows .row > span { font-size: 9px; letter-spacing: .08em; color: var(--dim-2); }
         .v-stats .live-card .rows .row b,
         .v-stats .season-card .rows .row b { width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 10.5px; line-height: 1.3; color: var(--ink-2); }
         .v-stats .live-card .rows .result-row { grid-column: 1 / -1; }
@@ -9350,7 +9363,7 @@ All of this only aims at believable statistics. It is your call and your risk.
            el historico usado y cuando fue la ultima lectura. */
         .account-card .acct-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin: -1px 0 6px; }
         .account-card .acct-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--acc-2); }
-        .account-card .acct-refresh { flex: 0 0 auto; padding: 4px 8px; font-size: 8px; }
+        .account-card .acct-refresh { flex: 0 0 auto; padding: 4px 8px; font-size: 9px; }
         .account-card .acct-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
         .account-card .acct-metrics > div { min-width: 0; padding: 6px 7px; background: rgba(0, 0, 0, .16); }
         .account-card .acct-metrics b { display: block; font: 700 15px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink); }
@@ -9363,12 +9376,12 @@ All of this only aims at believable statistics. It is your call and your risk.
         .account-card .acct-state[data-state="idle"] { color: var(--dim-2); }
         .season-card .season-name { margin: 1px 0 7px; font-size: 13px; }
         .season-card .season-actions { margin-top: 7px; }
-        .season-card .season-actions .act { font-size: 8px; padding: 5px 9px; }
+        .season-card .season-actions .act { font-size: 9px; padding: 5px 9px; }
         .update-card .season-actions .act { flex: 0 1 auto; }
 
         .foot { padding: 7px 11px 8px; background: transparent; }
         .status { min-height: 0; margin-bottom: 6px; font-size: 9px; color: var(--dim); }
-        .foot-bar { font-size: 8px; letter-spacing: .03em; }
+        .foot-bar { font-size: 9px; letter-spacing: .03em; }
         .actions { padding: 0 11px 11px; }
         .toggle { padding: 9px 0; border-radius: 8px; background: var(--acc-dim); border-color: var(--line-strong); box-shadow: none; }
         .toggle:hover { box-shadow: none; }
@@ -14629,7 +14642,7 @@ All of this only aims at believable statistics. It is your call and your risk.
               <div class="view-head"><span>Live</span><b>race telemetry</b></div>
               <div class="card live-card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
-                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
+                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag" role="status" aria-live="polite">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
                 <div class="hero">
                   <div class="stat"><b data-field="live">—</b><span>live wpm</span></div>
                   <i class="sep"></i>
