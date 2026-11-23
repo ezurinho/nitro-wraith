@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.61 — 2026-11-23
+
+- feat(pace): make the top-share rule depend on each account, not on a number
+
 ## 8.14.60 — 2026-11-23
 
 - feat(pace): aim at the account's own top speed, not at its average
