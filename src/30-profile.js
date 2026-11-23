@@ -1359,7 +1359,25 @@
       ? `${lifetimeInfo.rows} mo · ${lifetimeInfo.pages} pg${lifetimeInfo.stale ? ' · stale' : lifetimeInfo.cached ? ' · cached' : ''}`
       : accountStats ? 'profile only' : '—';
     const acctRead = at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'never';
+    // Calendario: el plan se pinta en la tarjeta de la cuenta, y cambia con la
+    // hora (curva) y con el dia (descanso), asi que entra en la firma.
+    const planWin = activeWindow();
+    const planRestNow = isRestDay(at || Date.now());
+    let planRestText = 'none';
+    if (restDaysPerWeek() > 0) {
+      if (planRestNow) planRestText = `today · back 00:00`;
+      else {
+        for (let day = 1; day <= 7; day++) {
+          if (isRestDay((at || Date.now()) + day * MS_PER_DAY)) { planRestText = `in ${day}d`; break; }
+        }
+      }
+    }
+    const planCurve = dayCurveAt(at || Date.now());
+    const planHours = !planWin.on || planWin.allDay
+      ? 'all day'
+      : `${planWin.startText}–${planWin.endText}`;
     const calSig = [wpmText, accText, accountText, at, accountId, acctState, acctLabel,
+      planHours, planRestText, planCurve, localDayKey(at || Date.now()),
       acctHistory, acctRead, calibrating, calibrationError, calibrationRetryAt,
       Number(accountStats && accountStats.targetWpm) || 0,
       Number(accountStats && accountStats.bestWpm) || 0,
@@ -1387,6 +1405,15 @@
       ? String(Math.round(Number(accountStats.bestWpm))) : '—');
     setText(panel.refs.acctHistory, acctHistory);
     setText(panel.refs.acctRange, wpmText === '—' ? '—' : `${wpmText} wpm`);
+    setText(panel.refs.acctHours, planHours);
+    setText(panel.refs.acctRest, planRestText);
+    // La curva se ensena como desvio y como objetivo ya corregido: el centro de
+    // la tanda no se mueve, lo que se mueve es lo que se teclea a esta hora.
+    // Redondeado a por ciento: la curva cambia de a decimas y `−0%` es ruido.
+    const curvePct = Math.round((1 - planCurve) * 100);
+    setText(panel.refs.acctCurve, curvePct <= 0
+      ? `none · ${raceWpm()} wpm`
+      : `−${curvePct}% · ${raceWpm()} wpm`);
     setText(panel.refs.acctRead, acctRead);
     if (panel.refs.acctState) {
       setText(panel.refs.acctState, acctLabel);

@@ -3317,7 +3317,25 @@ All of this only aims at believable statistics. It is your call and your risk.
       ? `${lifetimeInfo.rows} mo · ${lifetimeInfo.pages} pg${lifetimeInfo.stale ? ' · stale' : lifetimeInfo.cached ? ' · cached' : ''}`
       : accountStats ? 'profile only' : '—';
     const acctRead = at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'never';
+    // Calendario: el plan se pinta en la tarjeta de la cuenta, y cambia con la
+    // hora (curva) y con el dia (descanso), asi que entra en la firma.
+    const planWin = activeWindow();
+    const planRestNow = isRestDay(at || Date.now());
+    let planRestText = 'none';
+    if (restDaysPerWeek() > 0) {
+      if (planRestNow) planRestText = `today · back 00:00`;
+      else {
+        for (let day = 1; day <= 7; day++) {
+          if (isRestDay((at || Date.now()) + day * MS_PER_DAY)) { planRestText = `in ${day}d`; break; }
+        }
+      }
+    }
+    const planCurve = dayCurveAt(at || Date.now());
+    const planHours = !planWin.on || planWin.allDay
+      ? 'all day'
+      : `${planWin.startText}–${planWin.endText}`;
     const calSig = [wpmText, accText, accountText, at, accountId, acctState, acctLabel,
+      planHours, planRestText, planCurve, localDayKey(at || Date.now()),
       acctHistory, acctRead, calibrating, calibrationError, calibrationRetryAt,
       Number(accountStats && accountStats.targetWpm) || 0,
       Number(accountStats && accountStats.bestWpm) || 0,
@@ -3345,6 +3363,15 @@ All of this only aims at believable statistics. It is your call and your risk.
       ? String(Math.round(Number(accountStats.bestWpm))) : '—');
     setText(panel.refs.acctHistory, acctHistory);
     setText(panel.refs.acctRange, wpmText === '—' ? '—' : `${wpmText} wpm`);
+    setText(panel.refs.acctHours, planHours);
+    setText(panel.refs.acctRest, planRestText);
+    // La curva se ensena como desvio y como objetivo ya corregido: el centro de
+    // la tanda no se mueve, lo que se mueve es lo que se teclea a esta hora.
+    // Redondeado a por ciento: la curva cambia de a decimas y `−0%` es ruido.
+    const curvePct = Math.round((1 - planCurve) * 100);
+    setText(panel.refs.acctCurve, curvePct <= 0
+      ? `none · ${raceWpm()} wpm`
+      : `−${curvePct}% · ${raceWpm()} wpm`);
     setText(panel.refs.acctRead, acctRead);
     if (panel.refs.acctState) {
       setText(panel.refs.acctState, acctLabel);
@@ -12133,6 +12160,9 @@ function dayCurveAt(at = Date.now()) {
       acctTop: pick('[data-field="acctTop"]'),
       acctHistory: pick('[data-field="acctHistory"]'),
       acctRange: pick('[data-field="acctRange"]'),
+      acctHours: pick('[data-field="acctHours"]'),
+      acctRest: pick('[data-field="acctRest"]'),
+      acctCurve: pick('[data-field="acctCurve"]'),
       acctRead: pick('[data-field="acctRead"]'),
       acctRefresh: pick('[data-field="acctRefresh"]'),
       customWpm: pick('[data-field="customWpm"]'),
@@ -14887,6 +14917,9 @@ function dayCurveAt(at = Date.now()) {
                 <div class="rows">
                   <div class="row"><span>history</span><b data-field="acctHistory">—</b></div>
                   <div class="row"><span>range</span><b data-field="acctRange">—</b></div>
+                  <div class="row" title="Active hours: outside this window the queue waits instead of racing. All day means the window is off."><span>hours</span><b data-field="acctHours">all day</b></div>
+                  <div class="row" title="Rest days: the account takes one day in seven off, chosen from the date. A queue that races 24/7 for weeks is a stronger signature than a fast WPM."><span>rest</span><b data-field="acctRest">—</b></div>
+                  <div class="row" title="Day curve: the target moves with the hour (1.0 at 13:30, 0.95 at 01:30) so the pace is not identical at every hour of the day"><span>curve</span><b data-field="acctCurve">—</b></div>
                   <div class="row"><span>read</span><b data-field="acctRead">never</b></div>
                 </div>
               </div>

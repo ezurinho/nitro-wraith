@@ -105,6 +105,9 @@
                 <div class="rows">
                   <div class="row"><span>history</span><b data-field="acctHistory">—</b></div>
                   <div class="row"><span>range</span><b data-field="acctRange">—</b></div>
+                  <div class="row" title="Active hours: outside this window the queue waits instead of racing. All day means the window is off."><span>hours</span><b data-field="acctHours">all day</b></div>
+                  <div class="row" title="Rest days: the account takes one day in seven off, chosen from the date. A queue that races 24/7 for weeks is a stronger signature than a fast WPM."><span>rest</span><b data-field="acctRest">—</b></div>
+                  <div class="row" title="Day curve: the target moves with the hour (1.0 at 13:30, 0.95 at 01:30) so the pace is not identical at every hour of the day"><span>curve</span><b data-field="acctCurve">—</b></div>
                   <div class="row"><span>read</span><b data-field="acctRead">never</b></div>
                 </div>
               </div>

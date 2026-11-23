@@ -2890,10 +2890,13 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       // -2 no la saca), asi que se compara con margen y se exige la banda.
       && Math.abs(raceDrift.state.wpm
         - (raceDrift.state.planned + raceDrift.state.drift)) <= 2
-      && raceDrift.state.planned >= raceDrift.band.min
-      && raceDrift.state.planned <= raceDrift.band.max
-      && raceDrift.state.wpm >= raceDrift.band.min
-      && raceDrift.state.wpm <= raceDrift.band.max,
+      // La banda que gobierna el plan es la del propio plan (state.band), no la
+      // que pinta `autoPace`: son dos redondeos del mismo centro y comparar una
+      // contra otra fue lo que hizo flakear este check.
+      && raceDrift.state.planned >= raceDrift.state.band.min
+      && raceDrift.state.planned <= raceDrift.state.band.max
+      && raceDrift.state.wpm >= raceDrift.state.band.min
+      && raceDrift.state.wpm <= raceDrift.state.band.max,
     raceDrift);
 
   // Actividad humana: ni 24/7 ni el mismo ritmo a las 03:00 que a las 13:00.
