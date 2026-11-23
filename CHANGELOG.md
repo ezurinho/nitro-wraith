@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.64 — 2026-11-23
+
+- feat(panel): add contextual adaptive UI (#1)
+
 ## 8.14.63 — 2026-11-23
 
 - feat(panel): the account card says when it will race and when it will rest
