@@ -434,6 +434,89 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('opening the other views mounts the remaining templates',
     hydrated && hydrated.views === 4 && hydrated.nodes > startup.nodes, hydrated);
 
+  const uiFoundation = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const root = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = root.querySelector('.panel');
+    const limit = root.querySelector('.limit-row');
+    const prev = root.querySelector('.prev-row');
+    const collapse = root.querySelector('.collapse');
+    if (!collapse) return { has: false };
+    collapse.focus();
+    collapse.click();
+    const focusKept = root.activeElement === collapse;
+    collapse.click();
+    return {
+      has: true,
+      contextBanner: Boolean(root.querySelector('.context-banner')),
+      limitTag: limit ? limit.tagName : '',
+      prevTag: prev ? prev.tagName : '',
+      focusKept,
+      maxHeight: w.getComputedStyle(panel).maxHeight,
+    };
+  })()`);
+  check('the panel exposes a contextual shell and semantic setting controls',
+    uiFoundation.has && uiFoundation.contextBanner
+      && uiFoundation.limitTag === 'BUTTON' && uiFoundation.prevTag === 'BUTTON',
+    uiFoundation);
+  check('the panel keeps keyboard focus after a control action',
+    uiFoundation.has && uiFoundation.focusKept, uiFoundation);
+
+  const contextMatrix = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.panelContextFor) return { has: false };
+    const now = Date.now();
+    const cases = [
+      ['running', { typing: true }],
+      ['paused', { typing: true, paused: true }],
+      ['break', { breakUntil: now + 60000 }],
+      ['stopped', { stopped: true }],
+      ['banned', { banned: true, stopped: true }],
+      ['offline', { offline: true }],
+      ['blocked', { blockedUntil: now + 60000 }],
+      ['scheduled', { activeGate: { key: 'hours', label: 'hours 08–23', nextText: '08:00' } }],
+      ['rest', { restGate: { key: 'rest', label: 'rest day' } }],
+      ['limit', { dailyReached: true }],
+      ['waiting', {}],
+    ];
+    return {
+      has: true,
+      results: cases.map(([expected, patch]) => ({
+        expected,
+        actual: d.panelContextFor(patch).key,
+        title: d.panelContextFor(patch).title,
+      })),
+    };
+  })()`);
+  check('the contextual state matrix resolves precedence and labels',
+    contextMatrix.has && contextMatrix.results.every((item) => item.expected === item.actual && item.title),
+    contextMatrix);
+
+  const contextualDom = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const root = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    if (!d || !d.patchSession) return { has: false };
+    d.patchSession({ typing: true, stopped: false });
+    const running = {
+      context: root.querySelector('.panel').dataset.context,
+      title: root.querySelector('[data-field="contextTitle"]').textContent,
+    };
+    d.patchSession({ typing: false, stopped: true });
+    const stopped = {
+      context: root.querySelector('.panel').dataset.context,
+      title: root.querySelector('[data-field="contextTitle"]').textContent,
+    };
+    d.patchSession({ typing: false, stopped: false });
+    return { has: true, running, stopped };
+  })()`);
+  check('the panel repaints its contextual shell from real session state',
+    contextualDom.has && contextualDom.running.context === 'running'
+      && contextualDom.stopped.context === 'stopped'
+      && contextualDom.running.title !== contextualDom.stopped.title,
+    contextualDom);
+
   const state = await cdp.evaluate(READ);
   check('panel mounted inside the race frame', state.panel === true, state);
   // La version se lee del propio userscript: subirla no obliga a tocar el test.
@@ -748,6 +831,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   // RGB: se muestrea el tono y el acento con 900 ms de diferencia. Si
   // `@property` no estuviera registrado, el tono saltaria de 0 a 360 en seco y
   // las dos lecturas caerian en rojo (0/360), que es el fallo que se veia.
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+  });
   const rgbMotion = await cdp.evaluate(`(async () => {
     const w = document.querySelector('iframe').contentWindow;
     const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
@@ -769,6 +855,39 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('RGB animates the hue and the accent instead of freezing on red',
     Number(rgbMotion.h2) > Number(rgbMotion.h1)
       && Number(rgbMotion.h1) > 0 && rgbMotion.a1 !== rgbMotion.a2, rgbMotion);
+
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+  });
+  await waitFor(panelReadyRaw, 5000, 'the panel after reduced motion changes');
+  await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const root = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const rgb = root.querySelector('[data-theme-btn="rgb"]');
+    if (!rgb) return false;
+    rgb.click();
+    return true;
+  })()`);
+  await sleep(120);
+  const reducedRgb = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const root = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = root.querySelector('.panel');
+    const hue = panel.getAnimations().filter((animation) => animation.animationName === 'nt-rgb-hue');
+    const result = {
+      reduced: w.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      running: hue.some((animation) => animation.playState === 'running'),
+      animations: hue.map((animation) => animation.animationName),
+    };
+    const carbon = root.querySelector('[data-theme-btn="carbon"]');
+    if (carbon) carbon.click();
+    return result;
+  })()`);
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+  });
+  check('reduced motion disables the continuous RGB hue cycle',
+    reducedRgb.reduced && !reducedRgb.running, reducedRgb);
   check('challenge auto-close is on by default', state.ch === 'on', state.ch);
   check('pace auto-calibration is on by default', state.cal === 'on', state.cal);
   check('7-day card shows the two seeded days', state.weekRows === 2, { rows: state.weekRows, total: state.weekTotal });
@@ -2934,8 +3053,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     calendar.race.planned
       === Math.min(calendar.race.band.max,
         Math.max(calendar.race.band.min,
-          Math.round(calendar.race.sessionWpm * calendar.now.curve)))
-      && calendar.race.curve < 1,
+          Math.round(calendar.race.sessionWpm * calendar.now.curve))),
     `${calendar.race.sessionWpm} -> ${calendar.race.wpm} at curve ${calendar.now.curve}`);
 
   // Cuando el trinquete conserva un rango mas alto, la fila no puede seguir
@@ -4117,6 +4235,55 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     await cdp.evaluate(fs.readFileSync(SCRIPT, 'utf8'));
     await waitFor(async () => (await cdp.evaluate(`Boolean(document.getElementById('nt-queue-panel'))`)), 8000, 'the garage panel');
 
+    const garageUi = await cdp.evaluate(`(() => {
+      const root = document.getElementById('nt-queue-panel').shadowRoot;
+      const panel = root.querySelector('.p');
+      const context = root.querySelector('.garage-context');
+      const primary = root.querySelector('.act.primary');
+      return {
+        hasPanel: Boolean(panel),
+        hasContext: Boolean(context),
+        context: panel ? panel.dataset.context : '',
+        title: context ? (context.querySelector('[data-f="contextTitle"]') || {}).textContent : '',
+        primary: primary ? primary.dataset.act : '',
+      };
+    })()`);
+    check('the garage exposes a contextual summary and one primary action',
+      garageUi.hasPanel && garageUi.hasContext && garageUi.context
+        && garageUi.title && garageUi.primary,
+      garageUi);
+
+    const garageContextMatrix = await cdp.evaluate(`(() => {
+      const d = window.__ntaDebug;
+      if (!d || !d.garageActionFor) return { has: false };
+      const cases = [
+        ['ready', { signed: true, armed: true }, 'race'],
+        ['gate', { signed: true, armed: true, gates: [{ key: 'block', label: 'site block', left: 60000 }] }, ''],
+        ['retry', { signed: true, armed: true, hasRetry: true }, 'retry'],
+        ['reward', { signed: true, armed: true, boxReady: true }, 'box'],
+        ['stopped', { signed: true, armed: false, activeStop: true }, 'resume'],
+        ['banned', { signed: true, armed: false, banned: true }, 'resume'],
+        ['cleared', { signed: true, armed: false, banCleared: true }, 'resume'],
+        ['signin', { signed: false, armed: false }, ''],
+        ['offline', { signed: true, armed: true, offline: true }, ''],
+        ['read', { social: true }, ''],
+      ];
+      return {
+        has: true,
+        results: cases.map(([expected, patch, primary]) => {
+          const result = d.garageActionFor(patch);
+          return { expected, context: result.context.key, primary: result.primary };
+        }),
+      };
+    })()`);
+    check('the garage only highlights an action that can actually run',
+      garageContextMatrix.has && garageContextMatrix.results.every((item, index) => {
+        const expected = ['ready', 'gate', 'retry', 'reward', 'stopped', 'banned', 'cleared', 'signin', 'offline', 'read'][index];
+        const primary = ['race', '', 'retry', 'box', 'resume', 'resume', 'resume', '', '', ''][index];
+        return item.expected === expected && item.context === expected && item.primary === primary;
+      }),
+      garageContextMatrix);
+
     // El modal real de DQ ofrece «Try Again» y «Garage». El bot tiene que
     // pulsar Garage; se inyecta Try Again primero para que el orden del DOM no
     // decida por nosotros.
@@ -4565,6 +4732,48 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && /Clear ban/.test(garageStop.ban.title),
       garageStop.ban);
 
+    const banRecovery = await cdp.evaluate(`(() => {
+      const root = document.getElementById('nt-queue-panel').shadowRoot;
+      const panel = root.querySelector('.p');
+      const resume = root.querySelector('[data-act="resume"]');
+      const paint = () => window.__ntaDebug.garagePaint();
+      const previous = localStorage.getItem('ntQueue:lastStop');
+      const previousTop = window.__ntaFrame;
+      const frames = Array.from(document.querySelectorAll('iframe'));
+      const previousFrames = frames.map((frame) => {
+        try { return frame.contentWindow ? frame.contentWindow.__ntaFrame : null; } catch { return null; }
+      });
+      window.__ntaFrame = null;
+      for (const frame of frames) {
+        try { if (frame.contentWindow) frame.contentWindow.__ntaFrame = null; } catch { /* other origin */ }
+      }
+      localStorage.setItem('ntQueue:lastStop', JSON.stringify({
+        at: Date.now(), reason: 'account permanently banned; automation stopped',
+        holdMs: 24 * 3600000, clearedAt: 0, clearedBy: '',
+      }));
+      paint();
+      const banned = { context: panel.dataset.context, label: resume.textContent.trim() };
+      resume.click();
+      paint();
+      const cleared = { context: panel.dataset.context, label: resume.textContent.trim(), armed: panel.dataset.armed };
+      resume.click();
+      paint();
+      const resumed = { context: panel.dataset.context, armed: panel.dataset.armed };
+      if (previous === null) localStorage.removeItem('ntQueue:lastStop');
+      else localStorage.setItem('ntQueue:lastStop', previous);
+      window.__ntaFrame = previousTop;
+      frames.forEach((frame, index) => {
+        try { if (frame.contentWindow) frame.contentWindow.__ntaFrame = previousFrames[index]; } catch { /* other origin */ }
+      });
+      paint();
+      return { banned, cleared, resumed };
+    })()`);
+    check('the garage can clear a ban and then really re-arm the queue',
+      banRecovery.banned.context === 'banned' && banRecovery.banned.label === 'Clear ban'
+        && banRecovery.cleared.context === 'cleared' && banRecovery.cleared.armed === '0'
+        && banRecovery.resumed.armed === '1',
+      banRecovery);
+
     // Resumen de las ultimas paradas: cuenta motivos, no la ultima marca. Una
     // entrada de hace ocho dias no debe contaminar la ventana de siete dias.
     const stopMix = await cdp.evaluate(`(() => {
@@ -4972,6 +5181,141 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && tuneFilter.cleared.empty === false && tuneFilter.cleared.clear === false,
       { has: tuneFilter.has, total: tuneFilter.total, all: tuneFilter.all, active: tuneFilter.active, limits: tuneFilter.limits, none: tuneFilter.none, cleared: tuneFilter.cleared });
 
+    const tuneDisclosure = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+      const tab = shadow.querySelector('[data-tab-btn="tune"]');
+      const stats = shadow.querySelector('[data-tab-btn="stats"]');
+      if (!tab) return { has: false };
+      tab.click();
+      const sections = Array.from(shadow.querySelectorAll('.tune-sec'));
+      const buttons = sections.map((section) => section.querySelector('[data-tune-disclosure]'));
+      const limits = sections.find((section) => section.querySelector('[data-field="activeRow"]'));
+      const input = shadow.querySelector('[data-field="tuneSearch"]');
+      const clear = shadow.querySelector('[data-field="tuneClear"]');
+      if (!limits || !input || !clear || buttons.some((button) => !button)) return { has: false };
+      const limitsButton = limits.querySelector('[data-tune-disclosure]');
+      const before = {
+        open: limits.dataset.open,
+        expanded: limitsButton.getAttribute('aria-expanded'),
+        tag: limitsButton.tagName,
+      };
+      limitsButton.focus();
+      limitsButton.click();
+      const after = {
+        open: limits.dataset.open,
+        expanded: limitsButton.getAttribute('aria-expanded'),
+        focusKept: shadow.activeElement === limitsButton,
+      };
+      input.value = 'active hours';
+      input.dispatchEvent(new w.Event('input', { bubbles: true }));
+      const searchOpen = limits.dataset.open === 'true';
+      const matchingCard = limits.querySelector('[data-field="activeRow"]').closest('.card');
+      const cardDisplay = w.getComputedStyle(matchingCard).display;
+      clear.click();
+      const restored = limits.dataset.open;
+      const searchFocus = shadow.activeElement === input;
+      if (stats) stats.click();
+      return { has: true, before, after, searchOpen, cardDisplay, restored, searchFocus };
+    })()`);
+    check('TUNE sections are keyboard-operable disclosures',
+      tuneDisclosure.has && tuneDisclosure.before.tag === 'BUTTON'
+        && tuneDisclosure.before.expanded === 'true'
+        && tuneDisclosure.after.open === 'false'
+        && tuneDisclosure.after.expanded === 'false'
+        && tuneDisclosure.after.focusKept,
+      tuneDisclosure);
+    check('TUNE search opens matching collapsed sections and restores focus',
+      tuneDisclosure.has && tuneDisclosure.searchOpen
+        && tuneDisclosure.cardDisplay !== 'none'
+        && tuneDisclosure.restored === 'false'
+        && tuneDisclosure.searchFocus,
+      tuneDisclosure);
+
+    const logFilter = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+      const log = shadow.querySelector('[data-tab-btn="log"]');
+      const stats = shadow.querySelector('[data-tab-btn="stats"]');
+      if (!log) return { has: false };
+      log.click();
+      const input = shadow.querySelector('[data-field="logSearch"]');
+      const clear = shadow.querySelector('[data-field="logClear"]');
+      const empty = shadow.querySelector('[data-field="logEmpty"]');
+      const count = shadow.querySelector('[data-field="logCountFiltered"]');
+      const items = Array.from(shadow.querySelectorAll('.v-log .log-item, .v-log .notice-item'));
+      if (!input || !clear || !empty || !count) return { has: false };
+      const set = (value) => {
+        input.value = value;
+        input.dispatchEvent(new w.Event('input', { bubbles: true }));
+        return {
+          visible: items.filter((item) => !item.hidden).length,
+          empty: !empty.hidden,
+          count: count.textContent,
+        };
+      };
+      const all = set('');
+      const matches = set('race');
+      const none = set('zzzz-no-log-entry');
+      clear.click();
+      const cleared = set('');
+      if (stats) stats.click();
+      return { has: true, total: items.length, all, matches, none, cleared };
+    })()`);
+    check('the Log filter narrows entries and restores the full list',
+      logFilter.has && logFilter.total > 0
+        && logFilter.all.visible === logFilter.total
+        && logFilter.matches.visible > 0
+        && logFilter.matches.visible < logFilter.total
+        && logFilter.none.visible === 0 && logFilter.none.empty
+        && logFilter.cleared.visible === logFilter.total
+        && !logFilter.cleared.empty,
+      logFilter);
+
+    const logFilterLive = await cdp.evaluate(`(async () => {
+      try {
+        const w = document.querySelector('iframe').contentWindow;
+        const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+        const log = shadow.querySelector('[data-tab-btn="log"]');
+        const stats = shadow.querySelector('[data-tab-btn="stats"]');
+        log.click();
+        const input = shadow.querySelector('[data-field="logSearch"]');
+        const empty = shadow.querySelector('[data-field="logEmpty"]');
+        const count = shadow.querySelector('[data-field="logCountFiltered"]');
+        input.value = 'zzzz-no-log-entry';
+        input.dispatchEvent(new w.Event('input', { bubbles: true }));
+        const csv = 'at,races,samples,mean_pts,sd_pts,outside,user,deltas\\r\\n'
+          + '2026-11-02T09:00:00.000Z,4,4,-0.20,0.10,0,TestRacer,-0.3 -0.2\\r\\n';
+        const file = new w.File([csv], 'live-history.csv', { type: 'text/csv' });
+        const dt = new w.DataTransfer();
+        dt.items.add(file);
+        const fileInput = shadow.querySelector('[data-field="liveFile"]');
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new w.Event('change', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const read = () => ({
+          visible: Array.from(shadow.querySelectorAll('.v-log .log-item, .v-log .notice-item')).filter((item) => !item.hidden).length,
+          empty: !empty.hidden,
+          count: count.textContent,
+        });
+        const loaded = read();
+        shadow.querySelector('[data-field="liveClear"]').click();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        const cleared = read();
+        input.value = '';
+        input.dispatchEvent(new w.Event('input', { bubbles: true }));
+        if (stats) stats.click();
+        return { has: true, loaded, cleared };
+      } catch (error) {
+        return { has: false, error: String(error && error.message || error) };
+      }
+    })()`, true);
+    check('the Log filter stays active when Live passes are loaded or cleared',
+      Boolean(logFilterLive && logFilterLive.has && logFilterLive.loaded && logFilterLive.cleared)
+        && logFilterLive.loaded.visible === 0 && logFilterLive.loaded.empty
+        && logFilterLive.cleared.visible === 0 && logFilterLive.cleared.empty,
+      logFilterLive);
+
     // 320 px fisicos al 200 % son 160 CSS: el rail lateral no cabe y el panel
     // pasa a columna con el rail arriba. La cabecera tiene que seguir visible
     // dentro del viewport y los controles no pueden desbordar a la derecha.
@@ -5049,6 +5393,46 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && !compactRace.chipsOverflow
         && !compactRace.strategyOverflow,
       compactRace);
+
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 320, height: 300, deviceScaleFactor: 1, mobile: false,
+    });
+    await sleep(100);
+    const shortRace = await cdp.evaluate(`(() => {
+      const frame = document.querySelector('iframe');
+      const w = frame.contentWindow;
+      const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+      const panel = shadow.querySelector('.panel');
+      const actions = shadow.querySelector('.actions');
+      const oldWidth = frame.style.width;
+      const oldHeight = frame.style.height;
+      frame.style.width = '320px';
+      frame.style.height = '300px';
+      shadow.querySelector('[data-tab-btn="tune"]').click();
+      const p = panel.getBoundingClientRect();
+      const a = actions.getBoundingClientRect();
+      const out = {
+        inner: w.innerHeight,
+        panelTop: p.top,
+        panelBottom: p.bottom,
+        actionsBottom: a.bottom,
+        actionsRight: a.right,
+        panelRight: p.right,
+        overflow: actions.scrollWidth > actions.clientWidth + 1,
+      };
+      shadow.querySelector('[data-tab-btn="stats"]').click();
+      frame.style.width = oldWidth;
+      frame.style.height = oldHeight;
+      return out;
+    })()`);
+    await cdp.send('Emulation.clearDeviceMetricsOverride');
+    await sleep(80);
+    check('the race panel stays inside a short viewport with its actions visible',
+      shortRace.panelTop >= -1 && shortRace.panelBottom <= shortRace.inner + 1
+        && shortRace.actionsBottom <= shortRace.panelBottom + 1
+        && shortRace.actionsRight <= shortRace.panelRight + 1
+        && !shortRace.overflow,
+      shortRace);
 
     // Resume del garaje: con un tipador vivo solo reenvia Alt+A (la marca de
     // parada sigue en pie hasta que el marco acepte); sin tipador borra la

@@ -4147,6 +4147,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (panel.refs.liveStreakRow) panel.refs.liveStreakRow.style.display = 'none';
       if (panel.refs.liveSpreadRow) panel.refs.liveSpreadRow.style.display = 'none';
       if (panel.refs.livePickExport) panel.refs.livePickExport.disabled = true;
+      filterLog();
       return;
     }
 
@@ -4250,6 +4251,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     paintLivePickOptions(list);
+    filterLog();
   }
 
   // El `live-history.json` que escribe `npm run live` trae las pasadas ya
@@ -8930,8 +8932,11 @@ function dayCurveAt(at = Date.now()) {
           --bg-lo: rgba(5, 8, 6, .995);
           position: relative;
           isolation: isolate;
+          display: flex;
+          flex-direction: column;
           width: 322px;
           max-width: calc(100vw - 32px);
+          max-height: calc(100vh - 32px);
           color: var(--ink);
           background:
             repeating-linear-gradient(0deg, rgba(255, 255, 255, .014) 0 1px, transparent 1px 3px),
@@ -9128,9 +9133,82 @@ function dayCurveAt(at = Date.now()) {
         .cap { flex: 1 1 auto; padding: 4px 8px; border-radius: 999px; text-align: center; font: 700 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; color: #ffe0b0; background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); transition: color .2s ease, background .2s ease, border-color .2s ease; }
         .panel[data-cap-hit="1"] .cap { color: #ffd6d6; background: color-mix(in srgb, var(--bad) 18%, transparent); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 
+        /* ---------- contexto y accion principal ---------------------------- */
+        .context-banner {
+          --ctx: var(--acc);
+          display: grid;
+          grid-template-columns: 28px minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 8px;
+          margin: 0 11px 8px;
+          padding: 8px 9px;
+          border: 1px solid color-mix(in srgb, var(--ctx) 28%, transparent);
+          border-radius: 9px;
+          background:
+            linear-gradient(110deg, color-mix(in srgb, var(--ctx) 13%, transparent), transparent 72%),
+            rgba(255, 255, 255, .025);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+          transition: border-color .2s ease, background .2s ease;
+        }
+        .context-icon {
+          display: grid;
+          place-items: center;
+          width: 28px;
+          height: 28px;
+          border-radius: 8px;
+          color: var(--ctx);
+          background: color-mix(in srgb, var(--ctx) 12%, transparent);
+          border: 1px solid color-mix(in srgb, var(--ctx) 24%, transparent);
+        }
+        .context-icon svg { width: 15px; height: 15px; }
+        .context-copy { min-width: 0; }
+        .context-copy b {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font: 750 10px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+          letter-spacing: .02em;
+          color: var(--ink);
+        }
+        .context-copy > span {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          margin-top: 2px;
+          font: 500 8.5px/1.3 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+          color: var(--dim);
+        }
+        .context-pill {
+          padding: 3px 6px;
+          border-radius: 999px;
+          font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+          letter-spacing: .1em;
+          text-transform: uppercase;
+          color: var(--ctx);
+          background: color-mix(in srgb, var(--ctx) 10%, transparent);
+          border: 1px solid color-mix(in srgb, var(--ctx) 24%, transparent);
+        }
+        .context-banner[data-context="running"] { --ctx: var(--acc); }
+        .context-banner[data-context="paused"] { --ctx: var(--warn); }
+        .context-banner[data-context="break"] { --ctx: var(--info); }
+        .context-banner[data-context="stopped"] { --ctx: var(--warn); }
+        .context-banner[data-context="error"],
+        .context-banner[data-context="banned"] { --ctx: var(--bad); }
+        .context-banner[data-context="blocked"] { --ctx: var(--warn); }
+        .context-banner[data-context="loading"] { --ctx: var(--info); }
+        .panel[data-collapsed="true"] .context-banner { display: none; }
+
+        button:focus-visible, a:focus-visible, input:focus-visible,
+        select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+          outline: 2px solid var(--acc);
+          outline-offset: 2px;
+        }
 
         /* ---------- cuerpo: rail + vistas ----------------------------------- */
-        .main { display: flex; align-items: stretch; gap: 0; border-top: 1px solid var(--line); }
+        .main { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch; gap: 0; border-top: 1px solid var(--line); }
+        .head, .chips-row, .context-banner, .race-line, .foot, .actions { flex: none; }
         .rail { position: relative; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 9px 6px; border-right: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, .02), transparent); }
         .rail-btn { all: unset; position: relative; z-index: 1; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; cursor: pointer; color: var(--dim-2); transition: color .18s ease, transform .12s ease; }
         .rail-btn:hover { color: var(--acc-2); }
@@ -9150,7 +9228,7 @@ function dayCurveAt(at = Date.now()) {
         .rail[data-index="2"] .rail-btn[data-tab-btn="log"],
         .rail[data-index="3"] .rail-btn[data-tab-btn="info"] { color: var(--acc); }
 
-        .views { flex: 1 1 auto; min-width: 0; max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; padding: 10px 11px 11px; }
+        .views { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 11px 11px; }
         .views::-webkit-scrollbar { width: 6px; }
         .views::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--acc) 22%, transparent); border-radius: 99px; }
         .views::-webkit-scrollbar-track { background: transparent; }
@@ -9186,11 +9264,30 @@ function dayCurveAt(at = Date.now()) {
         .tune-clear[hidden], .tune-empty[hidden] { display: none; }
         .tune-count { flex: none; font: 700 7.5px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--dim-2); white-space: nowrap; }
         .tune-empty { margin: -2px 1px 10px; padding: 11px 8px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; font: 500 9.5px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
-        .tune-sec-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin: 1px 1px 7px; }
-        .tune-sec-h span { display: inline-flex; align-items: center; gap: 6px; font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); }
+        .tune-sec-h {
+          appearance: none;
+          display: flex;
+          align-items: baseline;
+          flex-wrap: wrap;
+          gap: 2px 8px;
+          width: 100%;
+          margin: 1px 1px 7px;
+          padding: 3px 0;
+          border: 0;
+          background: none;
+          color: inherit;
+          text-align: left;
+          cursor: pointer;
+        }
+        .tune-sec-h span { display: inline-flex; align-items: center; gap: 6px; font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--acc); }
         .tune-sec-h span::before { content: ''; width: 12px; height: 1px; border-radius: 99px; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
         .tune-sec-h b { font: 600 8px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .04em; color: var(--dim-2); }
-        .tune-sec-h::after { content: ''; flex: 1 1 20px; min-width: 12px; height: 1px; align-self: center; background: linear-gradient(90deg, var(--line), transparent); }
+        .tune-sec-h i { margin-left: auto; font: 700 12px/1 ui-sans-serif, system-ui, sans-serif; color: var(--dim-2); transition: transform .2s ease; }
+        .tune-sec-h:hover span { color: var(--acc-2); }
+        .tune-sec-h:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 5px; }
+        .tune-sec[data-open="false"] .tune-sec-h i { transform: rotate(-90deg); }
+        .tune-sec[data-open="false"] .tune-sec-body { display: none; }
+        .tune-sec-body { display: block; }
 
         /* ---------- tarjetas ------------------------------------------------- */
         .card { position: relative; contain: layout style; margin-bottom: 9px; padding: 9px 10px 10px; border-radius: 10px; background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .012)); border: 1px solid var(--line); transition: border-color .2s ease, box-shadow .25s ease, transform .18s ease; }
@@ -9294,11 +9391,23 @@ function dayCurveAt(at = Date.now()) {
         .break-row { display: flex; }
         .panel[data-state="break"] .break-row b { color: var(--info); }
         .dq-row b { color: var(--warn); }
-        .limit-row { cursor: pointer; }
+        .limit-row, .prev-row {
+          appearance: none;
+          display: flex;
+          width: 100%;
+          margin: 0;
+          padding: 2.5px 0;
+          border: 0;
+          background: none;
+          color: inherit;
+          font: inherit;
+          text-align: left;
+          cursor: pointer;
+          box-sizing: border-box;
+        }
         .limit-row b { color: var(--acc); }
         .limit-row:hover b { text-decoration: underline dotted; }
         .panel[data-limit="on"] .limit-row b { color: var(--acc); }
-        .prev-row { cursor: pointer; }
         .prev-row b { color: var(--ink-2); }
         .prev-row:hover b { text-decoration: underline dotted; }
         .hud-row b, .box-row b { color: var(--acc-2); }
@@ -9339,6 +9448,24 @@ function dayCurveAt(at = Date.now()) {
         .hist-foot b { font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--acc-2); }
 
         /* ---------- listas del registro -------------------------------------- */
+        .log-toolbar { display: flex; align-items: center; gap: 7px; margin: 0 1px 9px; }
+        .log-search { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; height: 28px;
+                      border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, .22); }
+        .log-search:focus-within { border-color: var(--line-strong); box-shadow: 0 0 16px -9px var(--acc); }
+        .log-search > svg { flex: none; width: 12px; height: 12px; margin-left: 8px; color: var(--dim-2); }
+        .log-search input { all: unset; flex: 1 1 auto; min-width: 0; padding: 0 5px;
+                           font: 600 10px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink); }
+        .log-search input::placeholder { color: var(--dim-2); }
+        .log-search input::-webkit-search-cancel-button { display: none; }
+        .log-clear { all: unset; flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-right: 4px;
+                     border-radius: 5px; cursor: pointer; font: 700 14px/1 ui-sans-serif, system-ui, sans-serif; color: var(--dim-2); }
+        .log-clear:hover { color: var(--acc); background: var(--acc-dim); }
+        .log-clear:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+        .log-clear[hidden], .log-empty[hidden] { display: none; }
+        .log-filter-count { flex: none; font: 700 7.5px/1.2 ui-monospace, monospace; letter-spacing: .06em;
+                            text-transform: uppercase; color: var(--dim-2); white-space: nowrap; }
+        .log-empty { margin: 0 1px 9px; padding: 10px 8px; border: 1px dashed var(--line); border-radius: 8px;
+                     text-align: center; font: 500 9.5px/1.4 ui-sans-serif, system-ui, sans-serif; color: var(--dim); }
         .log-list { display: grid; gap: 4px; }
         .log-item { display: grid; grid-template-columns: 46px 1fr auto; gap: 7px; align-items: baseline; padding: 4px 6px; border-radius: 7px; background: rgba(255, 255, 255, .022); border: 1px solid rgba(255, 255, 255, .045); font-variant-numeric: tabular-nums; transition: border-color .2s ease, transform .18s ease; }
         .log-item:hover { border-color: var(--line-strong); transform: translateX(1px); }
@@ -9603,8 +9730,27 @@ function dayCurveAt(at = Date.now()) {
 
         /* En una ventana estrecha la cuenta ocupa el sitio del nombre. Se
            retira antes de que el titulo empiece a cortarse. */
-        @media (max-width: 340px) {
+        @media (max-width: 360px) {
+          :host { left: 12px !important; }
+          .panel {
+            width: calc(100vw - 24px);
+            max-width: calc(100vw - 24px);
+          }
+          .views { padding-inline: 9px; }
+          .context-banner { margin-inline: 9px; }
           .who { display: none; }
+        }
+
+        /* En pantallas bajas el panel entero hace scroll interno: la cabecera
+           y las acciones nunca quedan fuera del viewport. */
+        @media (max-height: 420px) {
+          :host { bottom: 8px !important; }
+          .panel { max-height: calc(100vh - 16px); }
+          .head { padding-top: 7px; padding-bottom: 6px; }
+          .chips-row { padding-bottom: 6px; }
+          .context-banner { padding-block: 6px; margin-bottom: 6px; }
+          .foot { padding-block: 5px; }
+          .actions { padding-bottom: 8px; }
         }
 
         /* 160 CSS px (320 px fisicos al 200 %): el rail lateral y la columna
@@ -9658,11 +9804,8 @@ function dayCurveAt(at = Date.now()) {
            (dice si algo esta encendido), no adorno. */
         @media (prefers-reduced-motion: reduce) {
           .panel, .panel[data-fresh="1"] .card, .view, .stat b.bump, .recent-pair i.bump, .prog::after,
-          .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title { animation: none !important; }
-          /* El ciclo de tono no mueve nada: es color, no adorno. Se conserva
-             para que RGB siga cambiando aunque el sistema pida menos animacion;
-             el marco conico y el titulo si se quedan quietos. */
-          .panel[data-theme="rgb"] { animation: nt-rgb-hue 16s linear infinite !important; }
+          .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title,
+          .panel[data-theme="rgb"] { animation: none !important; }
         }
       `;
 
@@ -10316,10 +10459,21 @@ function dayCurveAt(at = Date.now()) {
       .trim();
   }
 
+  function setTuneSectionOpen(section, open) {
+    if (!section) return;
+    const value = open ? 'true' : 'false';
+    if (section.dataset.open !== value) section.dataset.open = value;
+    const button = section.querySelector('[data-tune-disclosure]');
+    if (button && button.getAttribute('aria-expanded') !== value) {
+      button.setAttribute('aria-expanded', value);
+    }
+  }
+
   // Filtro de TUNE: una tarjeta se queda si su texto o el titulo de su bloque
   // contienen la consulta. No borra ajustes ni cambia valores; solo oculta lo
-  // que no coincide para no recorrer una lista larga. Las secciones sin
-  // coincidencias tambien se esconden y queda un aviso claro si no hay nada.
+  // que no coincide para no recorrer una lista larga. Las secciones con
+  // coincidencias se abren aunque estuvieran plegadas y recuperan su estado al
+  // limpiar el filtro.
   function filterTune() {
     const input = panel.refs && panel.refs.tuneSearch;
     const cfg = panel.refs && panel.refs.cfg;
@@ -10340,6 +10494,17 @@ function dayCurveAt(at = Date.now()) {
     for (const section of cfg.querySelectorAll('.tune-sec')) {
       const show = Array.from(section.querySelectorAll('.card')).some((card) => !card.hidden);
       if (section.hidden !== !show) section.hidden = !show;
+      if (query && show) {
+        if (section.dataset.searchReveal !== '1') {
+          section.dataset.beforeSearchOpen = section.dataset.open || 'true';
+          section.dataset.searchReveal = '1';
+        }
+        setTuneSectionOpen(section, true);
+      } else if (!query && section.dataset.searchReveal === '1') {
+        setTuneSectionOpen(section, section.dataset.beforeSearchOpen !== 'false');
+        delete section.dataset.beforeSearchOpen;
+        delete section.dataset.searchReveal;
+      }
     }
 
     setText(panel.refs.tuneCount, query ? `${visible}/${cards.length}` : `${cards.length} settings`);
@@ -10348,6 +10513,27 @@ function dayCurveAt(at = Date.now()) {
       const empty = Boolean(query && visible === 0);
       panel.refs.tuneEmpty.hidden = !empty;
       if (empty) setText(panel.refs.tuneEmpty, `No setting matches “${input.value.trim()}”.`);
+    }
+  }
+
+  function filterLog() {
+    const input = panel.refs && panel.refs.logSearch;
+    const view = panel.root && panel.root.querySelector('.v-log');
+    if (!input || !view) return;
+    const query = tuneFilterText(input.value);
+    const items = Array.from(view.querySelectorAll('.log-item, .notice-item'));
+    let visible = 0;
+    for (const item of items) {
+      const show = !query || tuneFilterText(item.textContent).includes(query);
+      if (item.hidden !== !show) item.hidden = !show;
+      if (show) visible += 1;
+    }
+    if (panel.refs.logClear) panel.refs.logClear.hidden = !query;
+    setText(panel.refs.logCountFiltered, query ? `${visible}/${items.length}` : `${items.length} entries`);
+    if (panel.refs.logEmpty) {
+      const empty = Boolean(query && visible === 0);
+      panel.refs.logEmpty.hidden = !empty;
+      if (empty) setText(panel.refs.logEmpty, `No log entry matches “${input.value.trim()}”.`);
     }
   }
 
@@ -10767,6 +10953,13 @@ function dayCurveAt(at = Date.now()) {
     return out;
   };
 
+  // Matriz de contexto pura: el banco comprueba precedencia y texto sin tocar
+  // el motor ni esperar a que ocurra cada estado real.
+  window.__ntaDebug.panelContextFor = (patch = {}) => derivePanelContext({
+    now: Date.now(),
+    ...patch,
+  });
+
   // Estado de los tres topes y si ya se alcanzo alguno. Lo usa el banco para
   // probar los bordes; en el flujo normal nadie lo llama.
   window.__ntaDebug.session = () => ({
@@ -10813,6 +11006,8 @@ function dayCurveAt(at = Date.now()) {
     if (patch.typing !== undefined) session.typing = Boolean(patch.typing);
     if (patch.stopped !== undefined) session.stopped = Boolean(patch.stopped);
     if (patch.closed !== undefined) session.closed = Boolean(patch.closed);
+    if (Number.isFinite(Number(patch.raceWpmDrift))) session.raceWpmDrift = Number(patch.raceWpmDrift);
+    if (Number.isFinite(Number(patch.raceAccDrift))) session.raceAccDrift = Number(patch.raceAccDrift);
     if (Array.isArray(patch.clockSamples)) {
       session.clockSamples = patch.clockSamples.map(Number).filter(Number.isFinite);
     }
@@ -11335,6 +11530,7 @@ function dayCurveAt(at = Date.now()) {
       empty.className = 'log-empty';
       empty.textContent = 'no challenge data yet';
       panel.refs.chList.appendChild(empty);
+      filterLog();
       return;
     }
 
@@ -11350,6 +11546,7 @@ function dayCurveAt(at = Date.now()) {
       row.append(label, value);
       panel.refs.chList.appendChild(row);
     }
+    filterLog();
   }
 
   function paintLogLists() {
@@ -11481,6 +11678,7 @@ function dayCurveAt(at = Date.now()) {
         }
       }
     }
+    filterLog();
   }
 
   // Un numero que cambia se anuncia con un golpe corto de escala. Solo cuando
@@ -12045,6 +12243,10 @@ function dayCurveAt(at = Date.now()) {
       mode: pick('.mode'),
       pace: pick('.pace'),
       cap: pick('[data-field="cap"]'),
+      contextBanner: pick('.context-banner'),
+      contextTitle: pick('[data-field="contextTitle"]'),
+      contextDetail: pick('[data-field="contextDetail"]'),
+      contextPill: pick('[data-field="contextPill"]'),
       hudRow: pick('.hud-row'),
       hud: pick('[data-field="hud"]'),
       clockRow: pick('.clock-row'),
@@ -12200,6 +12402,10 @@ function dayCurveAt(at = Date.now()) {
       weekTotal: pick('[data-field="weekTotal"]'),
       closedList: pick('[data-field="closedList"]'),
       logCount: pick('[data-field="logCount"]'),
+      logSearch: pick('[data-field="logSearch"]'),
+      logClear: pick('[data-field="logClear"]'),
+      logCountFiltered: pick('[data-field="logCountFiltered"]'),
+      logEmpty: pick('[data-field="logEmpty"]'),
       noticeList: pick('[data-field="noticeList"]'),
       aboutVer: pick('[data-field="aboutVer"]'),
       infoCap: pick('[data-field="infoCap"]'),
@@ -12346,8 +12552,7 @@ function dayCurveAt(at = Date.now()) {
         if (!btn) return;
         event.stopPropagation();
         showTab(btn.dataset.tabBtn);
-        btn.blur();
-      });
+        btn      });
 
       // Patron tablist: flechas, Home y End mueven la vista y el foco. No toca
       // el teclado del juego porque solo se activa con el foco dentro del rail.
@@ -12482,6 +12687,13 @@ function dayCurveAt(at = Date.now()) {
     if (panel.refs.tuneSearch) {
       panel.refs.tuneSearch.addEventListener('input', () => filterTune());
       panel.refs.tuneSearch.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          panel.refs.tuneSearch.value = '';
+          filterTune();
+          return;
+        }
         if (event.key !== 'Enter') return;
         event.preventDefault();
         event.stopPropagation();
@@ -12495,7 +12707,26 @@ function dayCurveAt(at = Date.now()) {
         if (panel.refs.tuneSearch) panel.refs.tuneSearch.focus();
       });
     }
+    if (panel.refs.logSearch) {
+      panel.refs.logSearch.addEventListener('input', filterLog);
+      panel.refs.logSearch.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        panel.refs.logSearch.value = '';
+        filterLog();
+      });
+    }
+    if (panel.refs.logClear) {
+      panel.refs.logClear.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (panel.refs.logSearch) panel.refs.logSearch.value = '';
+        filterLog();
+        if (panel.refs.logSearch) panel.refs.logSearch.focus();
+      });
+    }
     filterTune();
+    filterLog();
 
     // Fila de auto-calibracion: no hay apagado; el clic solo fuerza una lectura
     // nueva para que el rango se mueva ya con la media mas reciente.
@@ -12510,8 +12741,7 @@ function dayCurveAt(at = Date.now()) {
       panel.refs.acctRefresh.addEventListener('click', (event) => {
         event.stopPropagation();
         refreshCalibration();
-        panel.refs.acctRefresh.blur();
-      });
+        panel.refs.acctRefresh      });
     }
 
     // Overrides manuales de WPM y precision. `change` evita aplicar cada tecla
@@ -12524,7 +12754,7 @@ function dayCurveAt(at = Date.now()) {
       panel.refs.customWpm.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
-        panel.refs.customWpm.blur();
+        setCustomWpm(panel.refs.customWpm.value);
       });
     }
     if (panel.refs.customAcc) {
@@ -12535,7 +12765,7 @@ function dayCurveAt(at = Date.now()) {
       panel.refs.customAcc.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
-        panel.refs.customAcc.blur();
+        setCustomAccuracy(panel.refs.customAcc.value);
       });
     }
 
@@ -12576,8 +12806,7 @@ function dayCurveAt(at = Date.now()) {
     panel.refs.toggle.addEventListener('click', (event) => {
       event.stopPropagation();
       setPaused(!session.paused);
-      panel.refs.toggle.blur();
-    });
+      panel.refs.toggle    });
 
     panel.refs.stop.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -12585,8 +12814,7 @@ function dayCurveAt(at = Date.now()) {
       // lo mismo que Alt+A, con las mismas puertas (tope diario y horas).
       if (session.stopped) resumeAuto();
       else requestStop();
-      panel.refs.stop.blur();
-    });
+      panel.refs.stop    });
 
     panel.refs.collapse.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -12594,8 +12822,7 @@ function dayCurveAt(at = Date.now()) {
       applyCollapsed(collapsed);
       restorePosition();
       if (!collapsed) updatePanel(true);
-      panel.refs.collapse.blur();
-    });
+      panel.refs.collapse    });
 
     // El chip del modo no es un interruptor: dice AUTO y nada mas. Parar es
     // cosa de Stop / Esc, y la cola se rearma sola.
@@ -12606,8 +12833,7 @@ function dayCurveAt(at = Date.now()) {
         event.stopPropagation();
         const index = PACE_ORDER.indexOf(paceProfile);
         setPaceProfile(PACE_ORDER[(index + 1) % PACE_ORDER.length]);
-        panel.refs.pace.blur();
-      });
+        panel.refs.pace      });
     }
 
     // Tema: un solo escuchador para las seis muestras. El CSS hace el resto.
@@ -12617,8 +12843,7 @@ function dayCurveAt(at = Date.now()) {
         if (!chip) return;
         event.stopPropagation();
         setTheme(chip.dataset.themeBtn);
-        chip.blur();
-      });
+        chip      });
     }
 
     // ⚙ lleva a la vista de ajustes (y vuelve): es el mismo cajon de siempre,
@@ -12627,8 +12852,7 @@ function dayCurveAt(at = Date.now()) {
       panel.refs.gear.addEventListener('click', (event) => {
         event.stopPropagation();
         showTab(panel.root.dataset.tab === 'tune' ? 'stats' : 'tune');
-        panel.refs.gear.blur();
-      });
+        panel.refs.gear      });
     }
 
     // Los chips del cajon: perfil, interruptores y exportar/importar. Un solo
@@ -12640,6 +12864,16 @@ function dayCurveAt(at = Date.now()) {
         const chip = target && target.closest ? target.closest('button') : null;
         if (!chip) return;
         event.stopPropagation();
+
+        if (chip.hasAttribute('data-tune-disclosure')) {
+          const section = chip.closest('.tune-sec');
+          const open = !section || section.dataset.open !== 'true';
+          setTuneSectionOpen(section, open);
+          if (section && section.dataset.searchReveal === '1') {
+            section.dataset.beforeSearchOpen = open ? 'true' : 'false';
+          }
+          return;
+        }
 
         if (chip.dataset.pace) {
           setPaceProfile(chip.dataset.pace);
@@ -12681,8 +12915,7 @@ function dayCurveAt(at = Date.now()) {
           try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
 
-        chip.blur();
-      });
+        chip      });
     }
 
     if (panel.refs.nitroStrategy) {
@@ -12698,8 +12931,7 @@ function dayCurveAt(at = Date.now()) {
       panel.refs.liveLoad.addEventListener('click', (event) => {
         event.stopPropagation();
         panel.refs.liveFile.click();
-        panel.refs.liveLoad.blur();
-      });
+        panel.refs.liveLoad      });
       panel.refs.liveFile.addEventListener('change', () => {
         const file = panel.refs.liveFile.files && panel.refs.liveFile.files[0];
         if (file) loadLiveCsv(file);
@@ -12711,8 +12943,7 @@ function dayCurveAt(at = Date.now()) {
       panel.refs.liveClear.addEventListener('click', (event) => {
         event.stopPropagation();
         clearLivePasses();
-        panel.refs.liveClear.blur();
-      });
+        panel.refs.liveClear      });
     }
     for (const select of [panel.refs.livePickA, panel.refs.livePickB]) {
       if (select) select.addEventListener('change', paintLivePick);
@@ -12721,8 +12952,7 @@ function dayCurveAt(at = Date.now()) {
       panel.refs.livePickExport.addEventListener('click', (event) => {
         event.stopPropagation();
         downloadLiveCompareCsv();
-        panel.refs.livePickExport.blur();
-      });
+        panel.refs.livePickExport      });
     }
     renderLivePasses();
 
@@ -13440,6 +13670,79 @@ function dayCurveAt(at = Date.now()) {
     setTimeout(() => clearInterval(timer), 12000);
   }
 
+  // El contexto es una derivacion del estado real, no un segundo motor. La
+  // precedencia importa: una cuenta bloqueada no debe parecer solo detenida y
+  // una carrera pausada manda sobre cualquier espera de garaje.
+  function derivePanelContext(input = {}) {
+    const now = Number(input.now) || Date.now();
+    if (input.banned) {
+      return { key: 'banned', title: 'Account blocked', detail: 'Clear the ban in the garage before racing again.', pill: 'BAN' };
+    }
+    if (input.offline) {
+      return { key: 'offline', title: 'Waiting for network', detail: 'The queue resumes when the connection returns.', pill: 'OFFLINE' };
+    }
+    if (Number(input.blockedUntil) > now) {
+      const left = Math.max(1, Math.ceil((Number(input.blockedUntil) - now) / 60000));
+      return { key: 'blocked', title: 'Cooling down', detail: `Site block clears in about ${left} min.`, pill: 'BLOCKED' };
+    }
+    if (input.stopped) {
+      return { key: 'stopped', title: 'Stopped', detail: input.reason || 'Press Resume when you are ready.', pill: 'STOPPED' };
+    }
+    if (input.stopAfterRace) {
+      return { key: 'stopped', title: 'Stopping after this race', detail: 'The current race finishes before the queue stops.', pill: 'PENDING' };
+    }
+    if (Number(input.breakUntil) > now) {
+      const left = Math.max(1, Math.ceil((Number(input.breakUntil) - now) / 60000));
+      return { key: 'break', title: 'Taking a human break', detail: `Next race in about ${left} min.`, pill: 'BREAK' };
+    }
+    if (input.paused) {
+      return { key: 'paused', title: 'Typing paused', detail: 'Resume now or wait for the short auto-resume.', pill: 'PAUSED' };
+    }
+    if (input.typing) {
+      return { key: 'running', title: 'Race in progress', detail: 'Pace and accuracy are following this account.', pill: 'LIVE' };
+    }
+    if (input.activeGate) {
+      return { key: 'scheduled', title: 'Outside active hours', detail: `The queue opens at ${input.activeGate.nextText || 'the next window'}.`, pill: 'SCHEDULED' };
+    }
+    if (input.restGate) {
+      return { key: 'rest', title: 'Rest day', detail: 'This account does not race again until tomorrow.', pill: 'REST' };
+    }
+    if (input.dailyReached || input.limitReached) {
+      return { key: 'limit', title: 'Session complete', detail: input.reason || 'A fresh session is ready when you resume.', pill: 'LIMIT' };
+    }
+    return { key: 'waiting', title: 'Ready when you are', detail: 'The queue is waiting for the next race.', pill: 'AUTO' };
+  }
+
+  function currentPanelContext() {
+    const now = Date.now();
+    return derivePanelContext({
+      now,
+      banned: terminalBanActive(),
+      offline: !onlineNow(),
+      blockedUntil: siteBlockedUntil(),
+      stopped: session.stopped,
+      stopAfterRace: session.stopAfterRace,
+      breakUntil: session.breakUntil,
+      paused: session.paused,
+      typing: session.typing,
+      activeGate: activeGate(now),
+      restGate: restGate(now),
+      dailyReached: dailyLimitReached(),
+      limitReached: limitReached(),
+      reason: capReason(),
+    });
+  }
+
+  function paintPanelContext(context) {
+    if (!panel.root || !panel.refs.contextBanner) return;
+    const next = context || currentPanelContext();
+    if (panel.root.dataset.context !== next.key) panel.root.dataset.context = next.key;
+    if (panel.refs.contextBanner.dataset.context !== next.key) panel.refs.contextBanner.dataset.context = next.key;
+    setText(panel.refs.contextTitle, next.title);
+    setText(panel.refs.contextDetail, next.detail);
+    setText(panel.refs.contextPill, next.pill);
+  }
+
   // Lo unico visible con el panel plegado. El resto del panel se queda tal
   // cual y se repinta entero al desplegarlo, no en cada latido.
   function paintPanelActions() {
@@ -13674,6 +13977,7 @@ function dayCurveAt(at = Date.now()) {
     // un tercer modo.
     const stoppedFlag = session.stopped ? '1' : '0';
     if (panel.root.dataset.stopped !== stoppedFlag) panel.root.dataset.stopped = stoppedFlag;
+    paintPanelContext(currentPanelContext());
 
     // Sin teclas todavia no hay medida: se muestra un guion y color neutro.
     const measured = session.chars > 0;
@@ -14821,7 +15125,7 @@ function dayCurveAt(at = Date.now()) {
   // que existir cuando se arma esta cadena.
   const PANEL_HTML = `
       <style>${PANEL_CSS}</style>
-      <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
+      <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-context="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
         <div class="head">
           <span class="mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
@@ -14840,6 +15144,16 @@ function dayCurveAt(at = Date.now()) {
           <button class="pace" type="button">LEGIT · balanced</button>
           <span class="mode" role="status" aria-live="polite" title="Always AUTO: the bot starts by itself. Stop stops it; it comes back on the next garage visit.">AUTO</span>
           <span class="cap" data-field="cap" title="Hard ceiling: no race is ever allowed above this WPM">≤ 120 wpm</span>
+        </div>
+        <div class="context-banner" data-context="waiting" role="status" aria-live="polite" aria-atomic="true">
+          <span class="context-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-5 4 10 2-5h2"/></svg>
+          </span>
+          <span class="context-copy">
+            <b data-field="contextTitle">Ready when you are</b>
+            <span data-field="contextDetail">The queue is waiting for the next race.</span>
+          </span>
+          <span class="context-pill" data-field="contextPill">AUTO</span>
         </div>
         <div class="race-line" aria-hidden="true"><i></i></div>
         <div class="main">
@@ -14970,8 +15284,11 @@ function dayCurveAt(at = Date.now()) {
                 <span class="tune-count" data-field="tuneCount" aria-live="polite">settings</span>
               </div>
               <div class="tune-empty" data-field="tuneEmpty" role="status" hidden></div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-health-label">
-                <div class="tune-sec-h"><span id="tune-health-label">Health</span><b>account · AFK · update</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-health-label" data-open="true" data-default-open="true">
+                <button type="button" class="tune-sec-h" data-tune-disclosure aria-expanded="true" aria-controls="tune-health-body">
+                  <span id="tune-health-label">Health</span><b>account · AFK · update</b><i aria-hidden="true">⌄</i>
+                </button>
+                <div class="tune-sec-body" id="tune-health-body">
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h4l2-5 4 10 2-5h6"/><path d="M4 20h16"/></svg></span>
                   <div class="card-h"><span class="card-t">Health center</span><span class="card-s" data-field="healthSummary">checking</span></div>
@@ -14984,9 +15301,13 @@ function dayCurveAt(at = Date.now()) {
                   <div class="cfg-note" data-field="healthNote">One place to see what needs attention.</div>
                   <button class="act" type="button" data-act="report" title="Copy the full diagnostic report, including the recent flight recorder, to paste when something is off">copy report</button>
                 </div>
+                </div>
               </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
-                <div class="tune-sec-h"><span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label" data-open="true" data-default-open="true">
+                <button type="button" class="tune-sec-h" data-tune-disclosure aria-expanded="true" aria-controls="tune-rhythm-body">
+                  <span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b><i aria-hidden="true">⌄</i>
+                </button>
+                <div class="tune-sec-body" id="tune-rhythm-body">
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
                   <div class="card-h"><span class="card-t">Pace</span><span class="card-s">all under the ceiling</span></div>
@@ -15008,25 +15329,29 @@ function dayCurveAt(at = Date.now()) {
                     <div class="cfg-note">Custom values override auto. Empty or 0 returns to automatic.</div>
                   </div>
                 </div>
+                </div>
               </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-limits-label">
-                <div class="tune-sec-h"><span id="tune-limits-label">Limits</span><b>session, day and hours</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-limits-label" data-open="true" data-default-open="true">
+                <button type="button" class="tune-sec-h" data-tune-disclosure aria-expanded="true" aria-controls="tune-limits-body">
+                  <span id="tune-limits-label">Limits</span><b>session, day and hours</b><i aria-hidden="true">⌄</i>
+                </button>
+                <div class="tune-sec-body" id="tune-limits-body">
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2"/><circle cx="15" cy="16" r="2"/></svg></span>
                   <div class="card-h"><span class="card-t">Session limit</span><span class="card-s">the bot stops on its own</span></div>
-                  <div class="limit-row row" data-field="raceLimitRow" title="Click: races per session (free, 25, 50, 100). 25 is where the session bonus reaches its 250 XP per race cap">
+                  <button type="button" class="limit-row row" data-field="raceLimitRow" title="Click: races per session (free, 25, 50, 100). 25 is where the session bonus reaches its 250 XP per race cap">
                     <span>races</span><b data-field="limit">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="limitSlider" aria-label="Races per session" title="Races per session: free, 25, 50 or 100">
                   <div class="sld-ends"><span>free</span><span>25</span><span>50</span><span>100</span></div>
-                  <div class="limit-row row time-row" data-field="timeLimitRow" title="Click: minutes per session (free, 15, 30, 60, 120). The clock starts with the first race of the session">
+                  <button type="button" class="limit-row row time-row" data-field="timeLimitRow" title="Click: minutes per session (free, 15, 30, 60, 120). The clock starts with the first race of the session">
                     <span>time</span><b data-field="timeLimit">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="timeSlider" aria-label="Minutes per session" title="Minutes per session: free, 15, 30, 60 or 120">
                   <div class="sld-ends"><span>free</span><span>15m</span><span>30m</span><span>1h</span><span>2h</span></div>
-                  <div class="limit-row row xp-row" data-field="xpLimitRow" title="Click: XP per session (free, 5k, 10k, 25k, 50k). Counts the XP the game itself awards in each race">
+                  <button type="button" class="limit-row row xp-row" data-field="xpLimitRow" title="Click: XP per session (free, 5k, 10k, 25k, 50k). Counts the XP the game itself awards in each race">
                     <span>xp</span><b data-field="xpLimit">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="xpSlider" aria-label="XP per session" title="XP per session: free, 5k, 10k, 25k or 50k">
                   <div class="sld-ends"><span>free</span><span>5k</span><span>10k</span><span>25k</span><span>50k</span></div>
                   <div class="rows">
@@ -15038,14 +15363,14 @@ function dayCurveAt(at = Date.now()) {
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 18V6M4 18h16"/><path d="M8 14v-3M12 14V7M16 14v-5"/></svg></span>
                   <div class="card-h"><span class="card-t">Daily budget</span><span class="card-s">stop before tomorrow</span></div>
-                  <div class="limit-row row" data-field="dailyRaceRow" title="Click: races per day (free, 100, 200, 300). Counts the races the game recorded today">
+                  <button type="button" class="limit-row row" data-field="dailyRaceRow" title="Click: races per day (free, 100, 200, 300). Counts the races the game recorded today">
                     <span>races/day</span><b data-field="dailyRaces">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyRaceSlider" aria-label="Races per day" title="Races per day: free, 100, 200 or 300">
                   <div class="sld-ends"><span>free</span><span>100</span><span>200</span><span>300</span></div>
-                  <div class="limit-row row xp-row" data-field="dailyXpRow" title="Click: XP per day (free, 50k, 100k, 200k). Counts the XP the game paid today">
+                  <button type="button" class="limit-row row xp-row" data-field="dailyXpRow" title="Click: XP per day (free, 50k, 100k, 200k). Counts the XP the game paid today">
                     <span>xp/day</span><b data-field="dailyXp">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyXpSlider" aria-label="XP per day" title="XP per day: free, 50k, 100k or 200k">
                   <div class="sld-ends"><span>free</span><span>50k</span><span>100k</span><span>200k</span></div>
                   <div class="rows">
@@ -15055,26 +15380,30 @@ function dayCurveAt(at = Date.now()) {
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span>
                   <div class="card-h"><span class="card-t">Active hours</span><span class="card-s">races only in this window</span></div>
-                  <div class="limit-row row" data-field="activeRow" title="Click: turn the active window on/off. Shift+click resets 08:00–23:00">
+                  <button type="button" class="limit-row row" data-field="activeRow" title="Click: turn the active window on/off. Shift+click resets 08:00–23:00">
                     <span>window</span><b data-field="activeState">off</b>
-                  </div>
-                  <div class="limit-row row" data-field="activeStartRow" title="Click: start hour +1 (Shift+click: −1). The window can cross midnight">
+                  </button>
+                  <button type="button" class="limit-row row" data-field="activeStartRow" title="Click: start hour +1 (Shift+click: −1). The window can cross midnight">
                     <span>from</span><b data-field="activeStart">08:00</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="23" step="1" value="8" data-field="activeStartSlider" aria-label="Active window start hour" title="Start of the active window">
                   <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
-                  <div class="limit-row row" data-field="activeEndRow" title="Click: end hour +1 (Shift+click: −1). An end before the start crosses midnight">
+                  <button type="button" class="limit-row row" data-field="activeEndRow" title="Click: end hour +1 (Shift+click: −1). An end before the start crosses midnight">
                     <span>to</span><b data-field="activeEnd">23:00</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="23" step="1" value="23" data-field="activeEndSlider" aria-label="Active window end hour" title="End of the active window">
                   <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
                   <div class="rows">
                     <div class="row" data-field="activeNowRow" title="Local time. Races only start while the window is open"><span>now</span><b data-field="activeNow">always</b></div>
                   </div>
                 </div>
+                </div>
               </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-automation-label">
-                <div class="tune-sec-h"><span id="tune-automation-label">Automation</span><b>behavior, panel and tools</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-automation-label" data-open="true" data-default-open="true">
+                <button type="button" class="tune-sec-h" data-tune-disclosure aria-expanded="true" aria-controls="tune-automation-body">
+                  <span id="tune-automation-label">Automation</span><b>behavior, panel and tools</b><i aria-hidden="true">⌄</i>
+                </button>
+                <div class="tune-sec-body" id="tune-automation-body">
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></span>
                   <div class="card-h"><span class="card-t">Switches</span><span class="card-s">saved on this browser</span></div>
@@ -15165,6 +15494,7 @@ function dayCurveAt(at = Date.now()) {
                   <textarea class="cfg-text" data-field="cfgText" spellcheck="false" placeholder="Paste a copied config here and press apply."></textarea>
                   <div class="cfg-note" data-field="cfgNote">Pace and switches are saved on this browser and survive reloads.</div>
                 </div>
+                </div>
               </div>
             </section>
             </template>
@@ -15173,12 +15503,21 @@ function dayCurveAt(at = Date.now()) {
             <template data-view="log">
             <section class="view v-log" id="nt-view-log" role="tabpanel" aria-label="Log">
               <div class="view-head"><span>Log</span><b>sessions · challenges</b></div>
+              <div class="log-toolbar">
+                <label class="log-search" title="Filter sessions, days, challenges and notices">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+                  <input type="search" data-field="logSearch" placeholder="Filter log…" autocomplete="off" spellcheck="false" aria-label="Filter log entries">
+                  <button type="button" class="log-clear" data-field="logClear" aria-label="Clear log filter" title="Clear filter" hidden>×</button>
+                </label>
+                <span class="log-filter-count" data-field="logCountFiltered" aria-live="polite">all entries</span>
+              </div>
+              <div class="log-empty" data-field="logEmpty" role="status" hidden></div>
               <div class="card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 1.8"/></svg></span>
                 <div class="card-h"><span class="card-t" data-field="prevLabel">prev</span><span class="card-s">click for the table</span></div>
-                <div class="prev-row row" style="display:none" title="The last session that closed: races, average WPM and deviation from target">
+                <button type="button" class="prev-row row" style="display:none" title="The last session that closed: races, average WPM and deviation from target">
                   <span>session</span><b data-field="prev">—</b>
-                </div>
+                </button>
               </div>
               <div class="card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
@@ -17560,6 +17899,45 @@ function dayCurveAt(at = Date.now()) {
           .hupd:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
           .hupd svg { width: 12px; height: 12px; display: block; }
 
+          .garage-context {
+            --ctx: var(--acc);
+            display: grid;
+            grid-template-columns: 26px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 12px 2px;
+            padding: 7px 8px;
+            border: 1px solid color-mix(in srgb, var(--ctx) 26%, transparent);
+            border-radius: 9px;
+            background:
+              linear-gradient(110deg, color-mix(in srgb, var(--ctx) 12%, transparent), transparent 74%),
+              rgba(255, 255, 255, .025);
+          }
+          .garage-context[data-context="stopped"],
+          .garage-context[data-context="signin"],
+          .garage-context[data-context="cleared"] { --ctx: var(--warn); }
+          .garage-context[data-context="banned"],
+          .garage-context[data-context="offline"] { --ctx: var(--bad); }
+          .garage-context[data-context="gate"],
+          .garage-context[data-context="retry"] { --ctx: var(--info); }
+          .garage-context[data-context="reward"],
+          .garage-context[data-context="ready"] { --ctx: var(--acc); }
+          .gc-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px;
+                     color: var(--ctx); background: color-mix(in srgb, var(--ctx) 12%, transparent);
+                     border: 1px solid color-mix(in srgb, var(--ctx) 24%, transparent); }
+          .gc-icon svg { width: 14px; height: 14px; }
+          .gc-copy { min-width: 0; }
+          .gc-copy b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                       font: 750 10px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink); }
+          .gc-copy > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                           margin-top: 2px; font: 500 8.5px/1.3 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
+          .garage-context > i { padding: 3px 6px; border-radius: 999px; font: 800 7.5px/1 ui-sans-serif, system-ui, sans-serif;
+                               letter-spacing: .1em; text-transform: uppercase; color: var(--ctx);
+                               background: color-mix(in srgb, var(--ctx) 10%, transparent);
+                               border: 1px solid color-mix(in srgb, var(--ctx) 24%, transparent); }
+          .p[data-fold="1"] .garage-context,
+          .p[data-social="1"] .garage-context { display: none; }
+
           .rows { display: grid; padding: 8px 12px 6px; }
           .r { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
                padding: 3px 0; font-weight: 500; font-size: 10.5px; line-height: 1.45;
@@ -17689,6 +18067,10 @@ function dayCurveAt(at = Date.now()) {
                  transition: filter .15s ease, box-shadow .25s ease, transform .1s ease; }
           .act:hover:not(:disabled) { filter: brightness(1.16);
                  box-shadow: 0 0 20px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .12); }
+          .act.primary { flex-basis: 100%; border-color: color-mix(in srgb, var(--acc) 58%, transparent);
+                         background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 30%, transparent), color-mix(in srgb, var(--acc) 12%, transparent));
+                         box-shadow: 0 0 20px -10px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .14); }
+          .act.primary:hover:not(:disabled) { box-shadow: 0 0 24px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .16); }
           .act:active:not(:disabled) { transform: translateY(1px); }
           .act:disabled { opacity: .38; cursor: default; }
           .act.ghost { color: #cfe9db; background: rgba(255, 255, 255, .045);
@@ -17719,8 +18101,6 @@ function dayCurveAt(at = Date.now()) {
 
           @media (prefers-reduced-motion: reduce) {
             .p, .p *, .p::before, .p::after { animation: none !important; transition: none !important; }
-            /* Misma regla que el panel grande: el color sigue, el movimiento no. */
-            .p[data-theme="rgb"] { animation: nt-rgb-hue 16s linear infinite !important; }
           }
         </style>
         <div class="p" data-mode="auto" data-theme="${panelTheme}">
@@ -17735,6 +18115,16 @@ function dayCurveAt(at = Date.now()) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg>
             </button>
             <button class="fold" type="button" data-f="fold" aria-expanded="true" aria-label="Fold the garage panel" title="Fold the garage panel (Alt+G)">−</button>
+          </div>
+          <div class="garage-context" data-context="waiting" role="status" aria-live="polite" aria-atomic="true">
+            <span class="gc-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-5 4 10 2-5h2"/></svg>
+            </span>
+            <span class="gc-copy">
+              <b data-f="contextTitle">Queue ready</b>
+              <span data-f="contextDetail">The next race will start automatically.</span>
+            </span>
+            <i data-f="contextPill">AUTO</i>
           </div>
           <div class="rows">
             <div class="r social" data-f="socialFriendsRow" hidden><span>friends</span><b data-f="socialFriends" aria-live="polite" aria-atomic="true">—</b></div>
@@ -17785,6 +18175,10 @@ function dayCurveAt(at = Date.now()) {
         host,
         head: root.querySelector('.h'),
         panel: root.querySelector('.p'),
+        context: root.querySelector('.garage-context'),
+        contextTitle: root.querySelector('[data-f="contextTitle"]'),
+        contextDetail: root.querySelector('[data-f="contextDetail"]'),
+        contextPill: root.querySelector('[data-f="contextPill"]'),
         mode: root.querySelector('.mode'),
         sub: root.querySelector('[data-f="sub"]'),
         socialFriendsRow: root.querySelector('[data-f="socialFriendsRow"]'),
@@ -18320,6 +18714,62 @@ function dayCurveAt(at = Date.now()) {
       return 'waiting · starts by itself';
     }
 
+    function deriveGarageContext(input = {}) {
+      if (input.social) {
+        return { key: 'read', title: 'Read-only social', detail: 'Friends and team counters without actions.', pill: 'READ' };
+      }
+      if (input.banned) {
+        return { key: 'banned', title: 'Account blocked', detail: 'Review the account before clearing the ban.', pill: 'BAN' };
+      }
+      if (!input.signed) {
+        return { key: 'signin', title: 'Sign in required', detail: 'The queue waits for a valid session.', pill: 'LOGIN' };
+      }
+      if (input.offline) {
+        return { key: 'offline', title: 'Waiting for network', detail: 'Races resume when the connection returns.', pill: 'OFFLINE' };
+      }
+      if (input.activeStop) {
+        return { key: 'stopped', title: 'Queue stopped', detail: input.reason || 'Resume when you are ready.', pill: 'STOPPED' };
+      }
+      if (input.banCleared) {
+        return { key: 'cleared', title: 'Ban stop cleared', detail: 'Resume to arm the queue again.', pill: 'CLEARED' };
+      }
+      if (input.hasRetry) {
+        return { key: 'retry', title: 'Sign-in retry pending', detail: `Retry in ${input.retryText || 'a moment'}.`, pill: 'LOGIN' };
+      }
+      if (Array.isArray(input.gates) && input.gates.length) {
+        const gate = input.gates[0];
+        return { key: 'gate', title: gate.label || 'Queue waiting', detail: `Clears in ${gate.leftText || 'a moment'}.`, pill: 'WAIT' };
+      }
+      if (input.boxReady) {
+        return { key: 'reward', title: 'Mystery Box ready', detail: 'Claim the daily reward before the next race.', pill: 'REWARD' };
+      }
+      if (!input.armed) {
+        return { key: 'stopped', title: 'Queue disarmed', detail: 'Resume to arm the next race.', pill: 'STOPPED' };
+      }
+      return { key: 'ready', title: 'Queue ready', detail: 'The next race will start automatically.', pill: 'AUTO' };
+    }
+
+    function garagePrimaryFor(context, available = {}) {
+      if (context.key === 'reward' && available.box) return 'box';
+      if ((context.key === 'stopped' || context.key === 'banned' || context.key === 'cleared') && available.resume) return 'resume';
+      if (context.key === 'retry' && available.retry) return 'retry';
+      if (context.key === 'ready' && available.race) return 'race';
+      return '';
+    }
+
+    window.__ntaDebug.garageActionFor = (patch = {}) => {
+      const context = deriveGarageContext(patch);
+      return {
+        context,
+        primary: garagePrimaryFor(context, {
+          box: patch.box !== false,
+          resume: patch.resume !== false,
+          retry: Boolean(patch.hasRetry),
+          race: Boolean(patch.armed && patch.race !== false),
+        }),
+      };
+    };
+
     function paintGaragePanel() {
       if (!qpanel) return;
 
@@ -18655,6 +19105,41 @@ function dayCurveAt(at = Date.now()) {
       }
 
       const raceButton = findButton((label) => label.includes('race now'));
+      const context = deriveGarageContext({
+        social,
+        banned: terminalBan,
+        signed,
+        offline: !onlineNow(),
+        activeStop,
+        reason: activeStop && lastStop ? lastStop.reason : '',
+        banCleared: banClearHeld(),
+        hasRetry,
+        retryText: sessionClockText(retryLeft),
+        gates: gates.map((gate) => ({ ...gate, leftText: shortWait(gate.left) })),
+        boxReady: boxText === 'ready now',
+        armed,
+      });
+      const primary = garagePrimaryFor(context, {
+        box: true,
+        resume: true,
+        retry: hasRetry,
+        race: Boolean(armed && raceButton),
+      });
+      if (qpanel.panel.dataset.context !== context.key) qpanel.panel.dataset.context = context.key;
+      if (qpanel.context) qpanel.context.dataset.context = context.key;
+      qpanel.contextTitle.textContent = context.title;
+      qpanel.contextDetail.textContent = context.detail;
+      qpanel.contextPill.textContent = context.pill;
+      for (const button of [qpanel.afkBtn, qpanel.boxBtn, qpanel.raceBtn, qpanel.stopBtn, qpanel.resumeBtn, qpanel.retryBtn]) {
+        if (button) button.classList.remove('primary');
+      }
+      const primaryButton = primary === 'box' ? qpanel.boxBtn
+        : primary === 'resume' ? qpanel.resumeBtn
+          : primary === 'retry' ? qpanel.retryBtn
+            : primary === 'race' ? qpanel.raceBtn
+              : null;
+      if (primaryButton) primaryButton.classList.add('primary');
+
       qpanel.race.textContent = raceNowText();
       qpanel.race.dataset.cancel = raceNowTimer ? '1' : '0';
       const total = raceNowDelay || 1;

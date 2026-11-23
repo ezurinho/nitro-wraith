@@ -562,6 +562,7 @@
       if (panel.refs.liveStreakRow) panel.refs.liveStreakRow.style.display = 'none';
       if (panel.refs.liveSpreadRow) panel.refs.liveSpreadRow.style.display = 'none';
       if (panel.refs.livePickExport) panel.refs.livePickExport.disabled = true;
+      filterLog();
       return;
     }
 
@@ -665,6 +666,7 @@
     }
 
     paintLivePickOptions(list);
+    filterLog();
   }
 
   // El `live-history.json` que escribe `npm run live` trae las pasadas ya

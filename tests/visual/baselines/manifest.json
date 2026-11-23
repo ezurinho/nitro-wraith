@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "capturedAt": "2026-11-23T06:32:02.262Z",
+  "capturedAt": "2026-11-23T21:21:02.909Z",
   "engine": {
     "product": "Chrome/157.0.8103.80",
     "browser": "Chrome",
@@ -27,138 +27,138 @@
   },
   "images": {
     "theme-carbon.png": {
-      "sha256": "ad4515f65ef53824d909ac642c0c973d01e779acdc808633bf39745c5e2773e6",
+      "sha256": "6534aaa2d12c14fb7a2386a80f8f51de87ea2d4b5de05d783e2c4ca65f724a7d",
       "width": 732,
-      "height": 1884,
+      "height": 2408,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "theme-aurora.png": {
-      "sha256": "50f934952307856bf3b78c7c0ec38290ec2a4ed3ae0b79082b7ae0dfa1062a03",
+      "sha256": "2d2d38307dd485bd53362a4318819517c4bae33659dc56898bb9084b86c4e517",
       "width": 732,
-      "height": 1884,
+      "height": 2408,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "theme-sunset.png": {
-      "sha256": "20e6ea635f78f13f0109e96076efa0862a5b2dbabfd6099d42cfdeacdd29082a",
+      "sha256": "ee85ab7f3e21464b30c98f8dbbfbd31d30f0263957f8acc35e5a60da906d651a",
       "width": 732,
-      "height": 1884,
+      "height": 2408,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "theme-ice.png": {
-      "sha256": "71b7bd0d86a929d95a9c40cd1fdd9944b488dba0f14fe2860486b792607ca943",
+      "sha256": "724a26fcc86a934bc1315d9c55df3ab2056eec36550b00c65df25f983b134212",
       "width": 732,
-      "height": 1884,
+      "height": 2408,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "theme-violet.png": {
-      "sha256": "3e617c52f7695d1a6c9b7c6e1a10adecbc535141828e5eedea4553febd7f6064",
+      "sha256": "3b6a25f74adaa3a4aca11d3e321c3a4735ea25cec1a6024ceb39deb46c5a66b1",
       "width": 732,
-      "height": 1884,
+      "height": 2408,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "theme-rgb.png": {
-      "sha256": "9f293284fdb21bf2616193b685de85cce24d3b22ed5b88955df2c501119fb7aa",
+      "sha256": "d9ae4d256f90b9fcaa1511367484f1d09e8b619db291fafac7436d85f8f4373f",
       "width": 732,
-      "height": 1884,
+      "height": 2408,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-tune-idle.png": {
-      "sha256": "e00d79056b908f0447dc33a5d34368690907c9b20aaa885cdce6d298037a6fc1",
+      "sha256": "44d3b439a620bfb1e427cc599d37bc1a33202e43d271561142287eb40beb6896",
       "width": 732,
-      "height": 4912,
+      "height": 2440,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-tune-racing.png": {
-      "sha256": "8921c0df7cd1d6aa032b3d1f2e39c863471749b05da7fa7741b5d54ce63f3756",
+      "sha256": "2a2e7d66be22f7a204d29cbb174511a4ccf9cc6d0ba32b9832403b7643105b83",
       "width": 732,
-      "height": 4912,
+      "height": 2472,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-tune-stopped.png": {
-      "sha256": "d37d9af9bd171fb86c7a3b79116d208a99b8a00ab3c38fc3edfd7572357b1b1c",
+      "sha256": "d0e362c05506e4247c97b0358a4dd13c063c6797c07a31bc59aefa122d97b4ac",
       "width": 732,
-      "height": 4912,
+      "height": 2504,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-log-idle.png": {
-      "sha256": "9576964ad7f517b98d8112bde11c5398dcab9ed808f3f256ac580fa82a10416e",
+      "sha256": "f84b2382fa01def05dc17c3a96b98f582dd99519524d3a016614559f1767c330",
       "width": 732,
-      "height": 2288,
+      "height": 2536,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-log-racing.png": {
-      "sha256": "a43d45366d696e5bd422462d40d4a13c9f0993a522cc727740f26ebfe68fc558",
+      "sha256": "826849a49c4cab36e69a547789dc3a6c71efbbcf561173b2fbdc0aee52e633a0",
       "width": 732,
-      "height": 2288,
+      "height": 2568,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-log-stopped.png": {
-      "sha256": "76a709955db7f06b69c9763ac82de5f6115e87961f2f53de9719e8c03a8a5b01",
+      "sha256": "51c2920e9077f7a9eb9495a60cf3276b824a604488f2307aded2ee50ec2e2d82",
       "width": 732,
-      "height": 2288,
+      "height": 2598,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-garage-idle.png": {
-      "sha256": "e3dcbfb206248198c56c462223354bcb828c14243eb7157180888213f75d2bc2",
+      "sha256": "92f8b380054fb7430ce7239cd9ca579e35ba48059d165b0858b36813e9af5101",
       "width": 656,
-      "height": 874,
+      "height": 1050,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-garage-racing.png": {
-      "sha256": "786eb6f09936cd89de9891f9bf509f308e81f86ca7007361aa9c60fcf5393467",
+      "sha256": "a5973163573f3cbe87811ec5eb41eab6e5014446d9c8627b0b1ad4eed84311d8",
       "width": 656,
-      "height": 920,
+      "height": 1152,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     },
     "view-garage-stopped.png": {
-      "sha256": "38dc36a2fe5f41e90d98bb2fcf0862b8c363d368a9e9e6e7ec5b1ee5c6300267",
+      "sha256": "26457a20edb005f660c73bbf6aae9da7b7ed8619ea51fcd2624b540f0e999834",
       "width": 656,
-      "height": 1064,
+      "height": 1240,
       "state": {
-        "version": "8.14.62",
-        "target": "190 · 98.7%"
+        "version": "8.14.63",
+        "target": "195 · 98.7%"
       }
     }
   }

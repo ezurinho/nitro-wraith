@@ -81,6 +81,7 @@ async function captureViewStates(cdp) {
             chars: 550, correct: 543, errors: 7,
             startedAt: now - 60000, endedAt: 0, clockDone: true,
             typing: true, stopped: 0, closed: 0, lastAcceptedAt: now - 200,
+            raceWpmDrift: 0, raceAccDrift: 0,
           });
         } else {
           w.localStorage.removeItem('ntQueue:stoppedAt');
@@ -318,7 +319,24 @@ async function captureGarageStates(cdp, appUrl) {
     await captureShot(cdp, path.join(SHOT_DIR, `view-garage-${name}.png`), clip);
   };
 
+  await cdp.evaluate(`(() => {
+    const frame = document.querySelector('iframe');
+    const typer = frame && frame.contentWindow && frame.contentWindow.__ntaDebug;
+    if (typer && typer.patchSession) typer.patchSession({ raceWpmDrift: 0, raceAccDrift: 0 });
+    const root = document.getElementById('nt-queue-panel').shadowRoot;
+    const style = document.createElement('style');
+    style.id = 'nta-visual-fixed-racing';
+    style.textContent = '.p{height:540px!important;}';
+    root.appendChild(style);
+    return true;
+  })()`);
   await captureGarageShot('racing');
+  await cdp.evaluate(`(() => {
+    const root = document.getElementById('nt-queue-panel').shadowRoot;
+    const style = root.querySelector('#nta-visual-fixed-racing');
+    if (style) style.remove();
+    return true;
+  })()`);
 
   // En espera: el tipador del iframe se declara parado, que es la condicion que
   // de verdad frena el rearme automatico del garaje, y se suelta el armed. Asi
