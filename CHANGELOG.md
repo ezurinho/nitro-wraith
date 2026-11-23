@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.59 — 2026-11-23
+
+- feat(panel): keep every WPM a whole number
+
 ## 8.14.58 — 2026-11-23
 
 - refactor(queue): move the 16 helpers that carry no queue state out of runQueue
