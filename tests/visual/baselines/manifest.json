@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "capturedAt": "2026-11-23T03:03:53.340Z",
+  "capturedAt": "2026-11-23T03:45:23.022Z",
   "engine": {
     "product": "Chrome/157.0.8103.80",
     "browser": "Chrome",
@@ -27,53 +27,85 @@
   },
   "images": {
     "theme-carbon.png": {
-      "sha256": "013d1dcc6c38b86348095f0e3eec99d9ee972dbc3bcb1558947468d2f1d61e70",
-      "width": 732,
-      "height": 1880
-    },
-    "theme-aurora.png": {
-      "sha256": "9807e4395ba8f9f6a9d022c510f47577d5daaabaee3eeaa7335823936b9a25f1",
+      "sha256": "2446abdef13b3def9c057c24aeb228ba2a41753b7c72495996e02d27bd1a3c17",
       "width": 732,
       "height": 1880,
       "state": {
-        "version": "8.14.57",
-        "target": "109 · 98.7%"
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
+      }
+    },
+    "theme-aurora.png": {
+      "sha256": "cce8e4a537a9f51046923bf0acfb0f728e42a05ee86f2197b6881318569f4e46",
+      "width": 732,
+      "height": 1880,
+      "state": {
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
       }
     },
     "theme-sunset.png": {
-      "sha256": "b70a9b5ed8741481127b8dbca3231cadc32737cc934a479d8ad340dc369e97bc",
+      "sha256": "1ba13c067be21be5faae9c27db339280ffa7fc088065e4691c566cb04dbae272",
       "width": 732,
-      "height": 1880
+      "height": 1880,
+      "state": {
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
+      }
     },
     "theme-ice.png": {
-      "sha256": "bca527e2e9ce7ca662a70a659539df2e64e49ebb0e7ead660bd824bf44061ef5",
+      "sha256": "50801558eae0f37f3168641a1684b3ced3298714536c9f46cbe84179f94695e6",
       "width": 732,
-      "height": 1880
+      "height": 1880,
+      "state": {
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
+      }
     },
     "theme-violet.png": {
-      "sha256": "d49dc8a043e71914b6708155e9505754a22a9730add4aed30154980040d93b55",
+      "sha256": "a5516c6437774e1a40bc927cdb9996e18c73792f7fe06c30bffab1a30848daf2",
       "width": 732,
-      "height": 1880
+      "height": 1880,
+      "state": {
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
+      }
     },
     "theme-rgb.png": {
-      "sha256": "2921d2d0b6a157380f742b2c7a8658bc760a2f68286300e8570d0ebe646818a6",
+      "sha256": "04c7cce10d0b019ad402f3ad9a7a16fc00a19d9638dfc1f5d85668f0d317e535",
       "width": 732,
-      "height": 1880
+      "height": 1880,
+      "state": {
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
+      }
     },
     "view-tune-idle.png": {
-      "sha256": "896364f747d623371a3e973f31f481779e5aa47025385ccb09a9b36ef40586f1",
+      "sha256": "2d7109f05cb0a8f6251d0031539d0bdcdf7fa815bb9809858998d811b01f03fc",
       "width": 732,
-      "height": 4854
+      "height": 4886,
+      "state": {
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
+      }
     },
     "view-tune-racing.png": {
-      "sha256": "bfd7256606533c052e45d17c51f2f23516ad00c19a590f0ac553bb55ca0fc49a",
+      "sha256": "aef3a06e1c513cac47f2669ba943e10c284c080daaec99962aa86d9d19c5f468",
       "width": 732,
-      "height": 4854
+      "height": 4886,
+      "state": {
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
+      }
     },
     "view-tune-stopped.png": {
-      "sha256": "b544c3c78e79fc875f0340b55c30467461ebf7f94140436bd0ef9d2c2531ddbd",
+      "sha256": "9fce081813a9d831c0ab97df62cc58a8a6ef0d3571f73e8f5fd62d609cb28c85",
       "width": 732,
-      "height": 4854
+      "height": 4886,
+      "state": {
+        "version": "8.14.58",
+        "target": "195 · 96.7%"
+      }
     },
     "view-log-idle.png": {
       "sha256": "800e25c9a5507656f3d299f0f40b23c8b1abc0edbee7d6d64f565d1f4dfd1775",

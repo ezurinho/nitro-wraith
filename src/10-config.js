@@ -33,6 +33,23 @@
       // Un override manual manda sobre la media. 0 = automatico.
       customWpm: 0,
       customAccuracy: 0,
+      // El objetivo NO se queda en la media de la cuenta: una cuenta de 83 de
+      // media con un top de 230 ya demostro que puede escribir mucho mas, y
+      // dejar el bot a 104 es escribir la mitad de lo que la cuenta hace. El
+      // centro del rango se apunta a una fraccion del TOP, y el techo duro sube
+      // con el para que el planificador tenga sitio (sin el, el rango se
+      // recortaba a 120 y el top solo servia de adorno).
+      topShare: 0.85,          // objetivo = 85% del mejor WPM de la cuenta
+      topShareMin: 80,         // por debajo de este top manda la media (cuenta nueva)
+      // Techo duro: 97% del top, nunca por encima de la marca de la cuenta. Ni
+      // por debajo del techo historico (120) ni por encima del maximo.
+      ceilingTopShare: 0.97,
+      ceilingMin: 120,
+      ceilingMax: 300,
+      // Una calibracion no puede mas que doblar el ritmo de golpe: subir un
+      // 25% por lectura (cada 30 min o 25 carreras) hace que la cuenta pase de
+      // 104 a 196 en tres lecturas en vez de en una carrera de 230.
+      maxStepRatio: 1.25,
       // Si la media se hundio pero el top sigue alto, el objetivo no se queda
       // en la media hundida: se usa un suelo de recuperacion proporcional al
       // top. Nunca puede saltar mas de un 25% sobre la media actual: una
@@ -196,12 +213,14 @@
     // chaining races with statistics that scream.
     guard: {
       enabled: true,
-      // Tripwire: the hard ceiling itself. The planner tops out at CONFIG.wpm.max
-      // and the governor keeps the running average under hardCap, so this number
-      // only gets reached when something is genuinely broken (a race the script is
-      // not driving, a duplicate copy, a runaway counter). If the game's own HUD
-      // reports more than this for a few samples, the bot aborts and stops.
-      // paceCap() plans at hardCap - 2 (118) on purpose: the 2 WPM margin keeps
+      // Tripwire: the hard ceiling itself. It follows CONFIG.wpm.hardCap, which
+      // is derived from the account's own top speed (see ceilingFor), so a
+      // 230 WPM account is not treated as a runaway. The planner stops at
+      // paceCap(), the governor keeps the running average under hardCap, so this
+      // number only gets reached when something is genuinely broken (a race the
+      // script is not driving, a duplicate copy, a runaway counter). If the game's
+      // own HUD reports more than this for a few samples, the bot aborts and
+      // stops. paceCap() plans at hardCap - 2 on purpose: the 2 WPM margin keeps
       // the game's own rounding from ever touching this tripwire.
       maxWpmLegit: 120,
       // A value 1.5x above the tripwire stops the race dead, no samples needed.
@@ -635,6 +654,7 @@
     activeEnd: 'autoTyperActiveEnd',
     calibratedRange: 'autoTyperCalibratedRange',
     calibratedAccuracy: 'autoTyperCalibratedAccuracy',
+    wpmCeiling: 'autoTyperWpmCeiling',
     calibrationAt: 'autoTyperCalibrationAt',
     calibrationVersion: 'autoTyperCalibrationVersion',
     calibrationAccount: 'autoTyperCalibrationAccount',
@@ -1117,4 +1137,4 @@
   // Cuando arranco esta pagina: un intento fallido anterior no bloquea la
   // visita nueva, pero uno de esta misma pagina si (no se insiste en caliente).
   const PAGE_AT = Date.now();
-
+

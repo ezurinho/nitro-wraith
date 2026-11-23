@@ -815,6 +815,13 @@
     };
     setNumberValue(panel.refs.customWpm, CONFIG.calibration.customWpm);
     setNumberValue(panel.refs.customAcc, CONFIG.calibration.customAccuracy);
+    // El maximo del campo sigue al techo: con una cuenta de 230 el input no
+    // puede seguir diciendo que el tope manual es 119.
+    if (panel.refs.customWpm) {
+      const max = String(Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1));
+      if (panel.refs.customWpm.max !== max) panel.refs.customWpm.max = max;
+      panel.refs.customWpm.title = `Manual WPM target, 15-${max}. Empty or 0 returns to automatic calibration (${wpmInt(Number(CONFIG.calibration.topShare) * 100)}% of the account top).`;
+    }
 
     if (panel.refs.nitroStrategy) {
       const strategy = normalizeNitroStrategy(CONFIG.nitroStrategy);
@@ -984,6 +991,11 @@
   window.__ntaDebug.setCustomWpm = (value) => setCustomWpm(value);
   window.__ntaDebug.setCustomAccuracy = (value) => setCustomAccuracy(value);
   window.__ntaDebug.paceCenter = (stats) => effectivePaceCenter(stats || {});
+  // El techo puro y el que resulta de un top, para que el harness compruebe la
+  // formula sin tener que leer una cuenta de verdad.
+  window.__ntaDebug.ceilingFor = (top) => ceilingFor(top);
+  window.__ntaDebug.applyCeiling = (top) => applyCeiling(top);
+  window.__ntaDebug.topPaceTarget = (top) => topPaceTarget(top);
   window.__ntaDebug.accountIdentity = () => readAccountIdentity();
   window.__ntaDebug.calibrationAccount = () => disk.get(KEYS.calibrationAccount, '');
   window.__ntaDebug.ensureCalibrationAccount = () => ensureCalibrationAccount();
@@ -1223,6 +1235,35 @@
   window.__ntaDebug.perf = () => ({ ...perfCounters });
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
+  // Muestra de cadencia pura: cuanto tarda el motor por tecla a un objetivo
+  // dado. Subir el techo solo cambia el numero del panel si la cadencia no
+  // llega, asi que el harness mide el motor y no la etiqueta.
+  window.__ntaDebug.paceSample = (target, keys = 2000) => {
+    const text = 'the quick brown fox jumps over the lazy dog and then some more words to type ';
+    const count = Math.max(2, Math.round(Number(keys) || 2000));
+    const wpm = Number(target) > 0 ? Number(target) : profile.targetWPM;
+    // El trim y el modo cuidadoso son estado de la tanda, no del modelo: la
+    // muestra se toma con los dos neutralizados para que mida la cadencia del
+    // motor y no lo que hoy pida la sesion.
+    const savedTrim = session.trim;
+    const savedCareful = session.carefulRaces;
+    let total = 0;
+    session.trim = 1;
+    session.carefulRaces = 0;
+    try {
+      for (let i = 1; i < count; i++) total += nextDelay(text, i % (text.length - 1), wpm);
+    } finally {
+      session.trim = savedTrim;
+      session.carefulRaces = savedCareful;
+    }
+    const msPerChar = total / (count - 1);
+    return {
+      target: wpm,
+      keys: count,
+      msPerChar: Number(msPerChar.toFixed(2)),
+      wpm: Number((60000 / (msPerChar * 5)).toFixed(1)),
+    };
+  };
   // Prueba pura del gobernador sin tocar la carrera real: guarda y restaura
   // los tres contadores que usa paceCapWait. El reloj es opcional para que el
   // harness pueda recorrer una carrera entera sin esperar en tiempo real.
@@ -3782,7 +3823,7 @@
   }
 
   function paintLiveNumbers(measured, wpm, acc) {
-    flashValue(panel.refs.live, measured ? wpm.toFixed(1) : '—');
+    flashValue(panel.refs.live, measured ? wpmInt(wpm) : '—');
     flashValue(panel.refs.acc, measured ? `${acc.toFixed(1)}%` : '—');
     setGood(panel.refs.live, measured ? wpm >= profile.targetWPM * 0.95 : null);
     setGood(panel.refs.acc, measured ? acc >= profile.accuracyGoal : null);
@@ -3799,7 +3840,7 @@
     const recent = liveRecentNow();
     const recentPace = recent ? recent.pace : null;
     const recentAcc = recent ? recent.accuracy : null;
-    flashValue(panel.refs.liveNow, stale || recentPace === null ? '—' : recentPace.toFixed(1));
+    flashValue(panel.refs.liveNow, stale || recentPace === null ? '—' : wpmInt(recentPace));
     flashValue(panel.refs.liveNowAcc, stale || recentAcc === null ? '—' : `${recentAcc.toFixed(1)}%`);
     setGood(panel.refs.liveNow, stale ? false : null);
     setGood(panel.refs.liveNowAcc,
@@ -4133,7 +4174,7 @@
     const tandaAvg = tandaAverages();
     if (panel.refs.tanda) {
       setText(panel.refs.tanda, tandaAvg
-        ? `${tandaAvg.wpm.toFixed(1)} · ${tandaAvg.acc.toFixed(1)}%`
+        ? `${wpmInt(tandaAvg.wpm)} · ${tandaAvg.acc.toFixed(1)}%`
         : '—');
       setGood(panel.refs.tanda, tandaAvg
         ? Math.abs((tandaAvg.wpm - tandaAvg.target) / tandaAvg.target) * 100 <= 2

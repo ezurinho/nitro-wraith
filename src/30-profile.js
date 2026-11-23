@@ -274,9 +274,14 @@
       KEYS.calibrationAt,
       KEYS.calibrationVersion,
       KEYS.lifetimeWpm,
+      KEYS.wpmCeiling,
     ]) disk.remove(key);
     calibratedRange = null;
     calibratedAccuracy = null;
+    // El techo vuelve al historico: el de la cuenta anterior no puede seguir
+    // mandando sobre esta.
+    CONFIG.wpm.hardCap = Number(CONFIG.calibration.ceilingMin) || 120;
+    CONFIG.guard.maxWpmLegit = CONFIG.wpm.hardCap;
     accountStats = null;
     calibrationError = '';
     calibrationFailures = 0;
@@ -337,8 +342,68 @@
   // El `avgSpeed` del perfil es una ventana corta. Cuando el bot ha corrido
   // por debajo, esa ventana se queda en 30-40 aunque el top siga en 230. Un
   // objetivo que solo mire esa media se retroalimenta: cada carrera baja la
-  // media y la media baja el objetivo. Este suelo compara ambos numeros y solo
-  // entra cuando el top demuestra una capacidad muy superior a la media.
+  // media y la media baja el objetivo. El techo duro nacia de una constante
+  // (120) y con el la calibracion era un adorno: `wpmRangeFor` recortaba el
+  // centro al techo y una cuenta de 230 escribia a 119 para siempre. Ahora el
+  // techo se deriva del top, justo por debajo de la marca de la propia cuenta,
+  // y sigue siendo un techo de verdad: el planificador no pasa de el, el
+  // gobernador frena la carrera que lo toque y el guardia aborta si el HUD del
+  // juego se pasa. Sin cuenta leida manda el 120 historico.
+  function ceilingFor(top) {
+    const floor = clamp(wpmInt(CONFIG.calibration.ceilingMin) || 120, 120, 400);
+    const max = Math.max(floor, wpmInt(CONFIG.calibration.ceilingMax) || 300);
+    const best = Number(top);
+    if (!Number.isFinite(best) || best <= 0) return floor;
+    const share = clamp(Number(CONFIG.calibration.ceilingTopShare) || 0.97, 0.5, 1);
+    return clamp(Math.round(best * share), floor, max);
+  }
+
+  // Aplica el techo y lo guarda con el top del que salio: al recargar se vuelve
+  // a derivar del mismo dato en vez de confiar en un numero suelto que pudo
+  // dejar otra cuenta.
+  function applyCeiling(top) {
+    const previous = wpmInt(CONFIG.wpm.hardCap);
+    const cap = ceilingFor(top);
+    CONFIG.wpm.hardCap = cap;
+    // El guardia compara el HUD del juego con este numero: si el techo sube y el
+    // tripwire se queda en 120, la primera carrera rapida aborta sola.
+    CONFIG.guard.maxWpmLegit = cap;
+    const best = Number(top);
+    if (Number.isFinite(best) && best > 0) {
+      disk.set(KEYS.wpmCeiling, JSON.stringify({ top: Math.round(best), cap, at: Date.now() }));
+    }
+    if (cap !== previous) {
+      log(`Pace ceiling: ${previous} -> ${cap} WPM (account top ${wpmInt(best)}).`);
+    }
+    return { cap, previous, changed: cap !== previous };
+  }
+
+  // Arranque: el techo guardado se vuelve a derivar de su top. Si el tope cambio
+  // de formula, se recalcula; si no hay nada guardado, manda el 120.
+  (function restoreCeiling() {
+    try {
+      const raw = JSON.parse(disk.get(KEYS.wpmCeiling, 'null'));
+      if (!raw || !Number.isFinite(Number(raw.top)) || Number(raw.top) <= 0) return;
+      const cap = ceilingFor(raw.top);
+      CONFIG.wpm.hardCap = cap;
+      CONFIG.guard.maxWpmLegit = cap;
+    } catch { /* sin techo guardado */ }
+  })();
+
+  // Objetivo por top: una fraccion del mejor WPM de la cuenta. El top es el
+  // unico dato que dice de lo que la cuenta es capaz cuando la media se ha
+  // quedado corta, y es lo que hace que una cuenta de 230 no escriba a 104. Una
+  // cuenta nueva no entra aqui: con un top de 40 el top no demuestra nada y
+  // manda la media.
+  function topPaceTarget(best) {
+    const top = Number(best);
+    const minTop = wpmInt(CONFIG.calibration.topShareMin) || 80;
+    if (!Number.isFinite(top) || top < minTop) return 0;
+    const share = clamp(Number(CONFIG.calibration.topShare) || 0.85, 0.5, 1);
+    const cap = Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 2);
+    return clamp(Math.round(top * share), wpmInt(CONFIG.calibration.minWpm) || 15, cap);
+  }
+
   function recoveryPaceFloor(average, top) {
     const avg = Number(average);
     const best = Number(top);
@@ -353,9 +418,9 @@
     return Math.min(cap, Math.round(best * ratio), Math.round(avg * jump));
   }
 
-  // La media que de verdad puede sostener el bot: reciente e historica, con
-  // el suelo de recuperacion del top. No incluye el override manual; ese se
-  // aplica antes y no se mezcla con la calibracion automatica.
+  // La media que de verdad puede sostener el bot: reciente e historica, con el
+  // objetivo por top como centro. No incluye el override manual; ese se aplica
+  // antes y no se mezcla con la calibracion automatica.
   function effectivePaceCenter(stats) {
     const values = [
       stats && stats.wpm,
@@ -363,21 +428,31 @@
       stats && stats.lifetimeWpm,
     ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
     const average = values.length ? Math.max(...values) : 0;
-    const floor = recoveryPaceFloor(average, stats && stats.bestWpm);
-    // El centro es un WPM entero: de aqui salen los objetivos de cada sesion, y
-    // medio WPM en el centro se convertia en rangos y filas con decimales.
-    return { average, center: Math.round(Math.max(average, floor)), floor };
+    const top = stats && stats.bestWpm;
+    const floor = recoveryPaceFloor(average, top);
+    const share = topPaceTarget(top);
+    return { average, center: Math.round(Math.max(average, floor, share)), floor, top: share };
   }
 
   // El suelo del top solo puede subir el objetivo. Para bajarlo esta el custom
   // o el reset explicito: asi una media corta nunca arrastra la calibracion.
   function applyCalibratedRange(value, options = {}) {
-    const range = wpmRangeFor(value);
+    let range = wpmRangeFor(value);
     if (!range) return { applied: false, range: calibratedRange, blocked: false };
     const previous = calibratedRange && Number.isFinite(calibratedRange.center)
       ? calibratedRange.center : null;
     if (options.allowLower !== true && previous !== null && range.center < previous - 0.5) {
       return { applied: false, range: calibratedRange, blocked: true };
+    }
+    // Subida por pasos: pasar de 104 a 196 en una carrera pone en el historial
+    // de la cuenta un salto que ninguna persona hace. Cada calibracion (cada 30
+    // min o 25 carreras) puede subir hasta un 25%, asi que la cuenta llega al
+    // objetivo del top en tres lecturas. El override manual va exacto: si el
+    // dueno lo escribe, es su decision.
+    const maxStep = Number(CONFIG.calibration.maxStepRatio);
+    if (options.allowLower !== true && previous !== null
+      && Number.isFinite(maxStep) && maxStep > 1 && range.center > previous * maxStep) {
+      range = wpmRangeFor(Math.round(previous * maxStep)) || range;
     }
     calibratedRange = range;
     disk.set(KEYS.calibratedRange, JSON.stringify(range));
@@ -409,7 +484,8 @@
 
   function customWpm() {
     const value = Number(CONFIG.calibration.customWpm);
-    return Number.isFinite(value) && value >= 15 ? clamp(Math.round(value), 15, 119) : 0;
+    const cap = Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1);
+    return Number.isFinite(value) && value >= 15 ? clamp(Math.round(value), 15, cap) : 0;
   }
 
   function customAccuracy() {
@@ -476,7 +552,7 @@
       challenges: flag('challenges'),
       calibration: true,
       customWpm: Number.isFinite(Number(saved.customWpm)) && Number(saved.customWpm) >= 15
-        ? clamp(Math.round(Number(saved.customWpm)), 15, 119) : 0,
+        ? clamp(Math.round(Number(saved.customWpm)), 15, Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1)) : 0,
       customAccuracy: Number.isFinite(Number(saved.customAccuracy)) && Number(saved.customAccuracy) >= 96
         ? clamp(Math.round(Number(saved.customAccuracy)), 96, 100) : 0,
     };
@@ -562,6 +638,9 @@
     // esta linea sobreescribia 110-116 con un avgSpeed de 38 en cada recarga.
     if (CONFIG.calibration.auto) {
       const persisted = readPersistedUser();
+      // El techo va ANTES del rango: con el techo viejo (120) el centro que sale
+      // del top se recortaba y la cuenta volvia a escribir a 119 al recargar.
+      if (persisted && persisted.bestWpm) applyCeiling(persisted.bestWpm);
       const manual = customWpm();
       if (manual) {
         applyCalibratedRange(manual, { allowLower: true });
@@ -689,7 +768,8 @@
   // no arrastre el ritmo hacia abajo.
   function setCustomWpm(value, options = {}) {
     const raw = Number(value);
-    const next = !Number.isFinite(raw) || raw <= 0 ? 0 : clamp(Math.round(raw), 15, 119);
+    const next = !Number.isFinite(raw) || raw <= 0
+      ? 0 : clamp(Math.round(raw), 15, Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1));
     if (next === customWpm()) return false;
 
     CONFIG.calibration.customWpm = next;
@@ -1034,6 +1114,9 @@
     calibrationRetryAt = 0;
     const beforeWpm = { min: CONFIG.wpm.min, max: CONFIG.wpm.max };
     const beforeAcc = { min: CONFIG.accuracy.min, max: CONFIG.accuracy.max };
+    // Primero el techo: el centro que sale del top no puede planificarse contra
+    // el techo de la cuenta anterior.
+    applyCeiling((stats && stats.bestWpm) || (stats && stats.recovery && stats.recovery.top));
     const manualWpm = customWpm();
     const manualAcc = customAccuracy();
     const pace = effectivePaceCenter(stats || {});
@@ -1043,6 +1126,10 @@
       const applied = applyCalibratedRange(target, { allowLower: manualWpm > 0 });
       if (applied.range) {
         const range = applied.range;
+        // El trinquete de subida puede dejar el centro por debajo del que se
+        // pidio: la fila tiene que enseñar el target del rango que de verdad se
+        // teclea, no el que se calculo antes del paso.
+        if (accountStats) accountStats.targetWpm = range.center;
         if (applied.applied) {
           const top = Number(stats.bestWpm) > 0 ? `; top ${Number(stats.bestWpm).toFixed(0)} WPM` : '';
           const recent = Number(stats.currentWpm) || 0;
@@ -1053,15 +1140,18 @@
           const provenance = info && info.rows
             ? `; ${info.rows} month${info.rows === 1 ? '' : 's'} / ${info.pages} page${info.pages === 1 ? '' : 's'}${info.stale ? ' cached' : ''}`
             : '';
+          const topTarget = Number(pace.top) || 0;
           const source = manualWpm
             ? 'manual override'
-            : floor > profileAverage + 0.5
+            : topTarget > 0 && topTarget >= profileAverage
+              ? `${wpmInt(Number(CONFIG.calibration.topShare) * 100)}% of the ${wpmInt(stats.bestWpm)} WPM account top (short average ${wpmInt(profileAverage)})`
+              : floor > profileAverage + 0.5
               ? `recovery floor from the ${Number(stats.bestWpm).toFixed(0)} WPM top (short average ${wpmInt(profileAverage)})`
               : lifetime > recent + 0.5
                 ? `lifetime ${lifetime.toFixed(1)}; short profile ${recent.toFixed(1)}`
                 : 'account average';
           const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
-          log(`Pace auto-calibrated: ${wpmInt(target)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max}.`);
+          log(`Pace auto-calibrated: ${wpmInt(target)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max} under a ${CONFIG.wpm.hardCap} WPM ceiling.`);
         } else if (applied.blocked) {
           log(`Pace kept at ${range.min}-${range.max}: the latest data would lower it to ${wpmInt(target)} WPM. Use custom WPM or clear the override to reset it.`);
         }

@@ -472,6 +472,23 @@ All of this only aims at believable statistics. It is your call and your risk.
       // Un override manual manda sobre la media. 0 = automatico.
       customWpm: 0,
       customAccuracy: 0,
+      // El objetivo NO se queda en la media de la cuenta: una cuenta de 83 de
+      // media con un top de 230 ya demostro que puede escribir mucho mas, y
+      // dejar el bot a 104 es escribir la mitad de lo que la cuenta hace. El
+      // centro del rango se apunta a una fraccion del TOP, y el techo duro sube
+      // con el para que el planificador tenga sitio (sin el, el rango se
+      // recortaba a 120 y el top solo servia de adorno).
+      topShare: 0.85,          // objetivo = 85% del mejor WPM de la cuenta
+      topShareMin: 80,         // por debajo de este top manda la media (cuenta nueva)
+      // Techo duro: 97% del top, nunca por encima de la marca de la cuenta. Ni
+      // por debajo del techo historico (120) ni por encima del maximo.
+      ceilingTopShare: 0.97,
+      ceilingMin: 120,
+      ceilingMax: 300,
+      // Una calibracion no puede mas que doblar el ritmo de golpe: subir un
+      // 25% por lectura (cada 30 min o 25 carreras) hace que la cuenta pase de
+      // 104 a 196 en tres lecturas en vez de en una carrera de 230.
+      maxStepRatio: 1.25,
       // Si la media se hundio pero el top sigue alto, el objetivo no se queda
       // en la media hundida: se usa un suelo de recuperacion proporcional al
       // top. Nunca puede saltar mas de un 25% sobre la media actual: una
@@ -635,12 +652,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     // chaining races with statistics that scream.
     guard: {
       enabled: true,
-      // Tripwire: the hard ceiling itself. The planner tops out at CONFIG.wpm.max
-      // and the governor keeps the running average under hardCap, so this number
-      // only gets reached when something is genuinely broken (a race the script is
-      // not driving, a duplicate copy, a runaway counter). If the game's own HUD
-      // reports more than this for a few samples, the bot aborts and stops.
-      // paceCap() plans at hardCap - 2 (118) on purpose: the 2 WPM margin keeps
+      // Tripwire: the hard ceiling itself. It follows CONFIG.wpm.hardCap, which
+      // is derived from the account's own top speed (see ceilingFor), so a
+      // 230 WPM account is not treated as a runaway. The planner stops at
+      // paceCap(), the governor keeps the running average under hardCap, so this
+      // number only gets reached when something is genuinely broken (a race the
+      // script is not driving, a duplicate copy, a runaway counter). If the game's
+      // own HUD reports more than this for a few samples, the bot aborts and
+      // stops. paceCap() plans at hardCap - 2 on purpose: the 2 WPM margin keeps
       // the game's own rounding from ever touching this tripwire.
       maxWpmLegit: 120,
       // A value 1.5x above the tripwire stops the race dead, no samples needed.
@@ -1074,6 +1093,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     activeEnd: 'autoTyperActiveEnd',
     calibratedRange: 'autoTyperCalibratedRange',
     calibratedAccuracy: 'autoTyperCalibratedAccuracy',
+    wpmCeiling: 'autoTyperWpmCeiling',
     calibrationAt: 'autoTyperCalibrationAt',
     calibrationVersion: 'autoTyperCalibrationVersion',
     calibrationAccount: 'autoTyperCalibrationAccount',
@@ -2197,9 +2217,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       KEYS.calibrationAt,
       KEYS.calibrationVersion,
       KEYS.lifetimeWpm,
+      KEYS.wpmCeiling,
     ]) disk.remove(key);
     calibratedRange = null;
     calibratedAccuracy = null;
+    // El techo vuelve al historico: el de la cuenta anterior no puede seguir
+    // mandando sobre esta.
+    CONFIG.wpm.hardCap = Number(CONFIG.calibration.ceilingMin) || 120;
+    CONFIG.guard.maxWpmLegit = CONFIG.wpm.hardCap;
     accountStats = null;
     calibrationError = '';
     calibrationFailures = 0;
@@ -2260,8 +2285,68 @@ All of this only aims at believable statistics. It is your call and your risk.
   // El `avgSpeed` del perfil es una ventana corta. Cuando el bot ha corrido
   // por debajo, esa ventana se queda en 30-40 aunque el top siga en 230. Un
   // objetivo que solo mire esa media se retroalimenta: cada carrera baja la
-  // media y la media baja el objetivo. Este suelo compara ambos numeros y solo
-  // entra cuando el top demuestra una capacidad muy superior a la media.
+  // media y la media baja el objetivo. El techo duro nacia de una constante
+  // (120) y con el la calibracion era un adorno: `wpmRangeFor` recortaba el
+  // centro al techo y una cuenta de 230 escribia a 119 para siempre. Ahora el
+  // techo se deriva del top, justo por debajo de la marca de la propia cuenta,
+  // y sigue siendo un techo de verdad: el planificador no pasa de el, el
+  // gobernador frena la carrera que lo toque y el guardia aborta si el HUD del
+  // juego se pasa. Sin cuenta leida manda el 120 historico.
+  function ceilingFor(top) {
+    const floor = clamp(wpmInt(CONFIG.calibration.ceilingMin) || 120, 120, 400);
+    const max = Math.max(floor, wpmInt(CONFIG.calibration.ceilingMax) || 300);
+    const best = Number(top);
+    if (!Number.isFinite(best) || best <= 0) return floor;
+    const share = clamp(Number(CONFIG.calibration.ceilingTopShare) || 0.97, 0.5, 1);
+    return clamp(Math.round(best * share), floor, max);
+  }
+
+  // Aplica el techo y lo guarda con el top del que salio: al recargar se vuelve
+  // a derivar del mismo dato en vez de confiar en un numero suelto que pudo
+  // dejar otra cuenta.
+  function applyCeiling(top) {
+    const previous = wpmInt(CONFIG.wpm.hardCap);
+    const cap = ceilingFor(top);
+    CONFIG.wpm.hardCap = cap;
+    // El guardia compara el HUD del juego con este numero: si el techo sube y el
+    // tripwire se queda en 120, la primera carrera rapida aborta sola.
+    CONFIG.guard.maxWpmLegit = cap;
+    const best = Number(top);
+    if (Number.isFinite(best) && best > 0) {
+      disk.set(KEYS.wpmCeiling, JSON.stringify({ top: Math.round(best), cap, at: Date.now() }));
+    }
+    if (cap !== previous) {
+      log(`Pace ceiling: ${previous} -> ${cap} WPM (account top ${wpmInt(best)}).`);
+    }
+    return { cap, previous, changed: cap !== previous };
+  }
+
+  // Arranque: el techo guardado se vuelve a derivar de su top. Si el tope cambio
+  // de formula, se recalcula; si no hay nada guardado, manda el 120.
+  (function restoreCeiling() {
+    try {
+      const raw = JSON.parse(disk.get(KEYS.wpmCeiling, 'null'));
+      if (!raw || !Number.isFinite(Number(raw.top)) || Number(raw.top) <= 0) return;
+      const cap = ceilingFor(raw.top);
+      CONFIG.wpm.hardCap = cap;
+      CONFIG.guard.maxWpmLegit = cap;
+    } catch { /* sin techo guardado */ }
+  })();
+
+  // Objetivo por top: una fraccion del mejor WPM de la cuenta. El top es el
+  // unico dato que dice de lo que la cuenta es capaz cuando la media se ha
+  // quedado corta, y es lo que hace que una cuenta de 230 no escriba a 104. Una
+  // cuenta nueva no entra aqui: con un top de 40 el top no demuestra nada y
+  // manda la media.
+  function topPaceTarget(best) {
+    const top = Number(best);
+    const minTop = wpmInt(CONFIG.calibration.topShareMin) || 80;
+    if (!Number.isFinite(top) || top < minTop) return 0;
+    const share = clamp(Number(CONFIG.calibration.topShare) || 0.85, 0.5, 1);
+    const cap = Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 2);
+    return clamp(Math.round(top * share), wpmInt(CONFIG.calibration.minWpm) || 15, cap);
+  }
+
   function recoveryPaceFloor(average, top) {
     const avg = Number(average);
     const best = Number(top);
@@ -2276,9 +2361,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     return Math.min(cap, Math.round(best * ratio), Math.round(avg * jump));
   }
 
-  // La media que de verdad puede sostener el bot: reciente e historica, con
-  // el suelo de recuperacion del top. No incluye el override manual; ese se
-  // aplica antes y no se mezcla con la calibracion automatica.
+  // La media que de verdad puede sostener el bot: reciente e historica, con el
+  // objetivo por top como centro. No incluye el override manual; ese se aplica
+  // antes y no se mezcla con la calibracion automatica.
   function effectivePaceCenter(stats) {
     const values = [
       stats && stats.wpm,
@@ -2286,21 +2371,31 @@ All of this only aims at believable statistics. It is your call and your risk.
       stats && stats.lifetimeWpm,
     ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
     const average = values.length ? Math.max(...values) : 0;
-    const floor = recoveryPaceFloor(average, stats && stats.bestWpm);
-    // El centro es un WPM entero: de aqui salen los objetivos de cada sesion, y
-    // medio WPM en el centro se convertia en rangos y filas con decimales.
-    return { average, center: Math.round(Math.max(average, floor)), floor };
+    const top = stats && stats.bestWpm;
+    const floor = recoveryPaceFloor(average, top);
+    const share = topPaceTarget(top);
+    return { average, center: Math.round(Math.max(average, floor, share)), floor, top: share };
   }
 
   // El suelo del top solo puede subir el objetivo. Para bajarlo esta el custom
   // o el reset explicito: asi una media corta nunca arrastra la calibracion.
   function applyCalibratedRange(value, options = {}) {
-    const range = wpmRangeFor(value);
+    let range = wpmRangeFor(value);
     if (!range) return { applied: false, range: calibratedRange, blocked: false };
     const previous = calibratedRange && Number.isFinite(calibratedRange.center)
       ? calibratedRange.center : null;
     if (options.allowLower !== true && previous !== null && range.center < previous - 0.5) {
       return { applied: false, range: calibratedRange, blocked: true };
+    }
+    // Subida por pasos: pasar de 104 a 196 en una carrera pone en el historial
+    // de la cuenta un salto que ninguna persona hace. Cada calibracion (cada 30
+    // min o 25 carreras) puede subir hasta un 25%, asi que la cuenta llega al
+    // objetivo del top en tres lecturas. El override manual va exacto: si el
+    // dueno lo escribe, es su decision.
+    const maxStep = Number(CONFIG.calibration.maxStepRatio);
+    if (options.allowLower !== true && previous !== null
+      && Number.isFinite(maxStep) && maxStep > 1 && range.center > previous * maxStep) {
+      range = wpmRangeFor(Math.round(previous * maxStep)) || range;
     }
     calibratedRange = range;
     disk.set(KEYS.calibratedRange, JSON.stringify(range));
@@ -2332,7 +2427,8 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   function customWpm() {
     const value = Number(CONFIG.calibration.customWpm);
-    return Number.isFinite(value) && value >= 15 ? clamp(Math.round(value), 15, 119) : 0;
+    const cap = Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1);
+    return Number.isFinite(value) && value >= 15 ? clamp(Math.round(value), 15, cap) : 0;
   }
 
   function customAccuracy() {
@@ -2399,7 +2495,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       challenges: flag('challenges'),
       calibration: true,
       customWpm: Number.isFinite(Number(saved.customWpm)) && Number(saved.customWpm) >= 15
-        ? clamp(Math.round(Number(saved.customWpm)), 15, 119) : 0,
+        ? clamp(Math.round(Number(saved.customWpm)), 15, Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1)) : 0,
       customAccuracy: Number.isFinite(Number(saved.customAccuracy)) && Number(saved.customAccuracy) >= 96
         ? clamp(Math.round(Number(saved.customAccuracy)), 96, 100) : 0,
     };
@@ -2485,6 +2581,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     // esta linea sobreescribia 110-116 con un avgSpeed de 38 en cada recarga.
     if (CONFIG.calibration.auto) {
       const persisted = readPersistedUser();
+      // El techo va ANTES del rango: con el techo viejo (120) el centro que sale
+      // del top se recortaba y la cuenta volvia a escribir a 119 al recargar.
+      if (persisted && persisted.bestWpm) applyCeiling(persisted.bestWpm);
       const manual = customWpm();
       if (manual) {
         applyCalibratedRange(manual, { allowLower: true });
@@ -2612,7 +2711,8 @@ All of this only aims at believable statistics. It is your call and your risk.
   // no arrastre el ritmo hacia abajo.
   function setCustomWpm(value, options = {}) {
     const raw = Number(value);
-    const next = !Number.isFinite(raw) || raw <= 0 ? 0 : clamp(Math.round(raw), 15, 119);
+    const next = !Number.isFinite(raw) || raw <= 0
+      ? 0 : clamp(Math.round(raw), 15, Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1));
     if (next === customWpm()) return false;
 
     CONFIG.calibration.customWpm = next;
@@ -2957,6 +3057,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibrationRetryAt = 0;
     const beforeWpm = { min: CONFIG.wpm.min, max: CONFIG.wpm.max };
     const beforeAcc = { min: CONFIG.accuracy.min, max: CONFIG.accuracy.max };
+    // Primero el techo: el centro que sale del top no puede planificarse contra
+    // el techo de la cuenta anterior.
+    applyCeiling((stats && stats.bestWpm) || (stats && stats.recovery && stats.recovery.top));
     const manualWpm = customWpm();
     const manualAcc = customAccuracy();
     const pace = effectivePaceCenter(stats || {});
@@ -2966,6 +3069,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       const applied = applyCalibratedRange(target, { allowLower: manualWpm > 0 });
       if (applied.range) {
         const range = applied.range;
+        // El trinquete de subida puede dejar el centro por debajo del que se
+        // pidio: la fila tiene que enseñar el target del rango que de verdad se
+        // teclea, no el que se calculo antes del paso.
+        if (accountStats) accountStats.targetWpm = range.center;
         if (applied.applied) {
           const top = Number(stats.bestWpm) > 0 ? `; top ${Number(stats.bestWpm).toFixed(0)} WPM` : '';
           const recent = Number(stats.currentWpm) || 0;
@@ -2976,15 +3083,18 @@ All of this only aims at believable statistics. It is your call and your risk.
           const provenance = info && info.rows
             ? `; ${info.rows} month${info.rows === 1 ? '' : 's'} / ${info.pages} page${info.pages === 1 ? '' : 's'}${info.stale ? ' cached' : ''}`
             : '';
+          const topTarget = Number(pace.top) || 0;
           const source = manualWpm
             ? 'manual override'
-            : floor > profileAverage + 0.5
+            : topTarget > 0 && topTarget >= profileAverage
+              ? `${wpmInt(Number(CONFIG.calibration.topShare) * 100)}% of the ${wpmInt(stats.bestWpm)} WPM account top (short average ${wpmInt(profileAverage)})`
+              : floor > profileAverage + 0.5
               ? `recovery floor from the ${Number(stats.bestWpm).toFixed(0)} WPM top (short average ${wpmInt(profileAverage)})`
               : lifetime > recent + 0.5
                 ? `lifetime ${lifetime.toFixed(1)}; short profile ${recent.toFixed(1)}`
                 : 'account average';
           const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
-          log(`Pace auto-calibrated: ${wpmInt(target)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max}.`);
+          log(`Pace auto-calibrated: ${wpmInt(target)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max} under a ${CONFIG.wpm.hardCap} WPM ceiling.`);
         } else if (applied.blocked) {
           log(`Pace kept at ${range.min}-${range.max}: the latest data would lower it to ${wpmInt(target)} WPM. Use custom WPM or clear the override to reset it.`);
         }
@@ -5469,9 +5579,12 @@ All of this only aims at believable statistics. It is your call and your risk.
     'ro', 'ic', 'ne', 'ea', 'ra', 'ce', 'li', 'ch', 'll', 'be', 'ma', 'si',
   ]);
 
-  function baseDelay() {
+  // `forWpm` permite medir la cadencia de un objetivo sin tocar la sesion: el
+  // harness pregunta "a 196 WPM, cuanto pides por tecla?" y el motor responde
+  // sin cambiar lo que esta tecleando la carrera en curso.
+  function baseDelay(forWpm = profile.targetWPM) {
     // T is the time per CORRECT character that targetWPM implies.
-    const correctMs = 60000 / (profile.targetWPM * 5);
+    const correctMs = 60000 / (forWpm * 5);
 
     // A mistake costs a whole keystroke (which does not advance) plus the
     // correction pause. With p mistakes per correct character, T = d(1 + p) + p*c,
@@ -5491,10 +5604,14 @@ All of this only aims at believable statistics. It is your call and your risk.
     // de descalificar, y ademas deja un margen extra bajo el techo.
     const careful = session.carefulRaces > 0 ? CONFIG.humanize.carefulFactor : 1;
 
-    // Pauses (word starts and punctuation) are discounted from the cadence using
-    // the real rate measured on the reference text instead of a fixed 1/5.5:
-    // MODEL_STATS computes them once at load time.
-    return Math.max(12, (motor * careful) - MODEL_STATS.pausePerChar);
+    // Sin descuento fijo de pausas. Estaba medido sobre el texto de referencia
+    // y restaba los mismos milisegundos a cualquier ritmo, asi que el motor
+    // corria por encima del objetivo: medido con `paceSample`, 110 WPM pedidos
+    // daban 119.7 y 196 daban 228.6. Ese error crecia con el ritmo (los mismos
+    // 8.8 ms son el 8% de una tecla a 110 y el 14% a 196) y el trim no puede
+    // absorberlo cuando pasa del 10%. Las pausas reales las añade `nextDelay`
+    // tecla a tecla, asi que el presupuesto por caracter es el del objetivo.
+    return Math.max(12, motor * careful);
   }
 
   // Log-logistic by inverse transform: X = (U/(1-U))^(1/beta). Free typing
@@ -5645,7 +5762,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   const MODEL_STATS = modelStats(REFERENCE_TEXT);
 
-  function nextDelay(content, index) {
+  function nextDelay(content, index, forWpm = profile.targetWPM) {
     const expected = content ? content[index] || '' : '';
     const previous = content && index > 0 ? content[index - 1] : '';
     const { pos, length } = wordContext(content, index);
@@ -5656,13 +5773,13 @@ All of this only aims at believable statistics. It is your call and your risk.
     // normalizada por la ganancia media del texto de referencia para que estas
     // reglas no muevan el WPM medido.
     const { shape } = CONFIG.humanize;
-    const scale = (baseDelay() / logLogisticMean(shape)) * fatigueFactor() / MODEL_STATS.gain;
+    const scale = (baseDelay(forWpm) / logLogisticMean(shape)) * fatigueFactor() / MODEL_STATS.gain;
     const delay = scale * digraphFactor(previous, expected) * wordShapeFactor(pos, length) * logLogistic(shape);
 
     // Nunca un intervalo no-finito: setTimeout(NaN) dispara al instante y eso
     // es tecleo a maquina (justo el fallo que encendio el guardia en las
     // pruebas del banco).
-    if (!Number.isFinite(delay)) return baseDelay();
+    if (!Number.isFinite(delay)) return baseDelay(forWpm);
 
     // La deuda del nitro se paga aqui: 1-2 ms por tecla no se notan, pero
     // suman exactamente el tiempo que costaria haber tecleado lo que salto.
@@ -5789,7 +5906,13 @@ All of this only aims at believable statistics. It is your call and your risk.
     const left = content.length - (index + length);
     const perCharMs = 60000 / ((CONFIG.wpm.hardCap - 1) * 5);
     const planMs = 60000 / (profile.targetWPM * 5);
+    // El precio del nitro es el tiempo que regala, a precio de techo
+    // (length * perCharMs), y se reparte entre las teclas que quedan. Si el
+    // ritmo planificado ya deja ese hueco de sobra (slack por encima del techo),
+    // el regalo no cuesta nada y se usa: con un objetivo muy por debajo del
+    // techo, exigirle el reparto de 25 ms por tecla apagaba el nitro del todo.
     const slack = Math.max(0, planMs - perCharMs);
+    if (length * perCharMs <= left * slack) return true;
     const roomPerChar = Math.max(0, NITRO_MAX_SPREAD - slack);
     return roomPerChar > 0 && length * perCharMs <= left * roomPerChar;
   }
@@ -10153,6 +10276,13 @@ All of this only aims at believable statistics. It is your call and your risk.
     };
     setNumberValue(panel.refs.customWpm, CONFIG.calibration.customWpm);
     setNumberValue(panel.refs.customAcc, CONFIG.calibration.customAccuracy);
+    // El maximo del campo sigue al techo: con una cuenta de 230 el input no
+    // puede seguir diciendo que el tope manual es 119.
+    if (panel.refs.customWpm) {
+      const max = String(Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1));
+      if (panel.refs.customWpm.max !== max) panel.refs.customWpm.max = max;
+      panel.refs.customWpm.title = `Manual WPM target, 15-${max}. Empty or 0 returns to automatic calibration (${wpmInt(Number(CONFIG.calibration.topShare) * 100)}% of the account top).`;
+    }
 
     if (panel.refs.nitroStrategy) {
       const strategy = normalizeNitroStrategy(CONFIG.nitroStrategy);
@@ -10322,6 +10452,11 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.setCustomWpm = (value) => setCustomWpm(value);
   window.__ntaDebug.setCustomAccuracy = (value) => setCustomAccuracy(value);
   window.__ntaDebug.paceCenter = (stats) => effectivePaceCenter(stats || {});
+  // El techo puro y el que resulta de un top, para que el harness compruebe la
+  // formula sin tener que leer una cuenta de verdad.
+  window.__ntaDebug.ceilingFor = (top) => ceilingFor(top);
+  window.__ntaDebug.applyCeiling = (top) => applyCeiling(top);
+  window.__ntaDebug.topPaceTarget = (top) => topPaceTarget(top);
   window.__ntaDebug.accountIdentity = () => readAccountIdentity();
   window.__ntaDebug.calibrationAccount = () => disk.get(KEYS.calibrationAccount, '');
   window.__ntaDebug.ensureCalibrationAccount = () => ensureCalibrationAccount();
@@ -10561,6 +10696,35 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.perf = () => ({ ...perfCounters });
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
+  // Muestra de cadencia pura: cuanto tarda el motor por tecla a un objetivo
+  // dado. Subir el techo solo cambia el numero del panel si la cadencia no
+  // llega, asi que el harness mide el motor y no la etiqueta.
+  window.__ntaDebug.paceSample = (target, keys = 2000) => {
+    const text = 'the quick brown fox jumps over the lazy dog and then some more words to type ';
+    const count = Math.max(2, Math.round(Number(keys) || 2000));
+    const wpm = Number(target) > 0 ? Number(target) : profile.targetWPM;
+    // El trim y el modo cuidadoso son estado de la tanda, no del modelo: la
+    // muestra se toma con los dos neutralizados para que mida la cadencia del
+    // motor y no lo que hoy pida la sesion.
+    const savedTrim = session.trim;
+    const savedCareful = session.carefulRaces;
+    let total = 0;
+    session.trim = 1;
+    session.carefulRaces = 0;
+    try {
+      for (let i = 1; i < count; i++) total += nextDelay(text, i % (text.length - 1), wpm);
+    } finally {
+      session.trim = savedTrim;
+      session.carefulRaces = savedCareful;
+    }
+    const msPerChar = total / (count - 1);
+    return {
+      target: wpm,
+      keys: count,
+      msPerChar: Number(msPerChar.toFixed(2)),
+      wpm: Number((60000 / (msPerChar * 5)).toFixed(1)),
+    };
+  };
   // Prueba pura del gobernador sin tocar la carrera real: guarda y restaura
   // los tres contadores que usa paceCapWait. El reloj es opcional para que el
   // harness pueda recorrer una carrera entera sin esperar en tiempo real.
@@ -13120,7 +13284,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   function paintLiveNumbers(measured, wpm, acc) {
-    flashValue(panel.refs.live, measured ? wpm.toFixed(1) : '—');
+    flashValue(panel.refs.live, measured ? wpmInt(wpm) : '—');
     flashValue(panel.refs.acc, measured ? `${acc.toFixed(1)}%` : '—');
     setGood(panel.refs.live, measured ? wpm >= profile.targetWPM * 0.95 : null);
     setGood(panel.refs.acc, measured ? acc >= profile.accuracyGoal : null);
@@ -13137,7 +13301,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     const recent = liveRecentNow();
     const recentPace = recent ? recent.pace : null;
     const recentAcc = recent ? recent.accuracy : null;
-    flashValue(panel.refs.liveNow, stale || recentPace === null ? '—' : recentPace.toFixed(1));
+    flashValue(panel.refs.liveNow, stale || recentPace === null ? '—' : wpmInt(recentPace));
     flashValue(panel.refs.liveNowAcc, stale || recentAcc === null ? '—' : `${recentAcc.toFixed(1)}%`);
     setGood(panel.refs.liveNow, stale ? false : null);
     setGood(panel.refs.liveNowAcc,
@@ -13471,7 +13635,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     const tandaAvg = tandaAverages();
     if (panel.refs.tanda) {
       setText(panel.refs.tanda, tandaAvg
-        ? `${tandaAvg.wpm.toFixed(1)} · ${tandaAvg.acc.toFixed(1)}%`
+        ? `${wpmInt(tandaAvg.wpm)} · ${tandaAvg.acc.toFixed(1)}%`
         : '—');
       setGood(panel.refs.tanda, tandaAvg
         ? Math.abs((tandaAvg.wpm - tandaAvg.target) / tandaAvg.target) * 100 <= 2

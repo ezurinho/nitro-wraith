@@ -10,9 +10,12 @@
     'ro', 'ic', 'ne', 'ea', 'ra', 'ce', 'li', 'ch', 'll', 'be', 'ma', 'si',
   ]);
 
-  function baseDelay() {
+  // `forWpm` permite medir la cadencia de un objetivo sin tocar la sesion: el
+  // harness pregunta "a 196 WPM, cuanto pides por tecla?" y el motor responde
+  // sin cambiar lo que esta tecleando la carrera en curso.
+  function baseDelay(forWpm = profile.targetWPM) {
     // T is the time per CORRECT character that targetWPM implies.
-    const correctMs = 60000 / (profile.targetWPM * 5);
+    const correctMs = 60000 / (forWpm * 5);
 
     // A mistake costs a whole keystroke (which does not advance) plus the
     // correction pause. With p mistakes per correct character, T = d(1 + p) + p*c,
@@ -32,10 +35,14 @@
     // de descalificar, y ademas deja un margen extra bajo el techo.
     const careful = session.carefulRaces > 0 ? CONFIG.humanize.carefulFactor : 1;
 
-    // Pauses (word starts and punctuation) are discounted from the cadence using
-    // the real rate measured on the reference text instead of a fixed 1/5.5:
-    // MODEL_STATS computes them once at load time.
-    return Math.max(12, (motor * careful) - MODEL_STATS.pausePerChar);
+    // Sin descuento fijo de pausas. Estaba medido sobre el texto de referencia
+    // y restaba los mismos milisegundos a cualquier ritmo, asi que el motor
+    // corria por encima del objetivo: medido con `paceSample`, 110 WPM pedidos
+    // daban 119.7 y 196 daban 228.6. Ese error crecia con el ritmo (los mismos
+    // 8.8 ms son el 8% de una tecla a 110 y el 14% a 196) y el trim no puede
+    // absorberlo cuando pasa del 10%. Las pausas reales las añade `nextDelay`
+    // tecla a tecla, asi que el presupuesto por caracter es el del objetivo.
+    return Math.max(12, motor * careful);
   }
 
   // Log-logistic by inverse transform: X = (U/(1-U))^(1/beta). Free typing
@@ -186,7 +193,7 @@
 
   const MODEL_STATS = modelStats(REFERENCE_TEXT);
 
-  function nextDelay(content, index) {
+  function nextDelay(content, index, forWpm = profile.targetWPM) {
     const expected = content ? content[index] || '' : '';
     const previous = content && index > 0 ? content[index - 1] : '';
     const { pos, length } = wordContext(content, index);
@@ -197,13 +204,13 @@
     // normalizada por la ganancia media del texto de referencia para que estas
     // reglas no muevan el WPM medido.
     const { shape } = CONFIG.humanize;
-    const scale = (baseDelay() / logLogisticMean(shape)) * fatigueFactor() / MODEL_STATS.gain;
+    const scale = (baseDelay(forWpm) / logLogisticMean(shape)) * fatigueFactor() / MODEL_STATS.gain;
     const delay = scale * digraphFactor(previous, expected) * wordShapeFactor(pos, length) * logLogistic(shape);
 
     // Nunca un intervalo no-finito: setTimeout(NaN) dispara al instante y eso
     // es tecleo a maquina (justo el fallo que encendio el guardia en las
     // pruebas del banco).
-    if (!Number.isFinite(delay)) return baseDelay();
+    if (!Number.isFinite(delay)) return baseDelay(forWpm);
 
     // La deuda del nitro se paga aqui: 1-2 ms por tecla no se notan, pero
     // suman exactamente el tiempo que costaria haber tecleado lo que salto.
@@ -330,7 +337,13 @@
     const left = content.length - (index + length);
     const perCharMs = 60000 / ((CONFIG.wpm.hardCap - 1) * 5);
     const planMs = 60000 / (profile.targetWPM * 5);
+    // El precio del nitro es el tiempo que regala, a precio de techo
+    // (length * perCharMs), y se reparte entre las teclas que quedan. Si el
+    // ritmo planificado ya deja ese hueco de sobra (slack por encima del techo),
+    // el regalo no cuesta nada y se usa: con un objetivo muy por debajo del
+    // techo, exigirle el reparto de 25 ms por tecla apagaba el nitro del todo.
     const slack = Math.max(0, planMs - perCharMs);
+    if (length * perCharMs <= left * slack) return true;
     const roomPerChar = Math.max(0, NITRO_MAX_SPREAD - slack);
     return roomPerChar > 0 && length * perCharMs <= left * roomPerChar;
   }

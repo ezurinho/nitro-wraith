@@ -2389,25 +2389,31 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       w.fetch = realFetch;
     }
   })()`, true);
-  check('wpm calibration applies the account average',
-    calibration.range === '106-118' && calibration.stored && calibration.stored.min === 106 && calibration.stored.max === 118,
+  // El objetivo sale del TOP de la cuenta (85%), no de su media: con un top de
+  // 230 y una media de 112 el centro nuevo pide 196. La primera calibracion no
+  // llega de un salto: el trinquete de subida la deja en 1.25x el centro previo
+  // (94 -> 118), y la cuenta sube en lecturas sucesivas.
+  check('the pace target climbs towards the account top in one step of at most 25%',
+    calibration.range === '112-124' && calibration.stored
+      && calibration.stored.min === 112 && calibration.stored.max === 124
+      && calibration.stored.center === 118,
     calibration);
   check('accuracy calibration applies the account average',
     calibration.acc === '98-99%' && calibration.storedAcc && calibration.storedAcc.min === 98 && calibration.storedAcc.max === 99,
     calibration);
   check('LOG shows the last calibration',
-    calibration.logWpm === '106-118 WPM' && calibration.logWhen !== 'never', calibration);
-  check('panel shows the account average',
-    calibration.account === '112 WPM · 98.7%', calibration);
+    calibration.logWpm === '112-124 WPM' && calibration.logWhen !== 'never', calibration);
+  check('the account row says the average AND the target it is aiming at',
+    calibration.account === '112 avg · 118 target · 230 top · 98.7%', calibration);
   check('auto pace cannot be switched off from the panel',
     calibration.auto === true && calibration.autoText === 'on', calibration);
   check('Live shows the auto pace and the account top WPM',
-    calibration.paceSource === 'auto · 112 target · 230 top', calibration.paceSource);
+    calibration.paceSource === 'auto · 118 target · 230 top', calibration.paceSource);
   check('the Live account card shows the read stats and its refresh control',
     calibration.acct.state === 'profile only' && calibration.acct.stateAttr === 'ready'
-      && calibration.acct.avg === '112' && calibration.acct.target === '112'
+      && calibration.acct.avg === '112' && calibration.acct.target === '118'
       && calibration.acct.top === '230' && calibration.acct.history === 'profile only'
-      && calibration.acct.range === '106-118 wpm' && calibration.acct.read !== 'never'
+      && calibration.acct.range === '112-124 wpm' && calibration.acct.read !== 'never'
       && calibration.acct.refreshDisabled === false,
     calibration.acct);
 
@@ -2458,11 +2464,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     }
   })()`, true);
   check('the lifetime average prevents a low recent profile from dragging the target down',
-    lifetimeCalibration.range === '113-120'
-      && lifetimeCalibration.account === '120 WPM · 98.7%'
-      && lifetimeCalibration.paceSource === 'auto · 120 target · 230 top'
-      && lifetimeCalibration.stored && lifetimeCalibration.stored.min === 113
-      && lifetimeCalibration.stored.max === 120
+    lifetimeCalibration.range === '142-154'
+      && lifetimeCalibration.account === '120 avg · 148 target · 230 top · 98.7%'
+      && lifetimeCalibration.paceSource === 'auto · 148 target · 230 top'
+      && lifetimeCalibration.stored && lifetimeCalibration.stored.min === 142
+      && lifetimeCalibration.stored.max === 154
       && lifetimeCalibration.accountInfo && lifetimeCalibration.accountInfo.lifetime
       && lifetimeCalibration.accountInfo.lifetime.rows === 1
       && lifetimeCalibration.accountInfo.lifetime.pages === 1
@@ -2554,7 +2560,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     return { wpm, both, cleared, values: { wpm: wpmInput.value, acc: accInput.value } };
   })()`, true);
   check('custom WPM overrides the automatic target and persists',
-    customPace.wpm.range === '112-120'
+    customPace.wpm.range === '112-124'
       && customPace.wpm.auto.custom.wpm === 118
       && customPace.wpm.stored.customWpm === 118
       && /manual · 118 wpm/.test(customPace.wpm.paceSource),
@@ -2565,7 +2571,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && customPace.both.stored.customAccuracy === 100,
     customPace.both);
   check('clearing both custom values returns to automatic calibration',
-    customPace.cleared.range === '113-120'
+    customPace.cleared.range === '190-202'
       && customPace.cleared.acc === '98-99%'
       && customPace.cleared.auto.custom.wpm === 0
       && customPace.cleared.auto.custom.accuracy === 0
@@ -2614,8 +2620,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     }
   })()`, true);
   check('a stale lifetime cache survives a monthly API failure',
-    lifetimeFallback.range === '113-120'
-      && lifetimeFallback.account === '120 WPM · 98.7%'
+    lifetimeFallback.range === '190-202'
+      && lifetimeFallback.account === '120 avg · 196 target · 230 top · 98.7%'
       && lifetimeFallback.accountInfo && lifetimeFallback.accountInfo.lifetime
       && lifetimeFallback.accountInfo.lifetime.stale === true
       && lifetimeFallback.accountInfo.lifetime.rows === 8
@@ -2688,7 +2694,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     // Carrera que YA se paso: 100 teclas enviadas en 100 ms (1200 WPM). Es lo
     // que pasa si otra copia del script teclea en la misma carrera. Aqui el
     // recorte de 5,5 s no llega, y eso tiene que ser VISIBLE.
-    const overshot = d.paceGovernorFor(1000000 - 100, 100, 1000000);
+    // La carrera se paso de largo: tres veces el cap de teclas en 100 ms es muy
+    // por encima del techo, y la deuda tiene que superar el tope de retencion en
+    // cualquier cap. Sin acentos ni comillas raras: esto vive en un template.
+    const overshot = d.paceGovernorFor(1000000 - 100, Math.round(cap * 3), 1000000);
     return { cap, limit, maxHold, msPerChar: Number(msPerChar.toFixed(2)), races, overshot };
   })()`);
 
@@ -2762,22 +2771,59 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       normal: d.paceCenter({ wpm: 110, bestWpm: 230 }),
     };
   })()`);
-  check('the top recovery floor stays proportional to the short average',
-    recoveryPace.collapsed.center === 48 && recoveryPace.collapsed.floor === 48,
+  check('a collapsed short average still aims at 85% of the account top',
+    recoveryPace.collapsed.center === 196 && recoveryPace.collapsed.top === 196
+      && recoveryPace.collapsed.floor === 48,
     recoveryPace.collapsed);
-  check('a 50 WPM account does not jump to a 110 WPM target',
-    recoveryPace.fifty.center === 63 && recoveryPace.fifty.floor === 63,
+  check('a 50 WPM account with a 230 WPM top aims at the top, not at the average',
+    recoveryPace.fifty.center === 196 && recoveryPace.fifty.top === 196,
     recoveryPace.fifty);
-  check('a 100 WPM account is not dragged down by a short 45 WPM window',
-    recoveryPace.hundred.center === 110 && recoveryPace.hundred.average === 100
+  check('a 100 WPM account keeps its own floor underneath the top share',
+    recoveryPace.hundred.center === 196 && recoveryPace.hundred.average === 100
       && recoveryPace.hundred.floor === 110,
     recoveryPace.hundred);
-  check('a beginner top does not trigger the recovery floor',
-    recoveryPace.beginner.center === 30 && recoveryPace.beginner.floor === 0,
+  check('a beginner top does not trigger the top share',
+    recoveryPace.beginner.center === 30 && recoveryPace.beginner.floor === 0
+      && recoveryPace.beginner.top === 0,
     recoveryPace.beginner);
-  check('a healthy average already above the floor is unchanged',
-    recoveryPace.normal.center === 110 && recoveryPace.normal.floor === 110,
+  check('an average above the recovery floor is still raised to the top share',
+    recoveryPace.normal.center === 196 && recoveryPace.normal.floor === 110,
     recoveryPace.normal);
+
+  // El techo sale del mismo top: justo por debajo de la marca de la cuenta, con
+  // el 120 historico como suelo y un maximo para que una cuenta imposible no
+  // abra un agujero. Sin cuenta leida manda el 120.
+  const ceilingMath = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    return {
+      none: d.ceilingFor(null),
+      low: d.ceilingFor(90),
+      typical: d.ceilingFor(230),
+      insane: d.ceilingFor(400),
+      share: d.topPaceTarget(230),
+      smallTop: d.topPaceTarget(79),
+    };
+  })()`);
+  check('the pace ceiling follows the account top and never drops below 120',
+    ceilingMath.none === 120 && ceilingMath.low === 120 && ceilingMath.typical === 223
+      && ceilingMath.insane === 300,
+    ceilingMath);
+  check('the top share is 85% of the account top and ignored on a beginner top',
+    ceilingMath.share === 196 && ceilingMath.smallTop === 0, ceilingMath);
+
+  // El motor es lo que de verdad limita la velocidad. Si la cadencia no llega,
+  // subir el techo solo cambia el numero del panel: se mide la cadencia pura a
+  // tres objetivos y se compara el WPM implicado con el pedido.
+  const paceSamples = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    return [110, 150, 196].map((target) => d.paceSample(target));
+  })()`);
+  check('the typing engine really reaches the top-based pace, not just the label',
+    paceSamples.every((sample) => Math.abs(sample.wpm - sample.target) <= sample.target * 0.04),
+    paceSamples.map((sample) => `${sample.target} -> ${sample.wpm} (${sample.msPerChar} ms/char)`).join(' · '));
+  check('the cadence at the top-based pace stays far above the 10 ms floor',
+    paceSamples.every((sample) => sample.msPerChar > 20),
+    paceSamples.map((sample) => `${sample.target} -> ${sample.msPerChar} ms`).join(' · '));
 
   // Cuando el trinquete conserva un rango mas alto, la fila no puede seguir
   // enseñando la media corta como si fuera el objetivo: avg, target y top van
@@ -2818,9 +2864,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     }
   })()`, true);
   check('a collapsed short average shows avg, target and top together',
-    collapsedAccount.range === '113-120'
-      && collapsedAccount.account === '38 avg · 117 target · 230 top · 98.7%'
-      && collapsedAccount.paceSource === 'auto · 117 target · 230 top',
+    collapsedAccount.range === '190-202'
+      && collapsedAccount.account === '38 avg · 196 target · 230 top · 98.7%'
+      && collapsedAccount.paceSource === 'auto · 196 target · 230 top',
     collapsedAccount);
   check('calibration records the script version that produced the range',
     Boolean(collapsedAccount.calVersion), collapsedAccount);
@@ -2862,8 +2908,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     }
   })()`, true);
   check('a lower profile average cannot pull an established target down',
-    persisted.range === '113-120' && persisted.acc === '98-99%'
-      && persisted.stored && persisted.stored.min === 113 && persisted.stored.max === 120
+    persisted.range === '190-202' && persisted.acc === '98-99%'
+      && persisted.stored && persisted.stored.min === 190 && persisted.stored.max === 202
       && persisted.storedAcc && persisted.storedAcc.min === 98 && persisted.storedAcc.max === 99,
     persisted);
 
@@ -6782,8 +6828,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     }
   })()`);
   check('the account identity is read from the current profile',
+    // Cambiar de cuenta borra la calibracion Y el techo: el tope vuelve al 120
+    // historico hasta que el perfil nuevo se lea, asi que la parte del top que se
+    // puede planificar en ese instante es cap - 2.
     accountIdentity.id === '987654'
-      && accountIdentity.target.center === 63,
+      && accountIdentity.target.center === 118 && accountIdentity.target.top === 118,
     accountIdentity);
 
   // La lectura viva: la formula del ritmo reciente y el aviso de telemetria
