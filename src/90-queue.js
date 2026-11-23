@@ -2076,6 +2076,45 @@
           .hupd:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
           .hupd svg { width: 12px; height: 12px; display: block; }
 
+          .garage-context {
+            --ctx: var(--acc);
+            display: grid;
+            grid-template-columns: 26px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 12px 2px;
+            padding: 7px 8px;
+            border: 1px solid color-mix(in srgb, var(--ctx) 26%, transparent);
+            border-radius: 9px;
+            background:
+              linear-gradient(110deg, color-mix(in srgb, var(--ctx) 12%, transparent), transparent 74%),
+              rgba(255, 255, 255, .025);
+          }
+          .garage-context[data-context="stopped"],
+          .garage-context[data-context="signin"],
+          .garage-context[data-context="cleared"] { --ctx: var(--warn); }
+          .garage-context[data-context="banned"],
+          .garage-context[data-context="offline"] { --ctx: var(--bad); }
+          .garage-context[data-context="gate"],
+          .garage-context[data-context="retry"] { --ctx: var(--info); }
+          .garage-context[data-context="reward"],
+          .garage-context[data-context="ready"] { --ctx: var(--acc); }
+          .gc-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px;
+                     color: var(--ctx); background: color-mix(in srgb, var(--ctx) 12%, transparent);
+                     border: 1px solid color-mix(in srgb, var(--ctx) 24%, transparent); }
+          .gc-icon svg { width: 14px; height: 14px; }
+          .gc-copy { min-width: 0; }
+          .gc-copy b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                       font: 750 10px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink); }
+          .gc-copy > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                           margin-top: 2px; font: 500 8.5px/1.3 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
+          .garage-context > i { padding: 3px 6px; border-radius: 999px; font: 800 7.5px/1 ui-sans-serif, system-ui, sans-serif;
+                               letter-spacing: .1em; text-transform: uppercase; color: var(--ctx);
+                               background: color-mix(in srgb, var(--ctx) 10%, transparent);
+                               border: 1px solid color-mix(in srgb, var(--ctx) 24%, transparent); }
+          .p[data-fold="1"] .garage-context,
+          .p[data-social="1"] .garage-context { display: none; }
+
           .rows { display: grid; padding: 8px 12px 6px; }
           .r { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
                padding: 3px 0; font-weight: 500; font-size: 10.5px; line-height: 1.45;
@@ -2205,6 +2244,10 @@
                  transition: filter .15s ease, box-shadow .25s ease, transform .1s ease; }
           .act:hover:not(:disabled) { filter: brightness(1.16);
                  box-shadow: 0 0 20px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .12); }
+          .act.primary { flex-basis: 100%; border-color: color-mix(in srgb, var(--acc) 58%, transparent);
+                         background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 30%, transparent), color-mix(in srgb, var(--acc) 12%, transparent));
+                         box-shadow: 0 0 20px -10px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .14); }
+          .act.primary:hover:not(:disabled) { box-shadow: 0 0 24px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .16); }
           .act:active:not(:disabled) { transform: translateY(1px); }
           .act:disabled { opacity: .38; cursor: default; }
           .act.ghost { color: #cfe9db; background: rgba(255, 255, 255, .045);
@@ -2235,8 +2278,6 @@
 
           @media (prefers-reduced-motion: reduce) {
             .p, .p *, .p::before, .p::after { animation: none !important; transition: none !important; }
-            /* Misma regla que el panel grande: el color sigue, el movimiento no. */
-            .p[data-theme="rgb"] { animation: nt-rgb-hue 16s linear infinite !important; }
           }
         </style>
         <div class="p" data-mode="auto" data-theme="${panelTheme}">
@@ -2251,6 +2292,16 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg>
             </button>
             <button class="fold" type="button" data-f="fold" aria-expanded="true" aria-label="Fold the garage panel" title="Fold the garage panel (Alt+G)">−</button>
+          </div>
+          <div class="garage-context" data-context="waiting" role="status" aria-live="polite" aria-atomic="true">
+            <span class="gc-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-5 4 10 2-5h2"/></svg>
+            </span>
+            <span class="gc-copy">
+              <b data-f="contextTitle">Queue ready</b>
+              <span data-f="contextDetail">The next race will start automatically.</span>
+            </span>
+            <i data-f="contextPill">AUTO</i>
           </div>
           <div class="rows">
             <div class="r social" data-f="socialFriendsRow" hidden><span>friends</span><b data-f="socialFriends" aria-live="polite" aria-atomic="true">—</b></div>
@@ -2301,6 +2352,10 @@
         host,
         head: root.querySelector('.h'),
         panel: root.querySelector('.p'),
+        context: root.querySelector('.garage-context'),
+        contextTitle: root.querySelector('[data-f="contextTitle"]'),
+        contextDetail: root.querySelector('[data-f="contextDetail"]'),
+        contextPill: root.querySelector('[data-f="contextPill"]'),
         mode: root.querySelector('.mode'),
         sub: root.querySelector('[data-f="sub"]'),
         socialFriendsRow: root.querySelector('[data-f="socialFriendsRow"]'),
@@ -2836,6 +2891,62 @@
       return 'waiting · starts by itself';
     }
 
+    function deriveGarageContext(input = {}) {
+      if (input.social) {
+        return { key: 'read', title: 'Read-only social', detail: 'Friends and team counters without actions.', pill: 'READ' };
+      }
+      if (input.banned) {
+        return { key: 'banned', title: 'Account blocked', detail: 'Review the account before clearing the ban.', pill: 'BAN' };
+      }
+      if (!input.signed) {
+        return { key: 'signin', title: 'Sign in required', detail: 'The queue waits for a valid session.', pill: 'LOGIN' };
+      }
+      if (input.offline) {
+        return { key: 'offline', title: 'Waiting for network', detail: 'Races resume when the connection returns.', pill: 'OFFLINE' };
+      }
+      if (input.activeStop) {
+        return { key: 'stopped', title: 'Queue stopped', detail: input.reason || 'Resume when you are ready.', pill: 'STOPPED' };
+      }
+      if (input.banCleared) {
+        return { key: 'cleared', title: 'Ban stop cleared', detail: 'Resume to arm the queue again.', pill: 'CLEARED' };
+      }
+      if (input.hasRetry) {
+        return { key: 'retry', title: 'Sign-in retry pending', detail: `Retry in ${input.retryText || 'a moment'}.`, pill: 'LOGIN' };
+      }
+      if (Array.isArray(input.gates) && input.gates.length) {
+        const gate = input.gates[0];
+        return { key: 'gate', title: gate.label || 'Queue waiting', detail: `Clears in ${gate.leftText || 'a moment'}.`, pill: 'WAIT' };
+      }
+      if (input.boxReady) {
+        return { key: 'reward', title: 'Mystery Box ready', detail: 'Claim the daily reward before the next race.', pill: 'REWARD' };
+      }
+      if (!input.armed) {
+        return { key: 'stopped', title: 'Queue disarmed', detail: 'Resume to arm the next race.', pill: 'STOPPED' };
+      }
+      return { key: 'ready', title: 'Queue ready', detail: 'The next race will start automatically.', pill: 'AUTO' };
+    }
+
+    function garagePrimaryFor(context, available = {}) {
+      if (context.key === 'reward' && available.box) return 'box';
+      if ((context.key === 'stopped' || context.key === 'banned' || context.key === 'cleared') && available.resume) return 'resume';
+      if (context.key === 'retry' && available.retry) return 'retry';
+      if (context.key === 'ready' && available.race) return 'race';
+      return '';
+    }
+
+    window.__ntaDebug.garageActionFor = (patch = {}) => {
+      const context = deriveGarageContext(patch);
+      return {
+        context,
+        primary: garagePrimaryFor(context, {
+          box: patch.box !== false,
+          resume: patch.resume !== false,
+          retry: Boolean(patch.hasRetry),
+          race: Boolean(patch.armed && patch.race !== false),
+        }),
+      };
+    };
+
     function paintGaragePanel() {
       if (!qpanel) return;
 
@@ -3171,6 +3282,41 @@
       }
 
       const raceButton = findButton((label) => label.includes('race now'));
+      const context = deriveGarageContext({
+        social,
+        banned: terminalBan,
+        signed,
+        offline: !onlineNow(),
+        activeStop,
+        reason: activeStop && lastStop ? lastStop.reason : '',
+        banCleared: banClearHeld(),
+        hasRetry,
+        retryText: sessionClockText(retryLeft),
+        gates: gates.map((gate) => ({ ...gate, leftText: shortWait(gate.left) })),
+        boxReady: boxText === 'ready now',
+        armed,
+      });
+      const primary = garagePrimaryFor(context, {
+        box: true,
+        resume: true,
+        retry: hasRetry,
+        race: Boolean(armed && raceButton),
+      });
+      if (qpanel.panel.dataset.context !== context.key) qpanel.panel.dataset.context = context.key;
+      if (qpanel.context) qpanel.context.dataset.context = context.key;
+      qpanel.contextTitle.textContent = context.title;
+      qpanel.contextDetail.textContent = context.detail;
+      qpanel.contextPill.textContent = context.pill;
+      for (const button of [qpanel.afkBtn, qpanel.boxBtn, qpanel.raceBtn, qpanel.stopBtn, qpanel.resumeBtn, qpanel.retryBtn]) {
+        if (button) button.classList.remove('primary');
+      }
+      const primaryButton = primary === 'box' ? qpanel.boxBtn
+        : primary === 'resume' ? qpanel.resumeBtn
+          : primary === 'retry' ? qpanel.retryBtn
+            : primary === 'race' ? qpanel.raceBtn
+              : null;
+      if (primaryButton) primaryButton.classList.add('primary');
+
       qpanel.race.textContent = raceNowText();
       qpanel.race.dataset.cancel = raceNowTimer ? '1' : '0';
       const total = raceNowDelay || 1;

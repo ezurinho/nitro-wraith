@@ -9,7 +9,7 @@
   // que existir cuando se arma esta cadena.
   const PANEL_HTML = `
       <style>${PANEL_CSS}</style>
-      <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
+      <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-context="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
         <div class="head">
           <span class="mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
@@ -28,6 +28,16 @@
           <button class="pace" type="button">LEGIT · balanced</button>
           <span class="mode" role="status" aria-live="polite" title="Always AUTO: the bot starts by itself. Stop stops it; it comes back on the next garage visit.">AUTO</span>
           <span class="cap" data-field="cap" title="Hard ceiling: no race is ever allowed above this WPM">≤ 120 wpm</span>
+        </div>
+        <div class="context-banner" data-context="waiting" role="status" aria-live="polite" aria-atomic="true">
+          <span class="context-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-5 4 10 2-5h2"/></svg>
+          </span>
+          <span class="context-copy">
+            <b data-field="contextTitle">Ready when you are</b>
+            <span data-field="contextDetail">The queue is waiting for the next race.</span>
+          </span>
+          <span class="context-pill" data-field="contextPill">AUTO</span>
         </div>
         <div class="race-line" aria-hidden="true"><i></i></div>
         <div class="main">
@@ -158,8 +168,11 @@
                 <span class="tune-count" data-field="tuneCount" aria-live="polite">settings</span>
               </div>
               <div class="tune-empty" data-field="tuneEmpty" role="status" hidden></div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-health-label">
-                <div class="tune-sec-h"><span id="tune-health-label">Health</span><b>account · AFK · update</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-health-label" data-open="true" data-default-open="true">
+                <button type="button" class="tune-sec-h" data-tune-disclosure aria-expanded="true" aria-controls="tune-health-body">
+                  <span id="tune-health-label">Health</span><b>account · AFK · update</b><i aria-hidden="true">⌄</i>
+                </button>
+                <div class="tune-sec-body" id="tune-health-body">
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h4l2-5 4 10 2-5h6"/><path d="M4 20h16"/></svg></span>
                   <div class="card-h"><span class="card-t">Health center</span><span class="card-s" data-field="healthSummary">checking</span></div>
@@ -172,9 +185,13 @@
                   <div class="cfg-note" data-field="healthNote">One place to see what needs attention.</div>
                   <button class="act" type="button" data-act="report" title="Copy the full diagnostic report, including the recent flight recorder, to paste when something is off">copy report</button>
                 </div>
+                </div>
               </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
-                <div class="tune-sec-h"><span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label" data-open="true" data-default-open="true">
+                <button type="button" class="tune-sec-h" data-tune-disclosure aria-expanded="true" aria-controls="tune-rhythm-body">
+                  <span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b><i aria-hidden="true">⌄</i>
+                </button>
+                <div class="tune-sec-body" id="tune-rhythm-body">
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
                   <div class="card-h"><span class="card-t">Pace</span><span class="card-s">all under the ceiling</span></div>
@@ -196,25 +213,29 @@
                     <div class="cfg-note">Custom values override auto. Empty or 0 returns to automatic.</div>
                   </div>
                 </div>
+                </div>
               </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-limits-label">
-                <div class="tune-sec-h"><span id="tune-limits-label">Limits</span><b>session, day and hours</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-limits-label" data-open="true" data-default-open="true">
+                <button type="button" class="tune-sec-h" data-tune-disclosure aria-expanded="true" aria-controls="tune-limits-body">
+                  <span id="tune-limits-label">Limits</span><b>session, day and hours</b><i aria-hidden="true">⌄</i>
+                </button>
+                <div class="tune-sec-body" id="tune-limits-body">
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2"/><circle cx="15" cy="16" r="2"/></svg></span>
                   <div class="card-h"><span class="card-t">Session limit</span><span class="card-s">the bot stops on its own</span></div>
-                  <div class="limit-row row" data-field="raceLimitRow" title="Click: races per session (free, 25, 50, 100). 25 is where the session bonus reaches its 250 XP per race cap">
+                  <button type="button" class="limit-row row" data-field="raceLimitRow" title="Click: races per session (free, 25, 50, 100). 25 is where the session bonus reaches its 250 XP per race cap">
                     <span>races</span><b data-field="limit">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="limitSlider" aria-label="Races per session" title="Races per session: free, 25, 50 or 100">
                   <div class="sld-ends"><span>free</span><span>25</span><span>50</span><span>100</span></div>
-                  <div class="limit-row row time-row" data-field="timeLimitRow" title="Click: minutes per session (free, 15, 30, 60, 120). The clock starts with the first race of the session">
+                  <button type="button" class="limit-row row time-row" data-field="timeLimitRow" title="Click: minutes per session (free, 15, 30, 60, 120). The clock starts with the first race of the session">
                     <span>time</span><b data-field="timeLimit">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="timeSlider" aria-label="Minutes per session" title="Minutes per session: free, 15, 30, 60 or 120">
                   <div class="sld-ends"><span>free</span><span>15m</span><span>30m</span><span>1h</span><span>2h</span></div>
-                  <div class="limit-row row xp-row" data-field="xpLimitRow" title="Click: XP per session (free, 5k, 10k, 25k, 50k). Counts the XP the game itself awards in each race">
+                  <button type="button" class="limit-row row xp-row" data-field="xpLimitRow" title="Click: XP per session (free, 5k, 10k, 25k, 50k). Counts the XP the game itself awards in each race">
                     <span>xp</span><b data-field="xpLimit">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="xpSlider" aria-label="XP per session" title="XP per session: free, 5k, 10k, 25k or 50k">
                   <div class="sld-ends"><span>free</span><span>5k</span><span>10k</span><span>25k</span><span>50k</span></div>
                   <div class="rows">
@@ -226,14 +247,14 @@
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 18V6M4 18h16"/><path d="M8 14v-3M12 14V7M16 14v-5"/></svg></span>
                   <div class="card-h"><span class="card-t">Daily budget</span><span class="card-s">stop before tomorrow</span></div>
-                  <div class="limit-row row" data-field="dailyRaceRow" title="Click: races per day (free, 100, 200, 300). Counts the races the game recorded today">
+                  <button type="button" class="limit-row row" data-field="dailyRaceRow" title="Click: races per day (free, 100, 200, 300). Counts the races the game recorded today">
                     <span>races/day</span><b data-field="dailyRaces">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyRaceSlider" aria-label="Races per day" title="Races per day: free, 100, 200 or 300">
                   <div class="sld-ends"><span>free</span><span>100</span><span>200</span><span>300</span></div>
-                  <div class="limit-row row xp-row" data-field="dailyXpRow" title="Click: XP per day (free, 50k, 100k, 200k). Counts the XP the game paid today">
+                  <button type="button" class="limit-row row xp-row" data-field="dailyXpRow" title="Click: XP per day (free, 50k, 100k, 200k). Counts the XP the game paid today">
                     <span>xp/day</span><b data-field="dailyXp">free</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyXpSlider" aria-label="XP per day" title="XP per day: free, 50k, 100k or 200k">
                   <div class="sld-ends"><span>free</span><span>50k</span><span>100k</span><span>200k</span></div>
                   <div class="rows">
@@ -243,26 +264,30 @@
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span>
                   <div class="card-h"><span class="card-t">Active hours</span><span class="card-s">races only in this window</span></div>
-                  <div class="limit-row row" data-field="activeRow" title="Click: turn the active window on/off. Shift+click resets 08:00–23:00">
+                  <button type="button" class="limit-row row" data-field="activeRow" title="Click: turn the active window on/off. Shift+click resets 08:00–23:00">
                     <span>window</span><b data-field="activeState">off</b>
-                  </div>
-                  <div class="limit-row row" data-field="activeStartRow" title="Click: start hour +1 (Shift+click: −1). The window can cross midnight">
+                  </button>
+                  <button type="button" class="limit-row row" data-field="activeStartRow" title="Click: start hour +1 (Shift+click: −1). The window can cross midnight">
                     <span>from</span><b data-field="activeStart">08:00</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="23" step="1" value="8" data-field="activeStartSlider" aria-label="Active window start hour" title="Start of the active window">
                   <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
-                  <div class="limit-row row" data-field="activeEndRow" title="Click: end hour +1 (Shift+click: −1). An end before the start crosses midnight">
+                  <button type="button" class="limit-row row" data-field="activeEndRow" title="Click: end hour +1 (Shift+click: −1). An end before the start crosses midnight">
                     <span>to</span><b data-field="activeEnd">23:00</b>
-                  </div>
+                  </button>
                   <input class="sld" type="range" min="0" max="23" step="1" value="23" data-field="activeEndSlider" aria-label="Active window end hour" title="End of the active window">
                   <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
                   <div class="rows">
                     <div class="row" data-field="activeNowRow" title="Local time. Races only start while the window is open"><span>now</span><b data-field="activeNow">always</b></div>
                   </div>
                 </div>
+                </div>
               </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-automation-label">
-                <div class="tune-sec-h"><span id="tune-automation-label">Automation</span><b>behavior, panel and tools</b></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-automation-label" data-open="true" data-default-open="true">
+                <button type="button" class="tune-sec-h" data-tune-disclosure aria-expanded="true" aria-controls="tune-automation-body">
+                  <span id="tune-automation-label">Automation</span><b>behavior, panel and tools</b><i aria-hidden="true">⌄</i>
+                </button>
+                <div class="tune-sec-body" id="tune-automation-body">
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></span>
                   <div class="card-h"><span class="card-t">Switches</span><span class="card-s">saved on this browser</span></div>
@@ -353,6 +378,7 @@
                   <textarea class="cfg-text" data-field="cfgText" spellcheck="false" placeholder="Paste a copied config here and press apply."></textarea>
                   <div class="cfg-note" data-field="cfgNote">Pace and switches are saved on this browser and survive reloads.</div>
                 </div>
+                </div>
               </div>
             </section>
             </template>
@@ -361,12 +387,21 @@
             <template data-view="log">
             <section class="view v-log" id="nt-view-log" role="tabpanel" aria-label="Log">
               <div class="view-head"><span>Log</span><b>sessions · challenges</b></div>
+              <div class="log-toolbar">
+                <label class="log-search" title="Filter sessions, days, challenges and notices">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+                  <input type="search" data-field="logSearch" placeholder="Filter log…" autocomplete="off" spellcheck="false" aria-label="Filter log entries">
+                  <button type="button" class="log-clear" data-field="logClear" aria-label="Clear log filter" title="Clear filter" hidden>×</button>
+                </label>
+                <span class="log-filter-count" data-field="logCountFiltered" aria-live="polite">all entries</span>
+              </div>
+              <div class="log-empty" data-field="logEmpty" role="status" hidden></div>
               <div class="card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 1.8"/></svg></span>
                 <div class="card-h"><span class="card-t" data-field="prevLabel">prev</span><span class="card-s">click for the table</span></div>
-                <div class="prev-row row" style="display:none" title="The last session that closed: races, average WPM and deviation from target">
+                <button type="button" class="prev-row row" style="display:none" title="The last session that closed: races, average WPM and deviation from target">
                   <span>session</span><b data-field="prev">—</b>
-                </div>
+                </button>
               </div>
               <div class="card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>

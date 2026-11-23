@@ -649,10 +649,21 @@
       .trim();
   }
 
+  function setTuneSectionOpen(section, open) {
+    if (!section) return;
+    const value = open ? 'true' : 'false';
+    if (section.dataset.open !== value) section.dataset.open = value;
+    const button = section.querySelector('[data-tune-disclosure]');
+    if (button && button.getAttribute('aria-expanded') !== value) {
+      button.setAttribute('aria-expanded', value);
+    }
+  }
+
   // Filtro de TUNE: una tarjeta se queda si su texto o el titulo de su bloque
   // contienen la consulta. No borra ajustes ni cambia valores; solo oculta lo
-  // que no coincide para no recorrer una lista larga. Las secciones sin
-  // coincidencias tambien se esconden y queda un aviso claro si no hay nada.
+  // que no coincide para no recorrer una lista larga. Las secciones con
+  // coincidencias se abren aunque estuvieran plegadas y recuperan su estado al
+  // limpiar el filtro.
   function filterTune() {
     const input = panel.refs && panel.refs.tuneSearch;
     const cfg = panel.refs && panel.refs.cfg;
@@ -673,6 +684,17 @@
     for (const section of cfg.querySelectorAll('.tune-sec')) {
       const show = Array.from(section.querySelectorAll('.card')).some((card) => !card.hidden);
       if (section.hidden !== !show) section.hidden = !show;
+      if (query && show) {
+        if (section.dataset.searchReveal !== '1') {
+          section.dataset.beforeSearchOpen = section.dataset.open || 'true';
+          section.dataset.searchReveal = '1';
+        }
+        setTuneSectionOpen(section, true);
+      } else if (!query && section.dataset.searchReveal === '1') {
+        setTuneSectionOpen(section, section.dataset.beforeSearchOpen !== 'false');
+        delete section.dataset.beforeSearchOpen;
+        delete section.dataset.searchReveal;
+      }
     }
 
     setText(panel.refs.tuneCount, query ? `${visible}/${cards.length}` : `${cards.length} settings`);
@@ -681,6 +703,27 @@
       const empty = Boolean(query && visible === 0);
       panel.refs.tuneEmpty.hidden = !empty;
       if (empty) setText(panel.refs.tuneEmpty, `No setting matches “${input.value.trim()}”.`);
+    }
+  }
+
+  function filterLog() {
+    const input = panel.refs && panel.refs.logSearch;
+    const view = panel.root && panel.root.querySelector('.v-log');
+    if (!input || !view) return;
+    const query = tuneFilterText(input.value);
+    const items = Array.from(view.querySelectorAll('.log-item, .notice-item'));
+    let visible = 0;
+    for (const item of items) {
+      const show = !query || tuneFilterText(item.textContent).includes(query);
+      if (item.hidden !== !show) item.hidden = !show;
+      if (show) visible += 1;
+    }
+    if (panel.refs.logClear) panel.refs.logClear.hidden = !query;
+    setText(panel.refs.logCountFiltered, query ? `${visible}/${items.length}` : `${items.length} entries`);
+    if (panel.refs.logEmpty) {
+      const empty = Boolean(query && visible === 0);
+      panel.refs.logEmpty.hidden = !empty;
+      if (empty) setText(panel.refs.logEmpty, `No log entry matches “${input.value.trim()}”.`);
     }
   }
 
@@ -1100,6 +1143,13 @@
     return out;
   };
 
+  // Matriz de contexto pura: el banco comprueba precedencia y texto sin tocar
+  // el motor ni esperar a que ocurra cada estado real.
+  window.__ntaDebug.panelContextFor = (patch = {}) => derivePanelContext({
+    now: Date.now(),
+    ...patch,
+  });
+
   // Estado de los tres topes y si ya se alcanzo alguno. Lo usa el banco para
   // probar los bordes; en el flujo normal nadie lo llama.
   window.__ntaDebug.session = () => ({
@@ -1146,6 +1196,8 @@
     if (patch.typing !== undefined) session.typing = Boolean(patch.typing);
     if (patch.stopped !== undefined) session.stopped = Boolean(patch.stopped);
     if (patch.closed !== undefined) session.closed = Boolean(patch.closed);
+    if (Number.isFinite(Number(patch.raceWpmDrift))) session.raceWpmDrift = Number(patch.raceWpmDrift);
+    if (Number.isFinite(Number(patch.raceAccDrift))) session.raceAccDrift = Number(patch.raceAccDrift);
     if (Array.isArray(patch.clockSamples)) {
       session.clockSamples = patch.clockSamples.map(Number).filter(Number.isFinite);
     }
@@ -1668,6 +1720,7 @@
       empty.className = 'log-empty';
       empty.textContent = 'no challenge data yet';
       panel.refs.chList.appendChild(empty);
+      filterLog();
       return;
     }
 
@@ -1683,6 +1736,7 @@
       row.append(label, value);
       panel.refs.chList.appendChild(row);
     }
+    filterLog();
   }
 
   function paintLogLists() {
@@ -1814,6 +1868,7 @@
         }
       }
     }
+    filterLog();
   }
 
   // Un numero que cambia se anuncia con un golpe corto de escala. Solo cuando
@@ -2378,6 +2433,10 @@
       mode: pick('.mode'),
       pace: pick('.pace'),
       cap: pick('[data-field="cap"]'),
+      contextBanner: pick('.context-banner'),
+      contextTitle: pick('[data-field="contextTitle"]'),
+      contextDetail: pick('[data-field="contextDetail"]'),
+      contextPill: pick('[data-field="contextPill"]'),
       hudRow: pick('.hud-row'),
       hud: pick('[data-field="hud"]'),
       clockRow: pick('.clock-row'),
@@ -2533,6 +2592,10 @@
       weekTotal: pick('[data-field="weekTotal"]'),
       closedList: pick('[data-field="closedList"]'),
       logCount: pick('[data-field="logCount"]'),
+      logSearch: pick('[data-field="logSearch"]'),
+      logClear: pick('[data-field="logClear"]'),
+      logCountFiltered: pick('[data-field="logCountFiltered"]'),
+      logEmpty: pick('[data-field="logEmpty"]'),
       noticeList: pick('[data-field="noticeList"]'),
       aboutVer: pick('[data-field="aboutVer"]'),
       infoCap: pick('[data-field="infoCap"]'),
@@ -2679,8 +2742,7 @@
         if (!btn) return;
         event.stopPropagation();
         showTab(btn.dataset.tabBtn);
-        btn.blur();
-      });
+        btn      });
 
       // Patron tablist: flechas, Home y End mueven la vista y el foco. No toca
       // el teclado del juego porque solo se activa con el foco dentro del rail.
@@ -2815,6 +2877,13 @@
     if (panel.refs.tuneSearch) {
       panel.refs.tuneSearch.addEventListener('input', () => filterTune());
       panel.refs.tuneSearch.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          panel.refs.tuneSearch.value = '';
+          filterTune();
+          return;
+        }
         if (event.key !== 'Enter') return;
         event.preventDefault();
         event.stopPropagation();
@@ -2828,7 +2897,26 @@
         if (panel.refs.tuneSearch) panel.refs.tuneSearch.focus();
       });
     }
+    if (panel.refs.logSearch) {
+      panel.refs.logSearch.addEventListener('input', filterLog);
+      panel.refs.logSearch.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        panel.refs.logSearch.value = '';
+        filterLog();
+      });
+    }
+    if (panel.refs.logClear) {
+      panel.refs.logClear.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (panel.refs.logSearch) panel.refs.logSearch.value = '';
+        filterLog();
+        if (panel.refs.logSearch) panel.refs.logSearch.focus();
+      });
+    }
     filterTune();
+    filterLog();
 
     // Fila de auto-calibracion: no hay apagado; el clic solo fuerza una lectura
     // nueva para que el rango se mueva ya con la media mas reciente.
@@ -2843,8 +2931,7 @@
       panel.refs.acctRefresh.addEventListener('click', (event) => {
         event.stopPropagation();
         refreshCalibration();
-        panel.refs.acctRefresh.blur();
-      });
+        panel.refs.acctRefresh      });
     }
 
     // Overrides manuales de WPM y precision. `change` evita aplicar cada tecla
@@ -2857,7 +2944,7 @@
       panel.refs.customWpm.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
-        panel.refs.customWpm.blur();
+        setCustomWpm(panel.refs.customWpm.value);
       });
     }
     if (panel.refs.customAcc) {
@@ -2868,7 +2955,7 @@
       panel.refs.customAcc.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
-        panel.refs.customAcc.blur();
+        setCustomAccuracy(panel.refs.customAcc.value);
       });
     }
 
@@ -2909,8 +2996,7 @@
     panel.refs.toggle.addEventListener('click', (event) => {
       event.stopPropagation();
       setPaused(!session.paused);
-      panel.refs.toggle.blur();
-    });
+      panel.refs.toggle    });
 
     panel.refs.stop.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -2918,8 +3004,7 @@
       // lo mismo que Alt+A, con las mismas puertas (tope diario y horas).
       if (session.stopped) resumeAuto();
       else requestStop();
-      panel.refs.stop.blur();
-    });
+      panel.refs.stop    });
 
     panel.refs.collapse.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -2927,8 +3012,7 @@
       applyCollapsed(collapsed);
       restorePosition();
       if (!collapsed) updatePanel(true);
-      panel.refs.collapse.blur();
-    });
+      panel.refs.collapse    });
 
     // El chip del modo no es un interruptor: dice AUTO y nada mas. Parar es
     // cosa de Stop / Esc, y la cola se rearma sola.
@@ -2939,8 +3023,7 @@
         event.stopPropagation();
         const index = PACE_ORDER.indexOf(paceProfile);
         setPaceProfile(PACE_ORDER[(index + 1) % PACE_ORDER.length]);
-        panel.refs.pace.blur();
-      });
+        panel.refs.pace      });
     }
 
     // Tema: un solo escuchador para las seis muestras. El CSS hace el resto.
@@ -2950,8 +3033,7 @@
         if (!chip) return;
         event.stopPropagation();
         setTheme(chip.dataset.themeBtn);
-        chip.blur();
-      });
+        chip      });
     }
 
     // ⚙ lleva a la vista de ajustes (y vuelve): es el mismo cajon de siempre,
@@ -2960,8 +3042,7 @@
       panel.refs.gear.addEventListener('click', (event) => {
         event.stopPropagation();
         showTab(panel.root.dataset.tab === 'tune' ? 'stats' : 'tune');
-        panel.refs.gear.blur();
-      });
+        panel.refs.gear      });
     }
 
     // Los chips del cajon: perfil, interruptores y exportar/importar. Un solo
@@ -2973,6 +3054,16 @@
         const chip = target && target.closest ? target.closest('button') : null;
         if (!chip) return;
         event.stopPropagation();
+
+        if (chip.hasAttribute('data-tune-disclosure')) {
+          const section = chip.closest('.tune-sec');
+          const open = !section || section.dataset.open !== 'true';
+          setTuneSectionOpen(section, open);
+          if (section && section.dataset.searchReveal === '1') {
+            section.dataset.beforeSearchOpen = open ? 'true' : 'false';
+          }
+          return;
+        }
 
         if (chip.dataset.pace) {
           setPaceProfile(chip.dataset.pace);
@@ -3014,8 +3105,7 @@
           try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
 
-        chip.blur();
-      });
+        chip      });
     }
 
     if (panel.refs.nitroStrategy) {
@@ -3031,8 +3121,7 @@
       panel.refs.liveLoad.addEventListener('click', (event) => {
         event.stopPropagation();
         panel.refs.liveFile.click();
-        panel.refs.liveLoad.blur();
-      });
+        panel.refs.liveLoad      });
       panel.refs.liveFile.addEventListener('change', () => {
         const file = panel.refs.liveFile.files && panel.refs.liveFile.files[0];
         if (file) loadLiveCsv(file);
@@ -3044,8 +3133,7 @@
       panel.refs.liveClear.addEventListener('click', (event) => {
         event.stopPropagation();
         clearLivePasses();
-        panel.refs.liveClear.blur();
-      });
+        panel.refs.liveClear      });
     }
     for (const select of [panel.refs.livePickA, panel.refs.livePickB]) {
       if (select) select.addEventListener('change', paintLivePick);
@@ -3054,8 +3142,7 @@
       panel.refs.livePickExport.addEventListener('click', (event) => {
         event.stopPropagation();
         downloadLiveCompareCsv();
-        panel.refs.livePickExport.blur();
-      });
+        panel.refs.livePickExport      });
     }
     renderLivePasses();
 
@@ -3773,6 +3860,79 @@
     setTimeout(() => clearInterval(timer), 12000);
   }
 
+  // El contexto es una derivacion del estado real, no un segundo motor. La
+  // precedencia importa: una cuenta bloqueada no debe parecer solo detenida y
+  // una carrera pausada manda sobre cualquier espera de garaje.
+  function derivePanelContext(input = {}) {
+    const now = Number(input.now) || Date.now();
+    if (input.banned) {
+      return { key: 'banned', title: 'Account blocked', detail: 'Clear the ban in the garage before racing again.', pill: 'BAN' };
+    }
+    if (input.offline) {
+      return { key: 'offline', title: 'Waiting for network', detail: 'The queue resumes when the connection returns.', pill: 'OFFLINE' };
+    }
+    if (Number(input.blockedUntil) > now) {
+      const left = Math.max(1, Math.ceil((Number(input.blockedUntil) - now) / 60000));
+      return { key: 'blocked', title: 'Cooling down', detail: `Site block clears in about ${left} min.`, pill: 'BLOCKED' };
+    }
+    if (input.stopped) {
+      return { key: 'stopped', title: 'Stopped', detail: input.reason || 'Press Resume when you are ready.', pill: 'STOPPED' };
+    }
+    if (input.stopAfterRace) {
+      return { key: 'stopped', title: 'Stopping after this race', detail: 'The current race finishes before the queue stops.', pill: 'PENDING' };
+    }
+    if (Number(input.breakUntil) > now) {
+      const left = Math.max(1, Math.ceil((Number(input.breakUntil) - now) / 60000));
+      return { key: 'break', title: 'Taking a human break', detail: `Next race in about ${left} min.`, pill: 'BREAK' };
+    }
+    if (input.paused) {
+      return { key: 'paused', title: 'Typing paused', detail: 'Resume now or wait for the short auto-resume.', pill: 'PAUSED' };
+    }
+    if (input.typing) {
+      return { key: 'running', title: 'Race in progress', detail: 'Pace and accuracy are following this account.', pill: 'LIVE' };
+    }
+    if (input.activeGate) {
+      return { key: 'scheduled', title: 'Outside active hours', detail: `The queue opens at ${input.activeGate.nextText || 'the next window'}.`, pill: 'SCHEDULED' };
+    }
+    if (input.restGate) {
+      return { key: 'rest', title: 'Rest day', detail: 'This account does not race again until tomorrow.', pill: 'REST' };
+    }
+    if (input.dailyReached || input.limitReached) {
+      return { key: 'limit', title: 'Session complete', detail: input.reason || 'A fresh session is ready when you resume.', pill: 'LIMIT' };
+    }
+    return { key: 'waiting', title: 'Ready when you are', detail: 'The queue is waiting for the next race.', pill: 'AUTO' };
+  }
+
+  function currentPanelContext() {
+    const now = Date.now();
+    return derivePanelContext({
+      now,
+      banned: terminalBanActive(),
+      offline: !onlineNow(),
+      blockedUntil: siteBlockedUntil(),
+      stopped: session.stopped,
+      stopAfterRace: session.stopAfterRace,
+      breakUntil: session.breakUntil,
+      paused: session.paused,
+      typing: session.typing,
+      activeGate: activeGate(now),
+      restGate: restGate(now),
+      dailyReached: dailyLimitReached(),
+      limitReached: limitReached(),
+      reason: capReason(),
+    });
+  }
+
+  function paintPanelContext(context) {
+    if (!panel.root || !panel.refs.contextBanner) return;
+    const next = context || currentPanelContext();
+    if (panel.root.dataset.context !== next.key) panel.root.dataset.context = next.key;
+    if (panel.refs.contextBanner.dataset.context !== next.key) panel.refs.contextBanner.dataset.context = next.key;
+    setText(panel.refs.contextTitle, next.title);
+    setText(panel.refs.contextDetail, next.detail);
+    setText(panel.refs.contextPill, next.pill);
+  }
+
   // Lo unico visible con el panel plegado. El resto del panel se queda tal
   // cual y se repinta entero al desplegarlo, no en cada latido.
   function paintPanelActions() {
@@ -4007,6 +4167,7 @@
     // un tercer modo.
     const stoppedFlag = session.stopped ? '1' : '0';
     if (panel.root.dataset.stopped !== stoppedFlag) panel.root.dataset.stopped = stoppedFlag;
+    paintPanelContext(currentPanelContext());
 
     // Sin teclas todavia no hay medida: se muestra un guion y color neutro.
     const measured = session.chars > 0;
