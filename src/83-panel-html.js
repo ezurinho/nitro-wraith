@@ -359,6 +359,20 @@
                     <button class="theme" type="button" data-theme-btn="violet" aria-pressed="false" title="Violet: purple neon"><i class="sw-violet"></i><span>Violet</span></button>
                     <button class="theme" type="button" data-theme-btn="rgb" aria-pressed="false" title="RGB: animated rainbow border and title"><i class="sw-rgb"></i><span>RGB</span></button>
                   </div>
+                  <div class="rgb-lab" data-field="rgbLab" role="group" aria-label="RGB Lab">
+                    <div class="rgb-lab-h"><span>RGB Lab</span><b>shape the rainbow</b></div>
+                    <div class="rgb-colors">
+                      <label>primary<input type="color" data-field="rgbColorA" value="#ff5f6d" aria-label="RGB primary color"></label>
+                      <label>secondary<input type="color" data-field="rgbColorB" value="#b06bff" aria-label="RGB secondary color"></label>
+                    </div>
+                    <div class="rgb-speed" role="group" aria-label="RGB animation speed">
+                      <button type="button" data-rgb-speed="0.5" aria-pressed="false">0.5×</button>
+                      <button type="button" data-rgb-speed="1" aria-pressed="true">1×</button>
+                      <button type="button" data-rgb-speed="2" aria-pressed="false">2×</button>
+                    </div>
+                    <label class="rgb-range">intensity <output data-field="rgbIntensityValue">90%</output><input type="range" min="25" max="100" step="1" value="90" data-field="rgbIntensity" aria-label="RGB intensity"></label>
+                    <label class="rgb-mode">during races<select data-field="rgbRaceMode" aria-label="RGB behavior during races"><option value="static">Static</option><option value="border">Border only</option><option value="full">Full RGB</option></select></label>
+                  </div>
                 </div>
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/></svg></span>

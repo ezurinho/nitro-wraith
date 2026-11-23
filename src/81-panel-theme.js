@@ -12,11 +12,24 @@
   // La piel la manda data-theme en el nodo raiz; el CSS deriva bordes, halos y
   // rellenos del acento. Aqui solo se cambia el atributo, se marca la muestra
   // activa y se guarda la eleccion.
+  function applyVisualTheme(root) {
+    if (!root || !root.style) return;
+    const speed = Number(visualPrefs.rgbSpeed) || 1;
+    root.style.setProperty('--nt-rgb-a', visualPrefs.rgbColorA);
+    root.style.setProperty('--nt-rgb-b', visualPrefs.rgbColorB);
+    root.style.setProperty('--nt-rgb-border-opacity', String(visualPrefs.rgbIntensity / 100));
+    root.style.setProperty('--nt-rgb-hue-duration', `${16 / speed}s`);
+    root.style.setProperty('--nt-rgb-angle-duration', `${8 / speed}s`);
+    root.style.setProperty('--nt-rgb-title-duration', `${6 / speed}s`);
+    if (root.dataset.rgbRace !== visualPrefs.rgbRaceMode) root.dataset.rgbRace = visualPrefs.rgbRaceMode;
+  }
+
   function paintTheme() {
     // En la pagina del garaje no existe el panel grande: el pequeno se pinta
     // igual, sin depender de `panel.root`.
     if (panel.root) {
       if (panel.root.dataset.theme !== panelTheme) panel.root.dataset.theme = panelTheme;
+      applyVisualTheme(panel.root);
       if (panel.refs && panel.refs.themeName) {
         setText(panel.refs.themeName, THEME_LABELS[panelTheme] || panelTheme);
       }
@@ -36,6 +49,7 @@
       const host = document.getElementById('nt-queue-panel');
       const small = host && host.shadowRoot ? host.shadowRoot.querySelector('.p') : null;
       if (small && small.dataset.theme !== panelTheme) small.dataset.theme = panelTheme;
+      applyVisualTheme(small);
       // La fila `theme` del garaje tambien dice cual esta activo; sin esto el
       // ciclo cambiaba la piel pero la etiqueta se quedaba en la anterior.
       const label = host && host.shadowRoot ? host.shadowRoot.querySelector('[data-f="theme"]') : null;
@@ -74,6 +88,17 @@
       panelTheme = event.newValue;
       paintTheme();
       log(`Theme: ${THEME_LABELS[panelTheme]} (other tab).`);
+    });
+  } catch { /* almacenamiento bloqueado */ }
+
+  try {
+    addEventListener('storage', (event) => {
+      if (event.key !== KEYS.visuals || !event.newValue) return;
+      try {
+        visualPrefs = normalizeVisualPrefs(JSON.parse(event.newValue));
+      } catch { return; }
+      paintTheme();
+      if (typeof paintConfig === 'function') paintConfig();
     });
   } catch { /* almacenamiento bloqueado */ }
 

@@ -2184,8 +2184,7 @@
             --bg-lo: rgba(5, 5, 10, .995);
             animation:
               nt-qp-boot .4s cubic-bezier(.2, .9, .25, 1) both,
-              nt-rgb-hue 16s linear infinite,
-              nt-rgb-angle 8s linear infinite;
+              nt-rgb-hue var(--nt-rgb-hue-duration, 16s) linear infinite;
           }
           @keyframes nt-rgb-hue { to { --nt-hue: 360; } }
           @keyframes nt-rgb-angle { to { --nt-angle: 360deg; } }
@@ -2198,26 +2197,36 @@
             padding: 1px;
             border-radius: 14px;
             background: conic-gradient(from var(--nt-angle, 0deg),
-              #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+              var(--nt-rgb-a, #ff5f6d), #ffc371, #47ffa1, #5ad1ff, var(--nt-rgb-b, #b06bff), var(--nt-rgb-a, #ff5f6d));
             -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             -webkit-mask-composite: xor;
             mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             mask-composite: exclude;
+            opacity: var(--nt-rgb-border-opacity, .9);
+            animation: nt-rgb-angle var(--nt-rgb-angle-duration, 8s) linear infinite;
             pointer-events: none;
           }
 
           /* El mismo titulo arcoiris que el panel grande, para que el garaje no
              parezca otra herramienta cuando el tema es RGB. */
           .p[data-theme="rgb"] .t {
-            background: linear-gradient(90deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+            background: linear-gradient(90deg, var(--nt-rgb-a, #ff5f6d), #ffc371, #47ffa1, #5ad1ff, var(--nt-rgb-b, #b06bff), var(--nt-rgb-a, #ff5f6d));
             background-size: 300% 100%;
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
             text-shadow: none;
-            animation: nt-rgb-title 6s linear infinite;
+            animation: nt-rgb-title var(--nt-rgb-title-duration, 6s) linear infinite;
           }
           @keyframes nt-rgb-title { to { background-position: 300% 0; } }
+
+          .p[data-theme="rgb"][data-state="running"][data-rgb-race="static"],
+          .p[data-theme="rgb"][data-state="running"][data-rgb-race="static"]::after,
+          .p[data-theme="rgb"][data-state="running"][data-rgb-race="static"] .t,
+          .p[data-theme="rgb"][data-state="running"][data-rgb-race="border"],
+          .p[data-theme="rgb"][data-state="running"][data-rgb-race="border"] .t {
+            animation-play-state: paused;
+          }
 
           /* La espera no es una metrica: es la respuesta a «por que no corre».
              Va en ambar y se separa de la lista, no compite con ella. */
@@ -2950,6 +2959,11 @@
     function paintGaragePanel() {
       if (!qpanel) return;
 
+      if (qpanel.panel.dataset.theme !== panelTheme) qpanel.panel.dataset.theme = panelTheme;
+      applyVisualTheme(qpanel.panel);
+      const rgbTyper = typerState();
+      const raceState = rgbTyper && !rgbTyper.stopped && rgbTyper.typing ? 'running' : 'waiting';
+      if (qpanel.panel.dataset.state !== raceState) qpanel.panel.dataset.state = raceState;
       paintUpdateHealth();
       paintUpdateBadge(qpanel.update, true);
       paintUpdateBadge(qpanel.updateCompact, false, true);

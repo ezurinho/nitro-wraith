@@ -48,6 +48,7 @@
       version: 2,
       prefsSchema: PREFS_SCHEMA,
       paceProfile,
+      visuals: { ...visualPrefs },
       raceLimit: session.raceLimit,
       xpLimit: session.xpLimit,
       timeLimit: session.timeLimit,
@@ -771,9 +772,24 @@
     panel.refs.healthNote.title = `${note} Copy report puts the full diagnostic on the clipboard.`;
   }
 
+  function paintVisualControls() {
+    if (!panel.refs || !panel.refs.rgbLab) return;
+    if (panel.refs.rgbColorA) panel.refs.rgbColorA.value = visualPrefs.rgbColorA;
+    if (panel.refs.rgbColorB) panel.refs.rgbColorB.value = visualPrefs.rgbColorB;
+    if (panel.refs.rgbIntensity) panel.refs.rgbIntensity.value = String(visualPrefs.rgbIntensity);
+    if (panel.refs.rgbRaceMode) panel.refs.rgbRaceMode.value = visualPrefs.rgbRaceMode;
+    setText(panel.refs.rgbIntensityValue, `${visualPrefs.rgbIntensity}%`);
+    for (const button of panel.refs.rgbLab.querySelectorAll('[data-rgb-speed]')) {
+      const selected = Number(button.dataset.rgbSpeed) === visualPrefs.rgbSpeed;
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      button.dataset.active = selected ? '1' : '0';
+    }
+  }
+
   function paintConfig() {
     if (!panel.refs || !panel.refs.cfg) return;
 
+    paintVisualControls();
     // Perfil de ritmo: los tres botones del segmentado y el deslizador que dice
     // cual manda (el indice, no el texto: es lo que mueve el CSS con muelle).
     for (const button of panel.refs.cfg.querySelectorAll('[data-pace]')) {
@@ -1954,6 +1970,12 @@
       done.push(`pace ${importedPace}`);
     }
 
+    if (data.visuals && typeof data.visuals === 'object') {
+      visualPrefs = normalizeVisualPrefs(data.visuals);
+      saveVisualPrefs();
+      done.push('visuals applied');
+    }
+
     if (data.customWpm !== undefined) {
       setCustomWpm(data.customWpm, { persist: false });
       done.push(customWpm() ? `custom wpm ${customWpm()}` : 'custom wpm auto');
@@ -2500,6 +2522,12 @@
       seg: pick('.seg'),
       themes: pick('[data-field="themes"]'),
       themeName: pick('[data-field="themeName"]'),
+      rgbLab: pick('[data-field="rgbLab"]'),
+      rgbColorA: pick('[data-field="rgbColorA"]'),
+      rgbColorB: pick('[data-field="rgbColorB"]'),
+      rgbIntensity: pick('[data-field="rgbIntensity"]'),
+      rgbIntensityValue: pick('[data-field="rgbIntensityValue"]'),
+      rgbRaceMode: pick('[data-field="rgbRaceMode"]'),
       tuneCap: pick('[data-field="tuneCap"]'),
       tuneRange: pick('[data-field="tuneRange"]'),
       healthSummary: pick('[data-field="healthSummary"]'),
@@ -3034,6 +3062,37 @@
         event.stopPropagation();
         setTheme(chip.dataset.themeBtn);
         chip      });
+    }
+
+    if (panel.refs.rgbLab) {
+      panel.refs.rgbLab.addEventListener('click', (event) => {
+        const button = event.target && event.target.closest ? event.target.closest('[data-rgb-speed]') : null;
+        if (!button) return;
+        event.stopPropagation();
+        setVisualPref('rgbSpeed', Number(button.dataset.rgbSpeed));
+        paintVisualControls();
+      });
+    }
+    for (const [ref, key] of [[panel.refs.rgbColorA, 'rgbColorA'], [panel.refs.rgbColorB, 'rgbColorB']]) {
+      if (!ref) continue;
+      ref.addEventListener('input', (event) => {
+        event.stopPropagation();
+        setVisualPref(key, event.target.value);
+      });
+    }
+    if (panel.refs.rgbIntensity) {
+      panel.refs.rgbIntensity.addEventListener('input', (event) => {
+        event.stopPropagation();
+        setVisualPref('rgbIntensity', Number(event.target.value));
+        paintVisualControls();
+      });
+    }
+    if (panel.refs.rgbRaceMode) {
+      panel.refs.rgbRaceMode.addEventListener('change', (event) => {
+        event.stopPropagation();
+        setVisualPref('rgbRaceMode', event.target.value);
+        paintVisualControls();
+      });
     }
 
     // ⚙ lleva a la vista de ajustes (y vuelve): es el mismo cajon de siempre,

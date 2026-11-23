@@ -651,6 +651,7 @@
     panelCollapsed: 'autoTyperPanelCollapsed',
     panelPosition: 'autoTyperPanelPosition',
     panelTheme: 'autoTyperPanelTheme',
+    visuals: 'autoTyperVisuals',
     season: 'autoTyperSeason',
     ntUser: 'persist:nt',
     footMode: 'autoTyperFootMode',

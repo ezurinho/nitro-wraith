@@ -769,6 +769,111 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     new Set(themeVars.map((theme) => theme.acc)).size === 6
       && themeVars.every((theme) => theme.acc && theme.bg), themeVars);
 
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+  });
+  const rgbLab = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = s.querySelector('.panel');
+    const speed = s.querySelector('[data-rgb-speed="2"]');
+    const colorA = s.querySelector('[data-field="rgbColorA"]');
+    const colorB = s.querySelector('[data-field="rgbColorB"]');
+    const intensity = s.querySelector('[data-field="rgbIntensity"]');
+    const mode = s.querySelector('[data-field="rgbRaceMode"]');
+    if (!speed || !colorA || !colorB || !intensity || !mode) return { missing: true };
+
+    s.querySelector('[data-theme-btn="rgb"]').click();
+    speed.click();
+    colorA.value = '#123456';
+    colorA.dispatchEvent(new w.Event('input', { bubbles: true }));
+    colorB.value = '#abcdef';
+    colorB.dispatchEvent(new w.Event('input', { bubbles: true }));
+    intensity.value = '55';
+    intensity.dispatchEvent(new w.Event('input', { bubbles: true }));
+    mode.value = 'border';
+    mode.dispatchEvent(new w.Event('change', { bubbles: true }));
+
+    const cs = w.getComputedStyle(panel);
+    const stored = JSON.parse(w.localStorage.getItem('autoTyperVisuals') || 'null');
+    s.querySelector('[data-act="export"]').click();
+    const exported = JSON.parse(s.querySelector('[data-field="cfgText"]').value);
+    s.querySelector('[data-rgb-speed="1"]').click();
+    s.querySelector('[data-field="cfgText"]').value = JSON.stringify(exported);
+    s.querySelector('[data-act="import"]').click();
+    const imported = JSON.parse(w.localStorage.getItem('autoTyperVisuals') || 'null');
+    const fastDuration = w.getComputedStyle(panel).animationDuration;
+    s.querySelector('[data-rgb-speed="0.5"]').click();
+    const slowDuration = w.getComputedStyle(panel).animationDuration;
+    const out = {
+      stored,
+      exported: exported.visuals,
+      importedSpeed: imported && imported.rgbSpeed,
+      slowDuration,
+      hueDuration: fastDuration,
+      colorA: panel.style.getPropertyValue('--nt-rgb-a').trim(),
+      colorB: panel.style.getPropertyValue('--nt-rgb-b').trim(),
+      borderOpacity: cs.getPropertyValue('--nt-rgb-border-opacity').trim(),
+      raceMode: panel.dataset.rgbRace,
+    };
+
+    s.querySelector('[data-rgb-speed="1"]').click();
+    colorA.value = '#ff5f6d';
+    colorA.dispatchEvent(new w.Event('input', { bubbles: true }));
+    colorB.value = '#b06bff';
+    colorB.dispatchEvent(new w.Event('input', { bubbles: true }));
+    intensity.value = '90';
+    intensity.dispatchEvent(new w.Event('input', { bubbles: true }));
+    mode.value = 'static';
+    mode.dispatchEvent(new w.Event('change', { bubbles: true }));
+    s.querySelector('[data-theme-btn="carbon"]').click();
+    return out;
+  })()`);
+  check('RGB Lab controls persist, drive CSS variables and export with the config',
+    !rgbLab.missing
+      && rgbLab.stored && rgbLab.stored.rgbSpeed === 2
+      && rgbLab.stored.rgbColorA === '#123456' && rgbLab.stored.rgbColorB === '#abcdef'
+      && rgbLab.stored.rgbIntensity === 55 && rgbLab.stored.rgbRaceMode === 'border'
+      && rgbLab.exported && rgbLab.exported.rgbSpeed === 2
+      && rgbLab.importedSpeed === 2
+      && rgbLab.colorA === '#123456' && rgbLab.colorB === '#abcdef'
+      && Number(rgbLab.borderOpacity) === 0.55
+      && /8s/.test(rgbLab.hueDuration) && /32s/.test(rgbLab.slowDuration)
+      && rgbLab.raceMode === 'border', rgbLab);
+
+  const rgbRaceModes = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = s.querySelector('.panel');
+    const mode = s.querySelector('[data-field="rgbRaceMode"]');
+    if (!mode) return { missing: true };
+    s.querySelector('[data-theme-btn="rgb"]').click();
+    panel.dataset.state = 'running';
+    const read = (value) => {
+      mode.value = value;
+      mode.dispatchEvent(new w.Event('change', { bubbles: true }));
+      return {
+        mode: value,
+        panel: w.getComputedStyle(panel).animationPlayState,
+        border: w.getComputedStyle(panel, '::after').animationPlayState,
+        title: w.getComputedStyle(s.querySelector('.title')).animationPlayState,
+      };
+    };
+    const out = ['static', 'border', 'full'].map(read);
+    panel.dataset.state = 'waiting';
+    mode.value = 'static';
+    mode.dispatchEvent(new w.Event('change', { bubbles: true }));
+    s.querySelector('[data-theme-btn="carbon"]').click();
+    return out;
+  })()`);
+  check('RGB race policy can freeze everything, keep only the border or stay fully animated',
+    !rgbRaceModes.missing
+      && rgbRaceModes[0].panel === 'paused' && rgbRaceModes[0].border === 'paused' && rgbRaceModes[0].title === 'paused'
+      && rgbRaceModes[1].panel === 'paused' && rgbRaceModes[1].border === 'running' && rgbRaceModes[1].title === 'paused'
+      && rgbRaceModes[2].panel.split(',').every((value) => value.trim() === 'running')
+      && rgbRaceModes[2].border === 'running' && rgbRaceModes[2].title === 'running',
+    rgbRaceModes);
+
   // Mini-HUD de la barra inferior: precision y hueco de reloj junto al WPM,
   // visibles tambien con el panel minimizado.
   const footStrip = await cdp.evaluate(`(() => {
@@ -877,6 +982,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     const result = {
       reduced: w.matchMedia('(prefers-reduced-motion: reduce)').matches,
       running: hue.some((animation) => animation.playState === 'running'),
+      borderAnimation: w.getComputedStyle(panel, '::after').animationName,
+      titleAnimation: w.getComputedStyle(root.querySelector('.title')).animationName,
       animations: hue.map((animation) => animation.animationName),
     };
     const carbon = root.querySelector('[data-theme-btn="carbon"]');
@@ -887,7 +994,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
   });
   check('reduced motion disables the continuous RGB hue cycle',
-    reducedRgb.reduced && !reducedRgb.running, reducedRgb);
+    reducedRgb.reduced && !reducedRgb.running
+      && reducedRgb.borderAnimation === 'none' && reducedRgb.titleAnimation === 'none', reducedRgb);
   check('challenge auto-close is on by default', state.ch === 'on', state.ch);
   check('pace auto-calibration is on by default', state.cal === 'on', state.cal);
   check('7-day card shows the two seeded days', state.weekRows === 2, { rows: state.weekRows, total: state.weekTotal });
@@ -4561,11 +4669,31 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       // Deja que el storage de vuelta llegue antes de que el siguiente caso
       // lea el tema; si no, el carbon pendiente pisa el ciclo del garaje.
       await new Promise((r) => setTimeout(r, 450));
-      return { before, after };
+      s.querySelector('[data-theme-btn="rgb"]').click();
+      s.querySelector('[data-rgb-speed="2"]').click();
+      const color = s.querySelector('[data-field="rgbColorA"]');
+      color.value = '#123456';
+      color.dispatchEvent(new w.Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 450));
+      const visuals = {
+        theme: p.dataset.theme,
+        color: p.style.getPropertyValue('--nt-rgb-a').trim(),
+        duration: getComputedStyle(p).animationDuration,
+      };
+      s.querySelector('[data-rgb-speed="1"]').click();
+      color.value = '#ff5f6d';
+      color.dispatchEvent(new w.Event('input', { bubbles: true }));
+      s.querySelector('[data-theme-btn="carbon"]').click();
+      await new Promise((r) => setTimeout(r, 450));
+      return { before, after, visuals };
     })()`, true);
     check('the garage panel follows the race panel theme without reloading',
       garageTheme.before.theme === 'carbon'
         && garageTheme.after.theme === 'violet' && garageTheme.after.acc === '#c08bff', garageTheme);
+    check('the garage panel inherits RGB Lab colors and speed without reloading',
+      garageTheme.visuals.theme === 'rgb'
+        && garageTheme.visuals.color === '#123456'
+        && /8s/.test(garageTheme.visuals.duration), garageTheme.visuals);
 
     // Y al reves: el garaje tambien puede cambiar la piel. El ciclo debe
     // guardarse y llegar al panel de la carrera por el evento storage.
@@ -4599,6 +4727,46 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageControl.label.toLowerCase() === garageControl.expected
         && garageControl.tag === 'BUTTON' && garageControl.tab >= 0
         && new RegExp(garageControl.expected, 'i').test(garageControl.aria || ''), garageControl);
+
+    const garageRgbPolicy = await cdp.evaluate(`(() => {
+      const host = document.getElementById('nt-queue-panel');
+      const p = host.shadowRoot.querySelector('.p');
+      const w = document.querySelector('iframe').contentWindow;
+      const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+      const previousFrame = window.__ntaFrame;
+      s.querySelector('[data-theme-btn="rgb"]').click();
+      window.dispatchEvent(new StorageEvent('storage', { key: 'autoTyperPanelTheme', newValue: 'rgb' }));
+      window.__ntaFrame = { typing: true, at: Date.now(), instance: 'rgb-policy-test' };
+      const read = (mode) => {
+        const prefs = JSON.parse(localStorage.getItem('autoTyperVisuals') || '{}');
+        prefs.rgbRaceMode = mode;
+        localStorage.setItem('autoTyperVisuals', JSON.stringify(prefs));
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'autoTyperVisuals', newValue: JSON.stringify(prefs),
+        }));
+        window.__ntaDebug.garagePaint();
+        return {
+          mode,
+          state: p.dataset.state,
+          panel: getComputedStyle(p).animationPlayState,
+          border: getComputedStyle(p, '::after').animationPlayState,
+          title: getComputedStyle(p.querySelector('.t')).animationPlayState,
+        };
+      };
+      const out = ['static', 'border', 'full'].map(read);
+      s.querySelector('[data-theme-btn="carbon"]').click();
+      window.dispatchEvent(new StorageEvent('storage', { key: 'autoTyperPanelTheme', newValue: 'carbon' }));
+      window.__ntaFrame = previousFrame;
+      window.__ntaDebug.garagePaint();
+      return out;
+    })()`);
+    check('the garage panel applies the RGB race policy from live typer state',
+      garageRgbPolicy.every((item) => item.state === 'running')
+        && garageRgbPolicy[0].panel === 'paused' && garageRgbPolicy[0].border === 'paused' && garageRgbPolicy[0].title === 'paused'
+        && garageRgbPolicy[1].panel === 'paused' && garageRgbPolicy[1].border === 'running' && garageRgbPolicy[1].title === 'paused'
+        && garageRgbPolicy[2].panel.split(',').every((value) => value.trim() === 'running')
+        && garageRgbPolicy[2].border === 'running' && garageRgbPolicy[2].title === 'running',
+      garageRgbPolicy);
 
     // El Stop del garaje es la salida cuando el panel de carrera no esta a la
     // vista (resultados, DQ o garaje): debe ser un boton real, no una etiqueta.
