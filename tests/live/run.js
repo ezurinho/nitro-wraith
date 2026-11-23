@@ -2782,9 +2782,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     recoveryPace.hundred.center === 196 && recoveryPace.hundred.average === 100
       && recoveryPace.hundred.floor === 110,
     recoveryPace.hundred);
-  check('a beginner top does not trigger the top share',
-    recoveryPace.beginner.center === 30 && recoveryPace.beginner.floor === 0
-      && recoveryPace.beginner.top === 0,
+  check('a beginner account aims at 85% of its own best, not at someone else number',
+    recoveryPace.beginner.center === 43 && recoveryPace.beginner.floor === 0
+      && recoveryPace.beginner.top === 43,
     recoveryPace.beginner);
   check('an average above the recovery floor is still raised to the top share',
     recoveryPace.normal.center === 196 && recoveryPace.normal.floor === 110,
@@ -2802,14 +2802,46 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       insane: d.ceilingFor(400),
       share: d.topPaceTarget(230),
       smallTop: d.topPaceTarget(79),
+      tinyTop: d.topPaceTarget(20),
+      noHeadroom: d.topPaceTarget(50, 46),
+      headroom: d.topPaceTarget(50, 30),
     };
   })()`);
   check('the pace ceiling follows the account top and never drops below 120',
     ceilingMath.none === 120 && ceilingMath.low === 120 && ceilingMath.typical === 223
       && ceilingMath.insane === 300,
     ceilingMath);
-  check('the top share is 85% of the account top and ignored on a beginner top',
-    ceilingMath.share === 196 && ceilingMath.smallTop === 0, ceilingMath);
+  // El tope del top es una comparacion de la cuenta consigo misma: sin margen
+  // sobre SU media no se toca nada, y un top de 20 WPM es una carrera de tres
+  // palabras, no una capacidad.
+  check('the top share is 85% of the account top and needs headroom over its own average',
+    ceilingMath.share === 196 && ceilingMath.tinyTop === 0
+      && ceilingMath.noHeadroom === 0 && ceilingMath.headroom === 43,
+    ceilingMath);
+
+  // Tres cuentas distintas, tres ritmos distintos: nada esta atado a una cuenta
+  // concreta. La de 45 escribe a 45 porque su mejor carrera apenas supera su
+  // media; la de 83 sube al 85% de su top; la de 180 tambien.
+  const perAccount = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    return {
+      slow: d.paceCenter({ wpm: 45, currentWpm: 45, bestWpm: 50 }),
+      mid: d.paceCenter({ wpm: 83, currentWpm: 83, bestWpm: 230 }),
+      fast: d.paceCenter({ wpm: 180, currentWpm: 180, bestWpm: 300 }),
+      ceilings: [d.ceilingFor(50), d.ceilingFor(230), d.ceilingFor(300)],
+      // El planificador nunca pasa del techo vivo de esta sesion: la cuenta de
+      // 300 llegaria a 255 cuando su techo suba a 291 en la proxima lectura.
+      cap: d.wpmCeiling().cap,
+    };
+  })()`);
+  check('each installed account gets its own pace and its own ceiling',
+    perAccount.slow.center === 45 && perAccount.slow.top === 0
+      && perAccount.mid.center === 196 && perAccount.mid.top === 196
+      && perAccount.fast.center === Math.min(255, perAccount.cap - 2)
+      && perAccount.fast.top === perAccount.fast.center
+      && perAccount.ceilings[0] === 120 && perAccount.ceilings[1] === 223
+      && perAccount.ceilings[2] === 291,
+    perAccount);
 
   // El motor es lo que de verdad limita la velocidad. Si la cadencia no llega,
   // subir el techo solo cambia el numero del panel: se mide la cadencia pura a

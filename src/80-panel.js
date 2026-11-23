@@ -995,7 +995,7 @@
   // formula sin tener que leer una cuenta de verdad.
   window.__ntaDebug.ceilingFor = (top) => ceilingFor(top);
   window.__ntaDebug.applyCeiling = (top) => applyCeiling(top);
-  window.__ntaDebug.topPaceTarget = (top) => topPaceTarget(top);
+  window.__ntaDebug.topPaceTarget = (top, average) => topPaceTarget(top, average);
   window.__ntaDebug.accountIdentity = () => readAccountIdentity();
   window.__ntaDebug.calibrationAccount = () => disk.get(KEYS.calibrationAccount, '');
   window.__ntaDebug.ensureCalibrationAccount = () => ensureCalibrationAccount();

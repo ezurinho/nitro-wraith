@@ -40,7 +40,14 @@
       // con el para que el planificador tenga sitio (sin el, el rango se
       // recortaba a 120 y el top solo servia de adorno).
       topShare: 0.85,          // objetivo = 85% del mejor WPM de la cuenta
-      topShareMin: 80,         // por debajo de este top manda la media (cuenta nueva)
+      // El top solo manda cuando la propia cuenta demuestra margen: si su mejor
+      // carrera esta a menos de un 15% de su media, ya escribe ahi y no hay nada
+      // que recuperar. Es una comparacion de la cuenta consigo misma, no un
+      // numero fijo: sirve igual para una de 30 que para una de 200. Y un top
+      // por debajo de 30 WPM se descarta: eso es una carrera de tres palabras,
+      // no una capacidad.
+      topHeadroomRatio: 1.15,
+      topFloorWpm: 30,
       // Techo duro: 97% del top, nunca por encima de la marca de la cuenta. Ni
       // por debajo del techo historico (120) ni por encima del maximo.
       ceilingTopShare: 0.97,

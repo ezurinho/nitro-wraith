@@ -479,7 +479,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       // con el para que el planificador tenga sitio (sin el, el rango se
       // recortaba a 120 y el top solo servia de adorno).
       topShare: 0.85,          // objetivo = 85% del mejor WPM de la cuenta
-      topShareMin: 80,         // por debajo de este top manda la media (cuenta nueva)
+      // El top solo manda cuando la propia cuenta demuestra margen: si su mejor
+      // carrera esta a menos de un 15% de su media, ya escribe ahi y no hay nada
+      // que recuperar. Es una comparacion de la cuenta consigo misma, no un
+      // numero fijo: sirve igual para una de 30 que para una de 200. Y un top
+      // por debajo de 30 WPM se descarta: eso es una carrera de tres palabras,
+      // no una capacidad.
+      topHeadroomRatio: 1.15,
+      topFloorWpm: 30,
       // Techo duro: 97% del top, nunca por encima de la marca de la cuenta. Ni
       // por debajo del techo historico (120) ni por encima del maximo.
       ceilingTopShare: 0.97,
@@ -2334,14 +2341,21 @@ All of this only aims at believable statistics. It is your call and your risk.
   })();
 
   // Objetivo por top: una fraccion del mejor WPM de la cuenta. El top es el
-  // unico dato que dice de lo que la cuenta es capaz cuando la media se ha
-  // quedado corta, y es lo que hace que una cuenta de 230 no escriba a 104. Una
-  // cuenta nueva no entra aqui: con un top de 40 el top no demuestra nada y
-  // manda la media.
-  function topPaceTarget(best) {
+  // unico dato que dice de lo que una cuenta es capaz cuando su media se ha
+  // quedado corta, y es lo que hace que una cuenta de 230 no escriba a 104 y que
+  // una de 300 no escriba a 104 tampoco.
+  //
+  // Todo se compara contra la propia cuenta, no contra un numero fijo: el top
+  // entra solo si demuestra margen sobre SU media (`topHeadroomRatio`). Una
+  // cuenta que ya escribe a su mejor marca no tiene nada que recuperar, y subirle
+  // el objetivo solo la pondria por encima de lo que nunca ha hecho.
+  function topPaceTarget(best, average = 0) {
     const top = Number(best);
-    const minTop = wpmInt(CONFIG.calibration.topShareMin) || 80;
-    if (!Number.isFinite(top) || top < minTop) return 0;
+    const avg = Number(average) > 0 ? Number(average) : 0;
+    const floorTop = wpmInt(CONFIG.calibration.topFloorWpm) || 30;
+    if (!Number.isFinite(top) || top < floorTop) return 0;
+    const headroom = Number(CONFIG.calibration.topHeadroomRatio) || 1.15;
+    if (avg > 0 && top < avg * headroom) return 0;
     const share = clamp(Number(CONFIG.calibration.topShare) || 0.85, 0.5, 1);
     const cap = Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 2);
     return clamp(Math.round(top * share), wpmInt(CONFIG.calibration.minWpm) || 15, cap);
@@ -2373,7 +2387,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     const average = values.length ? Math.max(...values) : 0;
     const top = stats && stats.bestWpm;
     const floor = recoveryPaceFloor(average, top);
-    const share = topPaceTarget(top);
+    const share = topPaceTarget(top, average);
     return { average, center: Math.round(Math.max(average, floor, share)), floor, top: share };
   }
 
@@ -10456,7 +10470,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // formula sin tener que leer una cuenta de verdad.
   window.__ntaDebug.ceilingFor = (top) => ceilingFor(top);
   window.__ntaDebug.applyCeiling = (top) => applyCeiling(top);
-  window.__ntaDebug.topPaceTarget = (top) => topPaceTarget(top);
+  window.__ntaDebug.topPaceTarget = (top, average) => topPaceTarget(top, average);
   window.__ntaDebug.accountIdentity = () => readAccountIdentity();
   window.__ntaDebug.calibrationAccount = () => disk.get(KEYS.calibrationAccount, '');
   window.__ntaDebug.ensureCalibrationAccount = () => ensureCalibrationAccount();
