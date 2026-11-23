@@ -364,7 +364,9 @@
     ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
     const average = values.length ? Math.max(...values) : 0;
     const floor = recoveryPaceFloor(average, stats && stats.bestWpm);
-    return { average, center: Math.max(average, floor), floor };
+    // El centro es un WPM entero: de aqui salen los objetivos de cada sesion, y
+    // medio WPM en el centro se convertia en rangos y filas con decimales.
+    return { average, center: Math.round(Math.max(average, floor)), floor };
   }
 
   // El suelo del top solo puede subir el objetivo. Para bajarlo esta el custom
@@ -1054,14 +1056,14 @@
           const source = manualWpm
             ? 'manual override'
             : floor > profileAverage + 0.5
-              ? `recovery floor from the ${Number(stats.bestWpm).toFixed(0)} WPM top (short average ${profileAverage.toFixed(1)})`
+              ? `recovery floor from the ${Number(stats.bestWpm).toFixed(0)} WPM top (short average ${wpmInt(profileAverage)})`
               : lifetime > recent + 0.5
                 ? `lifetime ${lifetime.toFixed(1)}; short profile ${recent.toFixed(1)}`
                 : 'account average';
           const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
-          log(`Pace auto-calibrated: ${target.toFixed(1)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max}.`);
+          log(`Pace auto-calibrated: ${wpmInt(target)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max}.`);
         } else if (applied.blocked) {
-          log(`Pace kept at ${range.min}-${range.max}: the latest data would lower it to ${target.toFixed(1)} WPM. Use custom WPM or clear the override to reset it.`);
+          log(`Pace kept at ${range.min}-${range.max}: the latest data would lower it to ${wpmInt(target)} WPM. Use custom WPM or clear the override to reset it.`);
         }
         setPaceProfile(paceProfile, { force: true });
       }
@@ -1189,7 +1191,7 @@
       && Math.abs(accountTarget - accountAvg) >= 0.5;
     const accountText = accountStats && (accountAvg || accountStats.accuracy)
       ? [
-        accountAvg ? `${accountAvg.toFixed(1)} ${accountRaised ? 'avg' : 'WPM'}` : '',
+        accountAvg ? `${wpmInt(accountAvg)} ${accountRaised ? 'avg' : 'WPM'}` : '',
         accountRaised ? `${Math.round(accountTarget)} target` : '',
         accountRaised && accountTop > 0 ? `${Math.round(accountTop)} top` : '',
         accountStats.accuracy ? `${accountStats.accuracy.toFixed(1)}%` : '',
@@ -1238,7 +1240,7 @@
     // tener que abrir TUNE.
     setText(panel.refs.acctId, accountId ? `#${accountId}` : 'not signed in');
     setText(panel.refs.acctAvg, accountStats && Number(accountStats.wpm) > 0
-      ? Number(accountStats.wpm).toFixed(1) : '—');
+      ? String(wpmInt(accountStats.wpm)) : '—');
     setText(panel.refs.acctTarget, accountStats && Number(accountStats.targetWpm) > 0
       ? String(Math.round(Number(accountStats.targetWpm))) : '—');
     setText(panel.refs.acctTop, accountStats && Number(accountStats.bestWpm) > 0
@@ -1455,4 +1457,4 @@
     paintCalibration();
     paintChallenges();
   }
-
+

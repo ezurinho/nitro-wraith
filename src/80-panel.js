@@ -1638,7 +1638,7 @@
             : null;
           const val = document.createElement('b');
           val.textContent = Number.isFinite(item.wpm)
-            ? `${item.wpm.toFixed(1)}${dev === null ? '' : ` ${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%`}`
+            ? `${wpmInt(item.wpm)}${dev === null ? '' : ` ${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%`}`
             : '—';
           if (dev !== null) val.dataset.good = Math.abs(dev) <= 2 ? '1' : '0';
 
@@ -1688,10 +1688,10 @@
           const target = day.races > 0 ? day.sumTarget / day.races : 0;
           mid.title = avg === null
             ? `${day.date}: no measured races`
-            : `${day.date}: ${bits.join(', ')} · ${avg.toFixed(1)} WPM against ${target.toFixed(1)}`;
+            : `${day.date}: ${bits.join(', ')} · ${wpmInt(avg)} WPM against ${wpmInt(target)}`;
 
           const val = document.createElement('b');
-          val.textContent = avg === null ? '—' : avg.toFixed(1);
+          val.textContent = avg === null ? '—' : String(wpmInt(avg));
           if (avg !== null && target > 0) {
             val.dataset.good = Math.abs((avg - target) / target) <= 0.02 ? '1' : '0';
           }
@@ -3851,7 +3851,7 @@
   }
 
   function paintLiveClock(measured, wpm, acc) {
-    setText(panel.refs.footWpm, measured ? `${wpm.toFixed(1)} wpm` : '— wpm');
+    setText(panel.refs.footWpm, measured ? `${wpmInt(wpm)} wpm` : '— wpm');
     setText(panel.refs.footAcc, measured ? `${acc.toFixed(1)}%` : '— acc');
     // El reloj se congela al cerrar la carrera: antes seguia sumando durante
     // la pantalla de resultados y parecia que la carrera no habia acabado.
@@ -4151,7 +4151,7 @@
           ? ((previous.wpm - previous.target) / previous.target) * 100
           : null;
 
-        setText(panel.refs.prev, `${previous.races} · ${Number.isFinite(previous.wpm) ? previous.wpm.toFixed(1) : '—'}`
+        setText(panel.refs.prev, `${previous.races} · ${Number.isFinite(previous.wpm) ? wpmInt(previous.wpm) : '—'}`
           + (dev === null ? '' : ` · ${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%`));
         setGood(panel.refs.prev, dev === null ? null : Math.abs(dev) <= 2);
         // La etiqueta delata cual es: la tanda que acaba de cerrar o la anterior.
@@ -4159,7 +4159,7 @@
 
         const bits = [
           `${previous.races} race${previous.races === 1 ? '' : 's'}`,
-          Number.isFinite(previous.wpm) ? `avg ${previous.wpm.toFixed(1)} WPM` : null,
+          Number.isFinite(previous.wpm) ? `avg ${wpmInt(previous.wpm)} WPM` : null,
           Number.isFinite(previous.target) && previous.target > 0 ? `target ${previous.target.toFixed(1)}` : null,
           Number.isFinite(previous.acc) ? `${previous.acc.toFixed(1)}% accuracy` : null,
           previous.dq ? `${previous.dq} DQ` : null,
@@ -4384,7 +4384,7 @@
         const avg = day.sumWpm / day.races;
         const avgTarget = day.sumTarget / day.races;
         parts.push(`${day.races} race${day.races === 1 ? '' : 's'}`);
-        parts.push(`${avg.toFixed(1)}/${Math.round(avgTarget)} wpm`);
+        parts.push(`${wpmInt(avg)}/${wpmInt(avgTarget)} wpm`);
       }
       if (day.cash > 0) parts.push(`$${Math.round(day.cash).toLocaleString()}`);
       if (day.boxes > 0) parts.push(`${day.boxes} box${day.boxes === 1 ? '' : 'es'}`);

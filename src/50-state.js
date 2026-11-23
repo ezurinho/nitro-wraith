@@ -410,7 +410,7 @@
         ? `${Math.round(daily.xp).toLocaleString()}/${daily.xpCap.toLocaleString()} XP`
         : '',
     ].filter(Boolean).join(' · ');
-    return `avg ${avg.wpm.toFixed(1)} WPM (${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%) · ${avg.acc.toFixed(1)}%${dq}${day ? ` · today ${day}` : ''}`;
+    return `avg ${wpmInt(avg.wpm)} WPM (${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%) · ${avg.acc.toFixed(1)}%${dq}${day ? ` · today ${day}` : ''}`;
   }
 
   // Un hueco normal entre carreras son unos segundos; mas de 90 s es un

@@ -402,6 +402,6 @@
 
     const wpm = wpmNow();
     if (!wpm) return;
-    log(`WPM ${wpm.toFixed(1)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}% · ${session.chars} keys`);
+    log(`WPM ${wpmInt(wpm)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}% · ${session.chars} keys`);
   }
-
+

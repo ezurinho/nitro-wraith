@@ -2398,14 +2398,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('LOG shows the last calibration',
     calibration.logWpm === '106-118 WPM' && calibration.logWhen !== 'never', calibration);
   check('panel shows the account average',
-    calibration.account === '112.4 WPM · 98.7%', calibration);
+    calibration.account === '112 WPM · 98.7%', calibration);
   check('auto pace cannot be switched off from the panel',
     calibration.auto === true && calibration.autoText === 'on', calibration);
   check('Live shows the auto pace and the account top WPM',
     calibration.paceSource === 'auto · 112 target · 230 top', calibration.paceSource);
   check('the Live account card shows the read stats and its refresh control',
     calibration.acct.state === 'profile only' && calibration.acct.stateAttr === 'ready'
-      && calibration.acct.avg === '112.4' && calibration.acct.target === '112'
+      && calibration.acct.avg === '112' && calibration.acct.target === '112'
       && calibration.acct.top === '230' && calibration.acct.history === 'profile only'
       && calibration.acct.range === '106-118 wpm' && calibration.acct.read !== 'never'
       && calibration.acct.refreshDisabled === false,
@@ -2459,7 +2459,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   })()`, true);
   check('the lifetime average prevents a low recent profile from dragging the target down',
     lifetimeCalibration.range === '113-120'
-      && lifetimeCalibration.account === '120.0 WPM · 98.7%'
+      && lifetimeCalibration.account === '120 WPM · 98.7%'
       && lifetimeCalibration.paceSource === 'auto · 120 target · 230 top'
       && lifetimeCalibration.stored && lifetimeCalibration.stored.min === 113
       && lifetimeCalibration.stored.max === 120
@@ -2615,7 +2615,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   })()`, true);
   check('a stale lifetime cache survives a monthly API failure',
     lifetimeFallback.range === '113-120'
-      && lifetimeFallback.account === '120.0 WPM · 98.7%'
+      && lifetimeFallback.account === '120 WPM · 98.7%'
       && lifetimeFallback.accountInfo && lifetimeFallback.accountInfo.lifetime
       && lifetimeFallback.accountInfo.lifetime.stale === true
       && lifetimeFallback.accountInfo.lifetime.rows === 8
@@ -2819,7 +2819,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   })()`, true);
   check('a collapsed short average shows avg, target and top together',
     collapsedAccount.range === '113-120'
-      && collapsedAccount.account === '38.0 avg · 117 target · 230 top · 98.7%'
+      && collapsedAccount.account === '38 avg · 117 target · 230 top · 98.7%'
       && collapsedAccount.paceSource === 'auto · 117 target · 230 top',
     collapsedAccount);
   check('calibration records the script version that produced the range',

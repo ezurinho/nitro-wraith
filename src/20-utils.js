@@ -4,6 +4,14 @@
    * ========================================================================== */
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  // Un WPM es un entero en todo lo que el bot planifica y en todo lo que pinta:
+  // «104.5 WPM» no dice nada que no diga 105 y ensucia cada fila del panel. Las
+  // diferencias y los porcentajes si conservan su decimal, que ahi el decimal es
+  // la informacion (una desviacion de -1.5 no es lo mismo que -2).
+  const wpmInt = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.round(number) : 0;
+  };
   const average = ([min, max]) => (min + max) / 2;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

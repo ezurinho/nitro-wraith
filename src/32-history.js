@@ -269,8 +269,8 @@
       '#': i + 1,
       date: new Date(item.at).toLocaleString(),
       races: item.races,
-      wpm: Number.isFinite(item.wpm) ? Number(item.wpm.toFixed(1)) : '—',
-      target: Number.isFinite(item.target) ? Number(item.target.toFixed(1)) : '—',
+      wpm: Number.isFinite(item.wpm) ? wpmInt(item.wpm) : '—',
+      target: Number.isFinite(item.target) ? wpmInt(item.target) : '—',
       deviation: Number.isFinite(item.wpm) && Number.isFinite(item.target) && item.target > 0
         ? `${item.wpm >= item.target ? '+' : ''}${(((item.wpm - item.target) / item.target) * 100).toFixed(1)}%`
         : '—',
@@ -842,4 +842,4 @@
       log('CSV export failed:', error);
     }
   }
-
+

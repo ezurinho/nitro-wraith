@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "capturedAt": "2026-11-22T04:55:34.481Z",
+  "capturedAt": "2026-11-23T03:03:53.340Z",
   "engine": {
     "product": "Chrome/157.0.8103.80",
     "browser": "Chrome",
@@ -32,9 +32,13 @@
       "height": 1880
     },
     "theme-aurora.png": {
-      "sha256": "74d3c0f68327d15dc74fa1550db800f556270366fd682717cef8ef61bd17a476",
+      "sha256": "9807e4395ba8f9f6a9d022c510f47577d5daaabaee3eeaa7335823936b9a25f1",
       "width": 732,
-      "height": 1880
+      "height": 1880,
+      "state": {
+        "version": "8.14.57",
+        "target": "109 · 98.7%"
+      }
     },
     "theme-sunset.png": {
       "sha256": "b70a9b5ed8741481127b8dbca3231cadc32737cc934a479d8ad340dc369e97bc",
@@ -72,19 +76,31 @@
       "height": 4854
     },
     "view-log-idle.png": {
-      "sha256": "11c8c21c2fb330f817f7d36d1b5188ad0b56aa15fd5b50b5f3f6d79e1ed6b706",
+      "sha256": "800e25c9a5507656f3d299f0f40b23c8b1abc0edbee7d6d64f565d1f4dfd1775",
       "width": 732,
-      "height": 2264
+      "height": 2264,
+      "state": {
+        "version": "8.14.57",
+        "target": "115 · 97.7%"
+      }
     },
     "view-log-racing.png": {
-      "sha256": "cedb5e7c4565de5d501ac398110f9ac4908bec828a05e78ae3edd7821bd82a93",
+      "sha256": "79dd0ecbf1d4ed6cfb6f53daf1961e518fcaf4badbe9b59e99fc1ba452b755ee",
       "width": 732,
-      "height": 2264
+      "height": 2264,
+      "state": {
+        "version": "8.14.57",
+        "target": "115 · 97.7%"
+      }
     },
     "view-log-stopped.png": {
-      "sha256": "2c94dc5c9b66121953e2dc457888aac455e46083109d8dcf960b13c3c8b7646f",
+      "sha256": "f5c292463326108d4ac2c6f590a2b5698bda153bca73fbcce0fc7ed92685b4cb",
       "width": 732,
-      "height": 2264
+      "height": 2264,
+      "state": {
+        "version": "8.14.57",
+        "target": "115 · 97.7%"
+      }
     },
     "view-garage-idle.png": {
       "sha256": "e3dcbfb206248198c56c462223354bcb828c14243eb7157180888213f75d2bc2",

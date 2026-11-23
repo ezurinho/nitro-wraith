@@ -123,7 +123,7 @@
     const model = Number.isFinite(Number(row.modelWpm)) ? Number(row.modelWpm)
       : (Number.isFinite(previous) ? previous : official);
     const diff = model - official;
-    log(`Server WPM (progress): game ${official} · model ${model.toFixed(1)}`
+    log(`Server WPM (progress): game ${official} · model ${wpmInt(model)}`
       + ` (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})`);
   }
 
@@ -349,7 +349,7 @@
       log('Race lost before the finish line; it is not counted.');
     } else {
       counted = countRace();
-      log(`Race finished · WPM ${wpmNow().toFixed(1)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}%`);
+      log(`Race finished · WPM ${wpmInt(wpmNow())}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}%`);
       // La fila recien apuntada, para que la calibracion sepa a que carrera
       // pertenece y pueda rehacerse cuando llegue su WPM oficial.
       autocalibrate(counted ? raceHistory[raceHistory.length - 1] : null);
@@ -1069,4 +1069,4 @@
     if (sfxOn) beep('resume');   // el clic ya es gesto valido: suena al activarlo
     log(sfxOn ? 'Sound alerts on.' : 'Sound alerts off.');
   }
-
+

@@ -1563,6 +1563,14 @@ All of this only aims at believable statistics. It is your call and your risk.
    * ========================================================================== */
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  // Un WPM es un entero en todo lo que el bot planifica y en todo lo que pinta:
+  // «104.5 WPM» no dice nada que no diga 105 y ensucia cada fila del panel. Las
+  // diferencias y los porcentajes si conservan su decimal, que ahi el decimal es
+  // la informacion (una desviacion de -1.5 no es lo mismo que -2).
+  const wpmInt = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.round(number) : 0;
+  };
   const average = ([min, max]) => (min + max) / 2;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -2279,7 +2287,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
     const average = values.length ? Math.max(...values) : 0;
     const floor = recoveryPaceFloor(average, stats && stats.bestWpm);
-    return { average, center: Math.max(average, floor), floor };
+    // El centro es un WPM entero: de aqui salen los objetivos de cada sesion, y
+    // medio WPM en el centro se convertia en rangos y filas con decimales.
+    return { average, center: Math.round(Math.max(average, floor)), floor };
   }
 
   // El suelo del top solo puede subir el objetivo. Para bajarlo esta el custom
@@ -2969,14 +2979,14 @@ All of this only aims at believable statistics. It is your call and your risk.
           const source = manualWpm
             ? 'manual override'
             : floor > profileAverage + 0.5
-              ? `recovery floor from the ${Number(stats.bestWpm).toFixed(0)} WPM top (short average ${profileAverage.toFixed(1)})`
+              ? `recovery floor from the ${Number(stats.bestWpm).toFixed(0)} WPM top (short average ${wpmInt(profileAverage)})`
               : lifetime > recent + 0.5
                 ? `lifetime ${lifetime.toFixed(1)}; short profile ${recent.toFixed(1)}`
                 : 'account average';
           const count = Number(stats.races) > 0 ? `, ${Number(stats.races).toLocaleString()} races` : '';
-          log(`Pace auto-calibrated: ${target.toFixed(1)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max}.`);
+          log(`Pace auto-calibrated: ${wpmInt(target)} WPM target (${source}${top}${provenance}${count}) -> ${range.min}-${range.max}.`);
         } else if (applied.blocked) {
-          log(`Pace kept at ${range.min}-${range.max}: the latest data would lower it to ${target.toFixed(1)} WPM. Use custom WPM or clear the override to reset it.`);
+          log(`Pace kept at ${range.min}-${range.max}: the latest data would lower it to ${wpmInt(target)} WPM. Use custom WPM or clear the override to reset it.`);
         }
         setPaceProfile(paceProfile, { force: true });
       }
@@ -3104,7 +3114,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       && Math.abs(accountTarget - accountAvg) >= 0.5;
     const accountText = accountStats && (accountAvg || accountStats.accuracy)
       ? [
-        accountAvg ? `${accountAvg.toFixed(1)} ${accountRaised ? 'avg' : 'WPM'}` : '',
+        accountAvg ? `${wpmInt(accountAvg)} ${accountRaised ? 'avg' : 'WPM'}` : '',
         accountRaised ? `${Math.round(accountTarget)} target` : '',
         accountRaised && accountTop > 0 ? `${Math.round(accountTop)} top` : '',
         accountStats.accuracy ? `${accountStats.accuracy.toFixed(1)}%` : '',
@@ -3153,7 +3163,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     // tener que abrir TUNE.
     setText(panel.refs.acctId, accountId ? `#${accountId}` : 'not signed in');
     setText(panel.refs.acctAvg, accountStats && Number(accountStats.wpm) > 0
-      ? Number(accountStats.wpm).toFixed(1) : '—');
+      ? String(wpmInt(accountStats.wpm)) : '—');
     setText(panel.refs.acctTarget, accountStats && Number(accountStats.targetWpm) > 0
       ? String(Math.round(Number(accountStats.targetWpm))) : '—');
     setText(panel.refs.acctTop, accountStats && Number(accountStats.bestWpm) > 0
@@ -3642,8 +3652,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       '#': i + 1,
       date: new Date(item.at).toLocaleString(),
       races: item.races,
-      wpm: Number.isFinite(item.wpm) ? Number(item.wpm.toFixed(1)) : '—',
-      target: Number.isFinite(item.target) ? Number(item.target.toFixed(1)) : '—',
+      wpm: Number.isFinite(item.wpm) ? wpmInt(item.wpm) : '—',
+      target: Number.isFinite(item.target) ? wpmInt(item.target) : '—',
       deviation: Number.isFinite(item.wpm) && Number.isFinite(item.target) && item.target > 0
         ? `${item.wpm >= item.target ? '+' : ''}${(((item.wpm - item.target) / item.target) * 100).toFixed(1)}%`
         : '—',
@@ -5012,7 +5022,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         ? `${Math.round(daily.xp).toLocaleString()}/${daily.xpCap.toLocaleString()} XP`
         : '',
     ].filter(Boolean).join(' · ');
-    return `avg ${avg.wpm.toFixed(1)} WPM (${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%) · ${avg.acc.toFixed(1)}%${dq}${day ? ` · today ${day}` : ''}`;
+    return `avg ${wpmInt(avg.wpm)} WPM (${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%) · ${avg.acc.toFixed(1)}%${dq}${day ? ` · today ${day}` : ''}`;
   }
 
   // Un hueco normal entre carreras son unos segundos; mas de 90 s es un
@@ -5851,7 +5861,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const wpm = wpmNow();
     if (!wpm) return;
-    log(`WPM ${wpm.toFixed(1)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}% · ${session.chars} keys`);
+    log(`WPM ${wpmInt(wpm)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}% · ${session.chars} keys`);
   }
 
 
@@ -7602,7 +7612,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     const model = Number.isFinite(Number(row.modelWpm)) ? Number(row.modelWpm)
       : (Number.isFinite(previous) ? previous : official);
     const diff = model - official;
-    log(`Server WPM (progress): game ${official} · model ${model.toFixed(1)}`
+    log(`Server WPM (progress): game ${official} · model ${wpmInt(model)}`
       + ` (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})`);
   }
 
@@ -7828,7 +7838,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       log('Race lost before the finish line; it is not counted.');
     } else {
       counted = countRace();
-      log(`Race finished · WPM ${wpmNow().toFixed(1)}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}%`);
+      log(`Race finished · WPM ${wpmInt(wpmNow())}/${profile.targetWPM} · accuracy ${accuracyNow().toFixed(1)}%/${profile.accuracyGoal.toFixed(1)}%`);
       // La fila recien apuntada, para que la calibracion sepa a que carrera
       // pertenece y pueda rehacerse cuando llegue su WPM oficial.
       autocalibrate(counted ? raceHistory[raceHistory.length - 1] : null);
@@ -10966,7 +10976,7 @@ All of this only aims at believable statistics. It is your call and your risk.
             : null;
           const val = document.createElement('b');
           val.textContent = Number.isFinite(item.wpm)
-            ? `${item.wpm.toFixed(1)}${dev === null ? '' : ` ${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%`}`
+            ? `${wpmInt(item.wpm)}${dev === null ? '' : ` ${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%`}`
             : '—';
           if (dev !== null) val.dataset.good = Math.abs(dev) <= 2 ? '1' : '0';
 
@@ -11016,10 +11026,10 @@ All of this only aims at believable statistics. It is your call and your risk.
           const target = day.races > 0 ? day.sumTarget / day.races : 0;
           mid.title = avg === null
             ? `${day.date}: no measured races`
-            : `${day.date}: ${bits.join(', ')} · ${avg.toFixed(1)} WPM against ${target.toFixed(1)}`;
+            : `${day.date}: ${bits.join(', ')} · ${wpmInt(avg)} WPM against ${wpmInt(target)}`;
 
           const val = document.createElement('b');
-          val.textContent = avg === null ? '—' : avg.toFixed(1);
+          val.textContent = avg === null ? '—' : String(wpmInt(avg));
           if (avg !== null && target > 0) {
             val.dataset.good = Math.abs((avg - target) / target) <= 0.02 ? '1' : '0';
           }
@@ -13179,7 +13189,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   function paintLiveClock(measured, wpm, acc) {
-    setText(panel.refs.footWpm, measured ? `${wpm.toFixed(1)} wpm` : '— wpm');
+    setText(panel.refs.footWpm, measured ? `${wpmInt(wpm)} wpm` : '— wpm');
     setText(panel.refs.footAcc, measured ? `${acc.toFixed(1)}%` : '— acc');
     // El reloj se congela al cerrar la carrera: antes seguia sumando durante
     // la pantalla de resultados y parecia que la carrera no habia acabado.
@@ -13479,7 +13489,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           ? ((previous.wpm - previous.target) / previous.target) * 100
           : null;
 
-        setText(panel.refs.prev, `${previous.races} · ${Number.isFinite(previous.wpm) ? previous.wpm.toFixed(1) : '—'}`
+        setText(panel.refs.prev, `${previous.races} · ${Number.isFinite(previous.wpm) ? wpmInt(previous.wpm) : '—'}`
           + (dev === null ? '' : ` · ${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%`));
         setGood(panel.refs.prev, dev === null ? null : Math.abs(dev) <= 2);
         // La etiqueta delata cual es: la tanda que acaba de cerrar o la anterior.
@@ -13487,7 +13497,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
         const bits = [
           `${previous.races} race${previous.races === 1 ? '' : 's'}`,
-          Number.isFinite(previous.wpm) ? `avg ${previous.wpm.toFixed(1)} WPM` : null,
+          Number.isFinite(previous.wpm) ? `avg ${wpmInt(previous.wpm)} WPM` : null,
           Number.isFinite(previous.target) && previous.target > 0 ? `target ${previous.target.toFixed(1)}` : null,
           Number.isFinite(previous.acc) ? `${previous.acc.toFixed(1)}% accuracy` : null,
           previous.dq ? `${previous.dq} DQ` : null,
@@ -13712,7 +13722,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         const avg = day.sumWpm / day.races;
         const avgTarget = day.sumTarget / day.races;
         parts.push(`${day.races} race${day.races === 1 ? '' : 's'}`);
-        parts.push(`${avg.toFixed(1)}/${Math.round(avgTarget)} wpm`);
+        parts.push(`${wpmInt(avg)}/${wpmInt(avgTarget)} wpm`);
       }
       if (day.cash > 0) parts.push(`$${Math.round(day.cash).toLocaleString()}`);
       if (day.boxes > 0) parts.push(`${day.boxes} box${day.boxes === 1 ? '' : 'es'}`);
