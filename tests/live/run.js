@@ -4694,7 +4694,20 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       return el ? (el.textContent || '').trim() : '';
     };
 
-    const before = d.role();
+    // El rol se recalcula en el latido (500 ms) y, tras un relevo o una vuelta
+    // de la cache, la lectura inicial puede caer entre dos latidos. Se espera a
+    // que la copia se declare primaria en vez de leer a un plazo fijo.
+    const roleUntil = async (test, ms) => {
+      const until = Date.now() + ms;
+      let r = d.role();
+      while (!test(r) && Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        r = d.role();
+      }
+      return r;
+    };
+
+    const before = await roleUntil((r) => r.primary === true && r.peers === 1, 4000);
 
     const registry = (Array.isArray(w.__ntaInstances) ? w.__ntaInstances : [])
       .filter((item) => item && item.id !== 'peer-copy');
@@ -4934,8 +4947,19 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     }
     await new Promise((resolve) => setTimeout(resolve, 350));
     const takeover = d.role();
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    const notices = (shadow.querySelector('[data-field="noticeList"]') || {}).textContent || '';
+    // El aviso lo publica el repintado del panel (cada 1-2 s), no el latido que
+    // decide el relevo: se sondea el texto en vez de leer a un plazo fijo, que
+    // en un runner lento leia la lista anterior al relevo.
+    const noticeText = () => {
+      const el = shadow.querySelector('[data-field="noticeList"]');
+      return el ? (el.textContent || '') : '';
+    };
+    let notices = noticeText();
+    const noticeUntil = Date.now() + 4000;
+    while (!/Pen: this copy #[a-z0-9]{4} takes the turn/.test(notices) && Date.now() < noticeUntil) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      notices = noticeText();
+    }
 
     // La primaria vuelve: debe entrar como la mas nueva y no quitarle el turno
     // a la copia que ya esta escribiendo.
