@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.71 — 2026-11-24
+
+- feat(brand): redraw the wraith mark and refresh the README art (#11)
+
 ## 8.14.70 — 2026-11-24
 
 - fix(panel): give the garage sheet the same design floor as the race panel (#10)
