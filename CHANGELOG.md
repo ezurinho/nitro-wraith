@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.81 — 2026-11-24
+
+- fix(profile): clear race state when the account changes (#25)
+
 ## 8.14.80 — 2026-11-24
 
 - fix(guard): fail closed when coordination is unavailable (#24)
