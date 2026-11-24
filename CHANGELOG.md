@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.72 — 2026-11-24
+
+- feat(a11y): audit WCAG contrast and add narrow visual baselines (#13)
+
 ## 8.14.71 — 2026-11-24
 
 - feat(brand): redraw the wraith mark and refresh the README art (#11)
