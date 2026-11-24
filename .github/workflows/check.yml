@@ -42,6 +42,10 @@ jobs:
     timeout-minutes: 20
     container:
       image: mcr.microsoft.com/playwright:v1.65.1-noble
+    # Firefox refuses to launch when $HOME is not owned by the user. GitHub
+    # mounts /github/home owned by pwuser while the job runs as root.
+    env:
+      HOME: /root
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
