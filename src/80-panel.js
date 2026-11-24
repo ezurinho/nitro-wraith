@@ -1362,6 +1362,9 @@
     accDrift: Number(session.raceAccDrift) || 0,
   });
   window.__ntaDebug.raceWpmFor = (base, drift) => raceWpmAt(base, drift);
+  // Ritmo con desvio recortado a la banda calibrada: el harness comprueba el
+  // recorte con el suelo y el techo sin depender de la hora real.
+  window.__ntaDebug.raceWpmInBand = (planned, drift) => raceWpmInBand(Number(planned), Number(drift) || 0);
   // Calendario: descanso y curva diurna. `at` explicito para que el harness
   // pueda preguntar por un dia y una hora sin tocar el reloj de la maquina.
   window.__ntaDebug.calendar = (at = Date.now()) => ({

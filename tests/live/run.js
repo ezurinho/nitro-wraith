@@ -3345,35 +3345,34 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   // queda dentro de la banda calibrada para no mover la media de la tanda.
   const raceDrift = await cdp.evaluate(`(() => {
     const d = document.querySelector('iframe').contentWindow.__ntaDebug;
-    const band = d.autoPace().range;
+    const plan = d.raceTarget();
+    const band = plan.band;
     const draws = [];
     for (let i = 0; i < 60; i++) draws.push(d.rollRaceDrift());
     return {
       band,
-      state: { ...d.raceTarget(), curve: d.calendar().curve },
+      state: plan,
       drifts: [...new Set(draws.map((draw) => draw.wpmDrift))].sort((a, b) => a - b),
       accDrifts: [...new Set(draws.map((draw) => draw.accDrift))].sort((a, b) => a - b),
-      clampHigh: d.raceWpmFor(band.max, 2),
-      clampLow: d.raceWpmFor(band.min, -2),
       samples: [d.raceWpmFor(196, -2), d.raceWpmFor(196, 0), d.raceWpmFor(196, 2)],
+      // El desvio se recorta en la banda que el panel declara, no solo en el
+      // rango del perfil: de madrugada la curva deja el plan en el suelo y un
+      // -2 sacaba la carrera del numero que el usuario lee.
+      bandFloor: d.raceWpmInBand(band.min, -2),
+      bandCeil: d.raceWpmInBand(band.max, 2),
     };
   })()`);
   check('two races in a row do not share the same pace and accuracy',
     raceDrift.drifts.length >= 3 && raceDrift.accDrifts.length >= 2
       && raceDrift.samples.join(',') === '194,196,198'
-      && raceDrift.clampHigh === raceDrift.band.max
-      && raceDrift.clampLow === raceDrift.band.min
-      // El desvio se recorta en la banda (si la carrera ya esta en el suelo, un
-      // -2 no la saca), asi que se compara con margen y se exige la banda.
+      && raceDrift.bandFloor === raceDrift.band.min
+      && raceDrift.bandCeil === raceDrift.band.max
       && Math.abs(raceDrift.state.wpm
         - (raceDrift.state.planned + raceDrift.state.drift)) <= 2
-      // La banda que gobierna el plan es la del propio plan (state.band), no la
-      // que pinta `autoPace`: son dos redondeos del mismo centro y comparar una
-      // contra otra fue lo que hizo flakear este check.
-      && raceDrift.state.planned >= raceDrift.state.band.min
-      && raceDrift.state.planned <= raceDrift.state.band.max
-      && raceDrift.state.wpm >= raceDrift.state.band.min
-      && raceDrift.state.wpm <= raceDrift.state.band.max,
+      && raceDrift.state.planned >= raceDrift.band.min
+      && raceDrift.state.planned <= raceDrift.band.max
+      && raceDrift.state.wpm >= raceDrift.band.min
+      && raceDrift.state.wpm <= raceDrift.band.max,
     raceDrift);
 
   // Actividad humana: ni 24/7 ni el mismo ritmo a las 03:00 que a las 13:00.

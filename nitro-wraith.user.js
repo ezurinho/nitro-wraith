@@ -2781,17 +2781,30 @@ All of this only aims at believable statistics. It is your call and your risk.
   // curva horaria, recortado a la banda que el panel declara para la cuenta.
   // El recorte importa: de noche la curva pide un 5% menos y sin el la carrera
   // saldria de la banda calibrada, que es justo el numero que el usuario lee.
-  function plannedRaceWpm() {
-    const curved = Math.round(profile.targetWPM * dayCurveAt());
+  function plannedRaceWpmAt(curve = dayCurveAt()) {
+    const curved = Math.round(profile.targetWPM * curve);
     const band = wpmRangeFor(profile.targetWPM);
     return band ? clamp(curved, band.min, band.max) : curved;
+  }
+
+  function plannedRaceWpm() {
+    return plannedRaceWpmAt();
+  }
+
+  // La banda manda tambien sobre el desvio: de madrugada el plan ya cae en el
+  // suelo de la banda, y un -2 sin recorte sacaba la carrera del rango que el
+  // panel muestra.
+  function raceWpmInBand(planned, drift) {
+    const value = raceWpmAt(planned, drift);
+    const band = wpmRangeFor(profile.targetWPM);
+    return band ? clamp(value, band.min, band.max) : value;
   }
 
   function raceWpm() {
     // La hora del dia entra aqui y no en el objetivo de la tanda: la tanda se
     // calibra una vez y la curva cambia cada hora, asi que el centro sigue
     // siendo el de la cuenta y lo que se mueve es lo que se teclea ahora.
-    return raceWpmAt(plannedRaceWpm(), session.raceWpmDrift);
+    return raceWpmInBand(plannedRaceWpm(), session.raceWpmDrift);
   }
 
   function raceAccuracyGoal() {
@@ -11434,6 +11447,9 @@ function dayCurveAt(at = Date.now()) {
     accDrift: Number(session.raceAccDrift) || 0,
   });
   window.__ntaDebug.raceWpmFor = (base, drift) => raceWpmAt(base, drift);
+  // Ritmo con desvio recortado a la banda calibrada: el harness comprueba el
+  // recorte con el suelo y el techo sin depender de la hora real.
+  window.__ntaDebug.raceWpmInBand = (planned, drift) => raceWpmInBand(Number(planned), Number(drift) || 0);
   // Calendario: descanso y curva diurna. `at` explicito para que el harness
   // pueda preguntar por un dia y una hora sin tocar el reloj de la maquina.
   window.__ntaDebug.calendar = (at = Date.now()) => ({
