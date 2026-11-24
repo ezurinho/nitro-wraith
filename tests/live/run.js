@@ -8669,6 +8669,70 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && raceCalibration.summaryCalls >= 1,
     raceCalibration);
 
+  const inFlightAccount = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.fetchAccountStats) return { has: false };
+    const saved = {};
+    for (let i = 0; i < w.localStorage.length; i++) {
+      const key = w.localStorage.key(i);
+      if (key) saved[key] = w.localStorage.getItem(key);
+    }
+    const realFetch = w.fetch;
+    let resolveSummary = null;
+    try {
+      w.localStorage.setItem('persist:nt', JSON.stringify({
+        user: JSON.stringify({ userID: 111222, username: 'account-a', avgSpeed: 70, highestSpeed: 120 }),
+      }));
+      d.refreshChallenges();
+      d.ensureCalibrationAccount();
+      const before = d.autoPace().account;
+      w.fetch = (url, options) => {
+        if (String(url).includes('/api/v2/stats/summary')) {
+          return new Promise((resolve) => { resolveSummary = resolve; });
+        }
+        if (String(url).includes('/api/v2/stats/data/bymonth')) {
+          return Promise.resolve(new w.Response(JSON.stringify({ success: true, data: [] }), {
+            status: 200, headers: { 'content-type': 'application/json' },
+          }));
+        }
+        return realFetch(url, options);
+      };
+      const pending = d.fetchAccountStats();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      w.localStorage.setItem('persist:nt', JSON.stringify({
+        user: JSON.stringify({ userID: 333444, username: 'account-b', avgSpeed: 50, highestSpeed: 90 }),
+      }));
+      d.refreshChallenges();
+      resolveSummary(new w.Response(JSON.stringify({
+        data: { wpm: 80, accuracy: 98, bestWpm: 120, racesPlayed: 100 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      const result = await pending;
+      return {
+        has: true,
+        reason: result && result.reason,
+        identity: d.accountIdentity(),
+        before: before ? JSON.stringify(before) : null,
+        after: d.autoPace().account ? JSON.stringify(d.autoPace().account) : null,
+        calibrated: d.autoPace().calibrated,
+      };
+    } finally {
+      w.fetch = realFetch;
+      for (let i = w.localStorage.length - 1; i >= 0; i--) {
+        const key = w.localStorage.key(i);
+        if (key) w.localStorage.removeItem(key);
+      }
+      for (const key of Object.keys(saved)) w.localStorage.setItem(key, saved[key]);
+      d.refreshChallenges();
+    }
+  })()`, true);
+  check('an in-flight account read cannot calibrate a different account',
+    inFlightAccount.has && inFlightAccount.reason === 'account changed'
+      && inFlightAccount.identity === '333444'
+      && inFlightAccount.before === inFlightAccount.after
+      && inFlightAccount.calibrated === null,
+    inFlightAccount);
+
   // Cambio de cuenta: la identidad anterior no puede conservar el rango ni
   // datos de carrera. Se restaura el almacenamiento al terminar.
   const accountReset = await cdp.evaluate(`(() => {

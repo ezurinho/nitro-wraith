@@ -3270,7 +3270,7 @@ All of this only aims at believable statistics. It is your call and your risk.
   // debajo, sus propias carreras la empujan hacia abajo y la calibracion se
   // retroalimenta. Los totales mensuales del mismo API dan la media de toda la
   // cuenta; se usa como suelo, nunca como excusa para bajar el ritmo.
-  async function fetchLifetimeWpm(races) {
+  async function fetchLifetimeWpm(races, accountId = readAccountIdentity()) {
     const cached = readLifetimeCache(races);
     const cacheValue = cached ? {
       wpm: cached.wpm,
@@ -3307,6 +3307,7 @@ All of this only aims at believable statistics. It is your call and your risk.
               headers,
               signal: controller ? controller.signal : undefined,
             });
+            if (readAccountIdentity() !== accountId) return null;
             if (response.ok) break;
           } catch (error) {
             if (error && error.name === 'AbortError') throw error;
@@ -3319,6 +3320,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         }
         pagesSeen++;
         const body = await response.json();
+        if (readAccountIdentity() !== accountId) return null;
         const rows = accountRows(body);
         if (!rows.length) break;
 
@@ -3353,6 +3355,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         cached: false,
         stale: false,
       };
+      if (readAccountIdentity() !== accountId) return null;
       disk.set(KEYS.lifetimeWpm, JSON.stringify({
         wpm,
         at: now,
@@ -3368,7 +3371,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
-  async function fetchAccountStats() {
+  async function fetchAccountStats(accountId = readAccountIdentity()) {
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), CONFIG.calibration.timeoutMs) : null;
     const failed = (reason) => ({ wpm: null, accuracy: null, reason });
@@ -3381,8 +3384,10 @@ All of this only aims at believable statistics. It is your call and your risk.
         headers: accountHeaders(),
         signal: controller ? controller.signal : undefined,
       });
+      if (readAccountIdentity() !== accountId) return failed('account changed');
       if (response.ok) {
         const body = await response.json();
+        if (readAccountIdentity() !== accountId) return failed('account changed');
         data = (body && (body.data || body.results)) || body;
       }
 
@@ -3395,7 +3400,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         || (persisted && persisted.bestWpm) || null;
       const races = pickAccountStat(data, ['racesPlayed', 'totalRaces', 'races'], 0, 100000000)
         || (persisted && persisted.races) || null;
-      const lifetime = await fetchLifetimeWpm(races);
+      const lifetime = await fetchLifetimeWpm(races, accountId);
+      if (readAccountIdentity() !== accountId) return failed('account changed');
       const lifetimeWpm = lifetime ? lifetime.wpm : null;
       const wpm = Number(currentWpm) > 0 || Number(lifetimeWpm) > 0
         ? Math.max(Number(currentWpm) || 0, Number(lifetimeWpm) || 0)
@@ -3587,9 +3593,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (retryDue) calibrationRetryAt = 0;
 
     calibrating = true;
+    const accountId = readAccountIdentity();
     paintCalibration();
     try {
-      const result = await fetchAccountStats();
+      const result = await fetchAccountStats(accountId);
+      if (readAccountIdentity() !== accountId) return;
       if (result.wpm || result.accuracy) {
         applyCalibration(result);
         return;
@@ -3607,7 +3615,7 @@ All of this only aims at believable statistics. It is your call and your risk.
         log(`Pace calibration: ${reason}; keeping ${CONFIG.wpm.min}-${CONFIG.wpm.max} WPM / ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%. Retrying in ${Math.round(retryMs / 60000)} min.`);
       }
     } finally {
-      disk.set(KEYS.calibrationVersion, VERSION);
+      if (readAccountIdentity() === accountId) disk.set(KEYS.calibrationVersion, VERSION);
       calibrating = false;
       paintCalibration();
     }
@@ -8530,6 +8538,18 @@ function dayCurveAt(at = Date.now()) {
     if (!userId) return;
 
     const handler = (event) => {
+      const currentUserId = (found.props && found.props.user && found.props.user.userID)
+        || (siteUser() && siteUser().userID)
+        || null;
+      if (currentUserId && String(currentUserId) !== String(userId)) {
+        try {
+          if (typeof resultServerObj.off === 'function') resultServerObj.off(RESULT_EVENT, handler);
+          else if (typeof resultServerObj.removeListener === 'function') resultServerObj.removeListener(RESULT_EVENT, handler);
+        } catch { /* server ya cerrado por el juego */ }
+        resultServerObj = null;
+        resultServerHandler = null;
+        return;
+      }
       const racers = event && event.racers;
       if (!Array.isArray(racers) || !racers.length) return;
 
@@ -11653,6 +11673,7 @@ function dayCurveAt(at = Date.now()) {
   window.__ntaDebug.calibrationAccount = () => disk.get(KEYS.calibrationAccount, '');
   window.__ntaDebug.ensureCalibrationAccount = () => ensureCalibrationAccount();
   window.__ntaDebug.needsAccountRead = () => calibrationNeedsAccountRead;
+  window.__ntaDebug.fetchAccountStats = () => fetchAccountStats();
   window.__ntaDebug.stickerChance = () => CONFIG.stickers.chance;
   window.__ntaDebug.progressWpm = (progress) => progressWpm(progress);
   window.__ntaDebug.lastProgress = () => session.lastProgress || null;

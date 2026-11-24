@@ -110,7 +110,7 @@ applicable and are listed as such, not silently ignored.
 | F8 no invented metrics | Enforced by product rule: all values come from the session |
 | F12–F14 hero / word count / container | Not applicable: no landing page |
 | F15 CSS stamp | Not applicable: generated panel sheet, not an exported page |
-| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (412 Chrome checks, including idle-heartbeat DOM-write guards for both surfaces, + 24 visual baselines + an 18-check Firefox/WebKit smoke) |
+| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (413 Chrome checks, including idle-heartbeat DOM-write guards for both surfaces, + 24 visual baselines + an 18-check Firefox/WebKit smoke) |
 
 ### Floor audit
 

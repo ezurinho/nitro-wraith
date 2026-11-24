@@ -99,9 +99,12 @@ page failure is retried once before the last complete snapshot is used.
 Calibration is tied to the account ID: if you switch accounts in the same
 browser, the old range, race history, session/day totals, box state and stop/DQ
 markers are cleared before the new account is read. Theme, pace profile and
-personal preferences are preserved. If a read fails, the card shows the retry
-and the bot tries again after two minutes, then after fifteen minutes while the
-API stays down; coming back online or returning to the tab also asks again.
+personal preferences are preserved. Pending calibration responses are checked
+against the current account after every await, and race-result listeners
+ignore a server that now belongs to another user. If a read fails, the card
+shows the retry and the bot tries again after two minutes, then after fifteen
+minutes while the API stays down; coming back online or returning to the tab
+also asks again.
 
 Automatic calibration has two rules:
 

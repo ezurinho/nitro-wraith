@@ -1075,7 +1075,7 @@
   // debajo, sus propias carreras la empujan hacia abajo y la calibracion se
   // retroalimenta. Los totales mensuales del mismo API dan la media de toda la
   // cuenta; se usa como suelo, nunca como excusa para bajar el ritmo.
-  async function fetchLifetimeWpm(races) {
+  async function fetchLifetimeWpm(races, accountId = readAccountIdentity()) {
     const cached = readLifetimeCache(races);
     const cacheValue = cached ? {
       wpm: cached.wpm,
@@ -1112,6 +1112,7 @@
               headers,
               signal: controller ? controller.signal : undefined,
             });
+            if (readAccountIdentity() !== accountId) return null;
             if (response.ok) break;
           } catch (error) {
             if (error && error.name === 'AbortError') throw error;
@@ -1124,6 +1125,7 @@
         }
         pagesSeen++;
         const body = await response.json();
+        if (readAccountIdentity() !== accountId) return null;
         const rows = accountRows(body);
         if (!rows.length) break;
 
@@ -1158,6 +1160,7 @@
         cached: false,
         stale: false,
       };
+      if (readAccountIdentity() !== accountId) return null;
       disk.set(KEYS.lifetimeWpm, JSON.stringify({
         wpm,
         at: now,
@@ -1173,7 +1176,7 @@
     }
   }
 
-  async function fetchAccountStats() {
+  async function fetchAccountStats(accountId = readAccountIdentity()) {
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), CONFIG.calibration.timeoutMs) : null;
     const failed = (reason) => ({ wpm: null, accuracy: null, reason });
@@ -1186,8 +1189,10 @@
         headers: accountHeaders(),
         signal: controller ? controller.signal : undefined,
       });
+      if (readAccountIdentity() !== accountId) return failed('account changed');
       if (response.ok) {
         const body = await response.json();
+        if (readAccountIdentity() !== accountId) return failed('account changed');
         data = (body && (body.data || body.results)) || body;
       }
 
@@ -1200,7 +1205,8 @@
         || (persisted && persisted.bestWpm) || null;
       const races = pickAccountStat(data, ['racesPlayed', 'totalRaces', 'races'], 0, 100000000)
         || (persisted && persisted.races) || null;
-      const lifetime = await fetchLifetimeWpm(races);
+      const lifetime = await fetchLifetimeWpm(races, accountId);
+      if (readAccountIdentity() !== accountId) return failed('account changed');
       const lifetimeWpm = lifetime ? lifetime.wpm : null;
       const wpm = Number(currentWpm) > 0 || Number(lifetimeWpm) > 0
         ? Math.max(Number(currentWpm) || 0, Number(lifetimeWpm) || 0)
@@ -1392,9 +1398,11 @@
     if (retryDue) calibrationRetryAt = 0;
 
     calibrating = true;
+    const accountId = readAccountIdentity();
     paintCalibration();
     try {
-      const result = await fetchAccountStats();
+      const result = await fetchAccountStats(accountId);
+      if (readAccountIdentity() !== accountId) return;
       if (result.wpm || result.accuracy) {
         applyCalibration(result);
         return;
@@ -1412,7 +1420,7 @@
         log(`Pace calibration: ${reason}; keeping ${CONFIG.wpm.min}-${CONFIG.wpm.max} WPM / ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%. Retrying in ${Math.round(retryMs / 60000)} min.`);
       }
     } finally {
-      disk.set(KEYS.calibrationVersion, VERSION);
+      if (readAccountIdentity() === accountId) disk.set(KEYS.calibrationVersion, VERSION);
       calibrating = false;
       paintCalibration();
     }
