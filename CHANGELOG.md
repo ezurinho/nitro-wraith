@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.76 — 2026-11-24
+
+- perf(panel): keep garage heartbeats free of DOM writes (#19)
+
 ## 8.14.75 — 2026-11-24
 
 - perf(panel): keep idle ticks free of DOM writes (#18)
