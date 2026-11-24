@@ -252,17 +252,30 @@ canary copy to the normal channel.
 ## Development
 
 The userscript has no runtime dependencies. The harness needs Node 22+ and
-Chrome.
+Chrome; the cross-engine smoke also needs Playwright's Firefox and WebKit
+builds (`npx playwright install firefox webkit`), which CI installs for its own
+job.
 
 ```bash
 npm run build       # concatenate src/ into nitro-wraith.user.js and .meta.js
 npm test            # synced build + queue unit tests + CLI checks, no browser needed
 npm run test:unit   # queue policy unit tests only (Node, no browser)
 npm run test:live   # browser harness (needs Chrome)
+npm run test:browsers # Firefox + WebKit smoke: boot, theme, shortcuts, no page errors
 npm run live:test   # CLI checks only, without the build sync
 npm run check       # synced build, syntax, release/README checks and both suites
 npm run visual      # capture Live themes + Tune/Log/garage states and compare
 ```
+
+### Cross-engine smoke
+
+`npm run test:browsers` loads the built userscript and the same fixtures in
+Firefox and WebKit through Playwright and asks the questions Chrome cannot
+answer for them: the race and garage panels mount, the skin paints, Alt+T
+reaches both panels, Alt+G folds the garage sheet, Alt+M cycles the footer HUD,
+and no uncaught exception reaches the page. It answers the update-check request
+locally, so the run is offline and deterministic. The `browsers` job in
+`check.yml` runs it on every pull request and on `main`.
 
 ### Visual regression
 
