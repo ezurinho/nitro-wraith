@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.83 — 2026-11-24
+
+- fix(queue): serialize tab actions with a short Web Lock (#27)
+
 ## 8.14.82 — 2026-11-24
 
 - fix(profile): reject stale account responses in flight (#26)
