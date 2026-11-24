@@ -8,5 +8,10 @@
     "width": 520,
     "height": 1200,
     "deviceScaleFactor": 2
+  },
+  "narrow": {
+    "width": 300,
+    "height": 1200,
+    "deviceScaleFactor": 2
   }
 }

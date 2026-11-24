@@ -10,15 +10,71 @@
  * funciones se movio tal cual, sin reescribir una linea.
  *
  *   const capture = createCapture({ fs, os, path, sleep, waitFor, captureShot,
- *     SCRIPT, SCRIPT_VERSION, SHOT_DIR, VISUAL_CAPTURE, VISUAL_FROZEN_AT });
+ *     SCRIPT, SCRIPT_VERSION, SHOT_DIR, VISUAL_CAPTURE, VISUAL_FROZEN_AT,
+ *     VISUAL_NARROW });
  *   await capture.capturePanelThemes(cdp, appUrl);
  */
 
 module.exports = function createCapture(deps) {
   const {
     fs, os, path, sleep, waitFor, captureShot,
-    SCRIPT, SCRIPT_VERSION, SHOT_DIR, VISUAL_CAPTURE, VISUAL_FROZEN_AT,
+    SCRIPT, SCRIPT_VERSION, SHOT_DIR, VISUAL_CAPTURE, VISUAL_FROZEN_AT, VISUAL_NARROW,
   } = deps;
+
+// Se mide el panel con la vista ya montada y se le da al iframe ese alto: el
+// panel es fixed al borde inferior y, si el marco se queda corto, la cabecera
+// saldria fuera de la foto. Con `width` se estrecha el marco ANTES de medir:
+// el panel recorta su ancho a `100vw - 32px` y ese es el layout que se
+// documenta; el alto se vuelve a medir porque la columna crece al envolver.
+async function shootViewState(cdp, label, file, width) {
+  const widthPx = Number(width) > 0 ? Math.round(Number(width)) : 0;
+  const frameHeight = await cdp.evaluate(`(() => {
+    const frame = document.querySelector('iframe');
+    ${widthPx ? `frame.style.width = '${widthPx}px';` : ''}
+    const panel = frame.contentWindow.document
+      .getElementById('nt-autotyper-panel').shadowRoot.querySelector('.panel');
+    return panel ? Math.ceil(panel.getBoundingClientRect().height) + 48 : 0;
+  })()`);
+  if (!frameHeight || frameHeight <= 48) throw new Error(`panel height not found: ${label}`);
+  await cdp.evaluate(`(() => {
+    const frame = document.querySelector('iframe');
+    frame.style.height = '${frameHeight}px';
+    document.body.style.minHeight = '${frameHeight}px';
+    return true;
+  })()`);
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520, height: Math.max(1200, frameHeight + 24), deviceScaleFactor: 2, mobile: false,
+  });
+  await sleep(150);
+  await cdp.evaluate('(() => document.querySelector(\'iframe\').contentWindow.__ntaDebug.paint(true))()');
+  await sleep(120);
+
+  const clip = await cdp.evaluate(`(() => {
+    const frame = document.querySelector('iframe');
+    const root = frame.contentWindow.document
+      .getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = root.querySelector('.panel');
+    if (!panel) return null;
+    if (typeof panel.getAnimations === 'function') {
+      for (const anim of panel.getAnimations({ subtree: true })) {
+        try { anim.pause(); anim.currentTime = 0; } catch { /* ya cancelada */ }
+      }
+    }
+    const status = root.querySelector('[data-field="status"]');
+    if (status) status.textContent = 'Live · auto pace';
+    const f = frame.getBoundingClientRect();
+    const r = panel.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.round(f.left + r.left - 18)),
+      y: Math.max(0, Math.round(f.top + r.top - 18)),
+      width: Math.ceil(r.width + 36),
+      height: Math.ceil(r.height + 36),
+    };
+  })()`);
+  if (!clip) throw new Error(`panel clip not found: ${label}`);
+  await captureShot(cdp, path.join(SHOT_DIR, file), clip);
+  return frameHeight;
+}
 
 async function captureViewStates(cdp) {
   const expanded = await cdp.evaluate(`(() => {
@@ -27,7 +83,12 @@ async function captureViewStates(cdp) {
     if (!root || root.getElementById('nta-visual-expand')) return false;
     const style = document.createElement('style');
     style.id = 'nta-visual-expand';
-    style.textContent = '.views{max-height:none!important;overflow:visible!important;}';
+    // Sin el tope de alto del panel: con la vista sin scroll pero el panel
+    // recortado a 100vh, el pie y las acciones (sticky) se pintaban ENCIMA de
+    // las tarjetas y la foto documentaba un layout que nadie ve. Con el alto
+    // en auto la columna entera fluye y la foto es la UI real.
+    style.textContent = '.views{max-height:none!important;overflow:visible!important;}'
+      + '.panel{height:auto!important;max-height:none!important;}';
     root.appendChild(style);
     return true;
   })()`);
@@ -102,54 +163,24 @@ async function captureViewStates(cdp) {
       })()`);
       await sleep(120);
 
-      // Se mide el panel con la vista ya montada y se le da al iframe ese alto:
-      // el panel es fixed al borde inferior y, si el marco se queda corto, la
-      // cabecera saldria fuera de la foto.
-      const height = await cdp.evaluate(`(() => {
-        const frame = document.querySelector('iframe');
-        const panel = frame.contentWindow.document
-          .getElementById('nt-autotyper-panel').shadowRoot.querySelector('.panel');
-        return panel ? Math.ceil(panel.getBoundingClientRect().height) : 0;
-      })()`);
-      if (!height) throw new Error(`panel height not found: ${view}/${state}`);
-      const frameHeight = height + 48;
-      await cdp.evaluate(`(() => {
-        const frame = document.querySelector('iframe');
-        frame.style.height = '${frameHeight}px';
-        document.body.style.minHeight = '${frameHeight}px';
-        return true;
-      })()`);
-      await cdp.send('Emulation.setDeviceMetricsOverride', {
-        width: 520, height: Math.max(1200, frameHeight + 24), deviceScaleFactor: 2, mobile: false,
-      });
-      await sleep(150);
-      await cdp.evaluate('(() => document.querySelector(\'iframe\').contentWindow.__ntaDebug.paint(true))()');
-      await sleep(120);
-
-      const clip = await cdp.evaluate(`(() => {
-        const frame = document.querySelector('iframe');
-        const root = frame.contentWindow.document
-          .getElementById('nt-autotyper-panel').shadowRoot;
-        const panel = root.querySelector('.panel');
-        if (!panel) return null;
-        if (typeof panel.getAnimations === 'function') {
-          for (const anim of panel.getAnimations({ subtree: true })) {
-            try { anim.pause(); anim.currentTime = 0; } catch { /* ya cancelada */ }
-          }
-        }
-        const status = root.querySelector('[data-field="status"]');
-        if (status) status.textContent = 'Live · auto pace';
-        const f = frame.getBoundingClientRect();
-        const r = panel.getBoundingClientRect();
-        return {
-          x: Math.max(0, Math.round(f.left + r.left - 18)),
-          y: Math.max(0, Math.round(f.top + r.top - 18)),
-          width: Math.ceil(r.width + 36),
-          height: Math.ceil(r.height + 36),
-        };
-      })()`);
-      if (!clip) throw new Error(`panel clip not found: ${view}/${state}`);
-      await captureShot(cdp, path.join(SHOT_DIR, `view-${view}-${state}.png`), clip);
+      const defaultHeight = await shootViewState(cdp, `${view}/${state}`, `view-${view}-${state}.png`);
+      // Mismo estado con el marco estrecho: el panel limita su ancho a
+      // `100vw - 32px`, asi que solo asi se ejerce el ajuste de la columna.
+      // El alto que deja la pasada estrecha es mayor (la columna envuelve), y
+      // el panel se recorta a 100vh: hay que devolver el marco a la caja de la
+      // foto normal o la siguiente captura sale con otro recorte.
+      if (VISUAL_NARROW) {
+        await shootViewState(cdp, `${view}/${state} · narrow`,
+          `narrow-view-${view}-${state}.png`, Number(VISUAL_NARROW.width));
+        await cdp.evaluate(`(() => {
+          const frame = document.querySelector('iframe');
+          frame.style.width = '420px';
+          frame.style.height = '${defaultHeight}px';
+          document.body.style.minHeight = '${defaultHeight}px';
+          return true;
+        })()`);
+        await sleep(120);
+      }
     }
   }
 }
@@ -295,28 +326,52 @@ async function captureGarageStates(cdp, appUrl) {
     return true;
   })()`);
 
-  const captureGarageShot = async (name) => {
-    await cdp.evaluate('(() => { if (window.__ntaDebug && window.__ntaDebug.garagePaint) window.__ntaDebug.garagePaint(); return true; })()');
-    await sleep(150);
-    const clip = await cdp.evaluate(`(() => {
-      const host = document.getElementById('nt-queue-panel');
-      const panel = host && host.shadowRoot && host.shadowRoot.querySelector('.p');
-      if (!panel) return null;
-      if (typeof panel.getAnimations === 'function') {
-        for (const anim of panel.getAnimations({ subtree: true })) {
-          try { anim.pause(); anim.currentTime = 0; } catch { /* ya cancelada */ }
-        }
+  const garageClip = () => cdp.evaluate(`(() => {
+    const host = document.getElementById('nt-queue-panel');
+    const panel = host && host.shadowRoot && host.shadowRoot.querySelector('.p');
+    if (!panel) return null;
+    if (typeof panel.getAnimations === 'function') {
+      for (const anim of panel.getAnimations({ subtree: true })) {
+        try { anim.pause(); anim.currentTime = 0; } catch { /* ya cancelada */ }
       }
-      const r = panel.getBoundingClientRect();
-      return {
-        x: Math.max(0, Math.round(r.left - 18)),
-        y: Math.max(0, Math.round(r.top - 18)),
-        width: Math.ceil(r.width + 36),
-        height: Math.ceil(r.height + 36),
-      };
-    })()`);
+    }
+    const r = panel.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.round(r.left - 18)),
+      y: Math.max(0, Math.round(r.top - 18)),
+      width: Math.ceil(r.width + 36),
+      height: Math.ceil(r.height + 36),
+    };
+  })()`);
+  const garagePaint = () => cdp.evaluate(
+    '(() => { if (window.__ntaDebug && window.__ntaDebug.garagePaint) window.__ntaDebug.garagePaint(); return true; })()',
+  );
+
+  const captureGarageShot = async (name) => {
+    await garagePaint();
+    await sleep(150);
+    const clip = await garageClip();
     if (!clip) throw new Error(`garage clip not found: ${name}`);
     await captureShot(cdp, path.join(SHOT_DIR, `view-garage-${name}.png`), clip);
+
+    // La hoja del garaje tambien limita su ancho a `100vw - 32px`: la captura
+    // estrecha la ventana y vuelve a medir su caja.
+    if (VISUAL_NARROW) {
+      const width = Math.round(Number(VISUAL_NARROW.width));
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width, height: 1200, deviceScaleFactor: 2, mobile: false,
+      });
+      await sleep(180);
+      await garagePaint();
+      await sleep(120);
+      const narrowClip = await garageClip();
+      if (!narrowClip) throw new Error(`narrow garage clip not found: ${name}`);
+      await captureShot(cdp, path.join(SHOT_DIR, `narrow-view-garage-${name}.png`), narrowClip);
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 520, height: 1200, deviceScaleFactor: 2, mobile: false,
+      });
+      await sleep(120);
+    }
   };
 
   await cdp.evaluate(`(() => {
@@ -693,6 +748,7 @@ async function capturePanelThemes(cdp, appUrl) {
             platform: `${process.platform} ${os.release()}`,
           },
           viewport: { width: 520, height: 1200, deviceScaleFactor: 2 },
+          narrow: VISUAL_NARROW || null,
           state: { version: SCRIPT_VERSION, target },
         }, null, 2)}\n`);
       } catch { /* la captura ya esta hecha */ }
