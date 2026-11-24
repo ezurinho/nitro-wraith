@@ -34,17 +34,20 @@ jobs:
   # The CDP harness only drives Chrome. This job boots the same userscript and
   # fixtures in Firefox and WebKit so an engine-specific regression (shadow DOM,
   # CSS, shortcut handling) fails before a release instead of on a user's browser.
+  # It runs inside the official image because `playwright install --with-deps`
+  # pulls ~100 apt packages, and a slow archive mirror has stalled the job for
+  # the full 20-minute timeout. The image ships the browsers and their libs.
   browsers:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Install the cross-engine smoke tools
-        run: |
-          npm ci
-          npx playwright install --with-deps firefox webkit
+      - name: Install dependencies
+        run: npm ci
       - name: Run the Firefox and WebKit smoke
         run: npm run test:browsers
