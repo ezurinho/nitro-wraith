@@ -436,4 +436,11 @@ All of this only aims at believable statistics. It is your call and your risk.
 
 (function () {
   'use strict';
+
+  // Reloj de arranque: la primera instruccion del IIFE y el final de boot()
+  // marcan cuanto cuesta levantar el script. El HTML y el CSS del panel son
+  // perezosos, asi que esta marca tambien delata si el arranque de garaje
+  // (donde no hay panel) empieza a pagar lo que no usa.
+  const BOOT_STARTED_AT = performance.now();
+  let BOOT_READY_AT = 0;
 

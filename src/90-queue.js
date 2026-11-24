@@ -2900,49 +2900,9 @@
       return 'waiting · starts by itself';
     }
 
-    function deriveGarageContext(input = {}) {
-      if (input.social) {
-        return { key: 'read', title: 'Read-only social', detail: 'Friends and team counters without actions.', pill: 'READ' };
-      }
-      if (input.banned) {
-        return { key: 'banned', title: 'Account blocked', detail: 'Review the account before clearing the ban.', pill: 'BAN' };
-      }
-      if (!input.signed) {
-        return { key: 'signin', title: 'Sign in required', detail: 'The queue waits for a valid session.', pill: 'LOGIN' };
-      }
-      if (input.offline) {
-        return { key: 'offline', title: 'Waiting for network', detail: 'Races resume when the connection returns.', pill: 'OFFLINE' };
-      }
-      if (input.activeStop) {
-        return { key: 'stopped', title: 'Queue stopped', detail: input.reason || 'Resume when you are ready.', pill: 'STOPPED' };
-      }
-      if (input.banCleared) {
-        return { key: 'cleared', title: 'Ban stop cleared', detail: 'Resume to arm the queue again.', pill: 'CLEARED' };
-      }
-      if (input.hasRetry) {
-        return { key: 'retry', title: 'Sign-in retry pending', detail: `Retry in ${input.retryText || 'a moment'}.`, pill: 'LOGIN' };
-      }
-      if (Array.isArray(input.gates) && input.gates.length) {
-        const gate = input.gates[0];
-        return { key: 'gate', title: gate.label || 'Queue waiting', detail: `Clears in ${gate.leftText || 'a moment'}.`, pill: 'WAIT' };
-      }
-      if (input.boxReady) {
-        return { key: 'reward', title: 'Mystery Box ready', detail: 'Claim the daily reward before the next race.', pill: 'REWARD' };
-      }
-      if (!input.armed) {
-        return { key: 'stopped', title: 'Queue disarmed', detail: 'Resume to arm the next race.', pill: 'STOPPED' };
-      }
-      return { key: 'ready', title: 'Queue ready', detail: 'The next race will start automatically.', pill: 'AUTO' };
-    }
-
-    function garagePrimaryFor(context, available = {}) {
-      if (context.key === 'reward' && available.box) return 'box';
-      if ((context.key === 'stopped' || context.key === 'banned' || context.key === 'cleared') && available.resume) return 'resume';
-      if (context.key === 'retry' && available.retry) return 'retry';
-      if (context.key === 'ready' && available.race) return 'race';
-      return '';
-    }
-
+    // El contexto y el boton primario del garaje son puros y viven en
+    // 36-queue-policy.js, donde `tests/unit` los cubre sin navegador. El banco
+    // conserva este atajo porque recibe el parche entero y ya conoce el estado.
     window.__ntaDebug.garageActionFor = (patch = {}) => {
       const context = deriveGarageContext(patch);
       return {

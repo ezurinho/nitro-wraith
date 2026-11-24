@@ -874,6 +874,7 @@
     hudReads: 0, dayScans: 0, panelPaints: 0, userParses: 0,
     warningScans: 0, challengeScans: 0, captchaScans: 0, captchaUiScans: 0,
     resultsWatches: 0, storageReads: 0, panelNodes: 0,
+    panelCssBuilds: 0, panelHtmlBuilds: 0,
   };
 
   function noteStorageRead() {

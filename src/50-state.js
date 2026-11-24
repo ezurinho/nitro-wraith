@@ -167,31 +167,21 @@
   // Session limit: only measured races count towards it, never a DQ. The time
   // limit is checked between races, never mid-race: the loop asks before it
   // opens one, and a live race always finishes (leaving it is a DQ).
-  const timeLimitLeft = () => {
-    if (!session.timeLimit) return null;
-    if (!session.tandaStartedAt) return session.timeLimit * 60000;
-    return Math.max(0, session.tandaStartedAt + session.timeLimit * 60000 - Date.now());
-  };
+  const timeLimitLeft = () => timeLimitLeftFor({
+    timeLimit: session.timeLimit,
+    tandaStartedAt: session.tandaStartedAt,
+  });
 
   // Presupuesto del dia: carreras y XP reales de hoy. El override solo lo usa
   // el banco para probar los bordes sin mover el resumen del dia.
   let dailyCountsOverride = null;
+  // La cuenta es pura y vive en 36-queue-policy.js; aqui solo se elige de
+  // donde salen los numeros (resumen del dia o el override del banco).
   function dailyCaps() {
-    const day = dailyCountsOverride || todayRead();
-    const races = Math.max(0, Number(day.races) || 0);
-    const xp = Math.max(0, Number(day.xp) || 0);
-    const raceCap = Math.max(0, Number(session.dailyRaceLimit) || 0);
-    const xpCap = Math.max(0, Number(session.dailyXpLimit) || 0);
-    return {
-      races,
-      xp,
-      raceCap,
-      xpCap,
-      raceHit: raceCap > 0 && races >= raceCap,
-      xpHit: xpCap > 0 && xp >= xpCap,
-      warn: (raceCap > 0 && races >= raceCap * 0.8)
-        || (xpCap > 0 && xp >= xpCap * 0.8),
-    };
+    return dailyCapsFor(dailyCountsOverride || todayRead(), {
+      raceCap: session.dailyRaceLimit,
+      xpCap: session.dailyXpLimit,
+    });
   }
 
   const dailyLimitReached = () => {
@@ -202,66 +192,9 @@
   /* --------------------------------------------------------------------------
    * Ventana de horas activas
    * ------------------------------------------------------------------------ */
-  // Hora local del navegador. Admite cruzar medianoche (22:00–02:00); con
-  // start === end la ventana es todo el dia, y apagada no limita nada.
-  const padHour = (hour) => `${String(hour).padStart(2, '0')}:00`;
-
-  function activeWindowAt(settings, at = Date.now()) {
-    const on = Boolean(settings && settings.on);
-    const start = clamp((settings && settings.start) | 0, 0, 23);
-    const end = clamp((settings && settings.end) | 0, 0, 23);
-    const startText = padHour(start);
-    const endText = padHour(end);
-    const allDay = start === end;
-    const date = new Date(at);
-    const startAt = new Date(at);
-    const endAt = new Date(at);
-    startAt.setHours(start, 0, 0, 0);
-    endAt.setHours(end, 0, 0, 0);
-
-    const nextStart = () => {
-      const next = new Date(startAt);
-      if (next.getTime() <= at) next.setDate(next.getDate() + 1);
-      return next;
-    };
-    const nextEnd = () => {
-      const next = new Date(endAt);
-      if (next.getTime() <= at) next.setDate(next.getDate() + 1);
-      return next;
-    };
-
-    if (!on || allDay) {
-      return {
-        on, start, end, startText, endText, allDay: true, open: true,
-        nextAt: 0, closesAt: 0, nextText: startText, closesText: endText,
-        msUntilOpen: 0, msUntilClose: 0,
-      };
-    }
-
-    let open = false;
-    let nextAt = 0;
-    let closesAt = 0;
-
-    if (start < end) {
-      open = date >= startAt && date < endAt;
-      if (open) closesAt = endAt.getTime();
-      else nextAt = date < startAt ? startAt.getTime() : nextStart().getTime();
-    } else {
-      // Cruza medianoche: abierta desde start hasta las 24:00 y desde las
-      // 00:00 hasta end. Cerrada en el hueco entre end y start.
-      open = date >= startAt || date < endAt;
-      if (open) closesAt = date < endAt ? endAt.getTime() : nextEnd().getTime();
-      else nextAt = startAt.getTime();
-    }
-
-    return {
-      on, start, end, startText, endText, allDay, open,
-      nextAt, closesAt, nextText: startText, closesText: endText,
-      msUntilOpen: nextAt ? Math.max(0, nextAt - at) : 0,
-      msUntilClose: closesAt ? Math.max(0, closesAt - at) : 0,
-    };
-  }
-
+  // La matematica de la ventana (medianoche incluida) vive en
+  // 36-queue-policy.js y se prueba en Node; aqui solo se pasan los ajustes de
+  // la sesion actual.
   function activeWindow(at = Date.now()) {
     return activeWindowAt({
       on: session.activeOn,
@@ -347,11 +280,14 @@
     if (session.activeOn) scheduleActiveResume();
   }
 
-  const limitReached = () => (session.raceLimit > 0 && session.races >= session.raceLimit)
-    || (session.timeLimit > 0 && session.tandaStartedAt > 0
-      && Date.now() >= session.tandaStartedAt + session.timeLimit * 60000)
-    || (session.xpLimit > 0 && session.xp >= session.xpLimit)
-    || dailyLimitReached();
+  const limitReached = () => sessionLimitReached({
+    races: session.races,
+    raceLimit: session.raceLimit,
+    xp: session.xp,
+    xpLimit: session.xpLimit,
+    timeLimit: session.timeLimit,
+    tandaStartedAt: session.tandaStartedAt,
+  }, dailyCaps());
 
   // Texto corto para el tope por tiempo: "45m", "2h", "1h 30m".
   function limitMinutesText(minutes) {

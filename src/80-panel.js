@@ -13,6 +13,15 @@
     if (el && el.textContent !== value) el.textContent = value;
   }
 
+  // Los title largos de las cifras vivas se reescribian cuatro veces por
+  // segundo aunque el texto fuese el mismo. El expando vive en el nodo, asi que
+  // un panel nuevo empieza sin cache y no hereda valores del anterior.
+  function setTitle(el, text) {
+    if (!el || el.__ntaTitle === text) return;
+    el.__ntaTitle = text;
+    el.title = text;
+  }
+
   // Las filas que aparecen y desaparecen se tocan en cada latido. Escribir el
   // mismo display invalida el estilo aunque el valor no cambie, asi que solo
   // se escribe cuando de verdad cambia.
@@ -1324,6 +1333,16 @@
     return true;
   };
   window.__ntaDebug.perf = () => ({ ...perfCounters });
+  // Arranque medido: cuanto tarda el IIFE desde su primera instruccion hasta
+  // el final de boot(), y cuantas veces se armaron el CSS y el HTML del panel.
+  // En garaje los dos contadores tienen que quedarse en cero.
+  window.__ntaDebug.boot = () => ({
+    startedAt: BOOT_STARTED_AT,
+    readyAt: BOOT_READY_AT,
+    ms: BOOT_READY_AT ? Math.round(BOOT_READY_AT - BOOT_STARTED_AT) : null,
+    cssBuilds: perfCounters.panelCssBuilds,
+    htmlBuilds: perfCounters.panelHtmlBuilds,
+  });
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
   // Muestra de cadencia pura: cuanto tarda el motor por tecla a un objetivo
@@ -2396,6 +2415,8 @@
   }
 
   let panelReclampTimer = 0;
+  let panelResizeBound = false;
+  let updateTickerBound = false;
 
   // Escala, densidad o un cambio de ventana pueden dejar el panel fuera del
   // viewport. Se vuelve a la ultima posicion guardada (placeHost la recorta al
@@ -2495,7 +2516,7 @@
     host.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:2147483000;';
 
     const shadow = host.attachShadow({ mode: 'open' });
-    shadow.innerHTML = PANEL_HTML;
+    shadow.innerHTML = panelHtml();
 
     // Las vistas inactivas viven en <template>: sus nodos se parsean, pero no
     // entran en el arbol del documento ni en el layout. `pick` las encuentra
@@ -3099,7 +3120,12 @@
     applyFootMode();
     restorePosition();
     makeDraggable(shadow);
-    window.addEventListener('resize', schedulePanelReclamp);
+    // Una sola escucha por ventana aunque el panel se reconstruya: cada
+    // montaje traia la suya y el latido puede remontar el panel tras navegar.
+    if (!panelResizeBound) {
+      panelResizeBound = true;
+      window.addEventListener('resize', schedulePanelReclamp);
+    }
 
     panel.refs.toggle.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -4197,20 +4223,16 @@
     setGood(panel.refs.liveNow, stale ? false : null);
     setGood(panel.refs.liveNowAcc,
       stale ? false : recentAcc === null ? null : recentAcc >= profile.accuracyGoal);
-    if (panel.refs.liveNow) {
-      panel.refs.liveNow.title = stale
-        ? frozenWarning
-        : recentPace === null
-          ? `Recent pace: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
-          : `Recent pace: ${recentPace.toFixed(1)} WPM over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys. The session row is the cumulative average.`;
-    }
-    if (panel.refs.liveNowAcc) {
-      panel.refs.liveNowAcc.title = stale
-        ? frozenWarning
-        : recentAcc === null
-          ? `Recent accuracy: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
-          : `Recent accuracy: ${recentAcc.toFixed(1)}% over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys (errors / typed, the game formula). The accuracy above is cumulative.`;
-    }
+    setTitle(panel.refs.liveNow, stale
+      ? frozenWarning
+      : recentPace === null
+        ? `Recent pace: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
+        : `Recent pace: ${recentPace.toFixed(1)} WPM over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys. The session row is the cumulative average.`);
+    setTitle(panel.refs.liveNowAcc, stale
+      ? frozenWarning
+      : recentAcc === null
+        ? `Recent accuracy: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
+        : `Recent accuracy: ${recentAcc.toFixed(1)}% over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys (errors / typed, the game formula). The accuracy above is cumulative.`);
 
     let ageText = '—';
     if (session.endedAt) ageText = 'final';
@@ -4219,11 +4241,9 @@
     }
     setText(panel.refs.liveAge, ageText);
     setGood(panel.refs.liveAge, stale ? false : null);
-    if (panel.refs.liveAge) {
-      panel.refs.liveAge.title = stale
-        ? frozenWarning
-        : 'Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.';
-    }
+    setTitle(panel.refs.liveAge, stale
+      ? frozenWarning
+      : 'Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.');
     return { pace: recentPace, accuracy: recentAcc, stale };
   }
 
@@ -4270,6 +4290,8 @@
   let rhythmSamples = [];
   let rhythmLastSampleAt = 0;
   let rhythmRaceKey = '';
+  let rhythmPaintEl = null;
+  let rhythmPaintSig = '';
 
   function rhythmReset() {
     rhythmSamples = [];
@@ -4305,6 +4327,13 @@
   function paintRhythm() {
     if (!panel.refs || !panel.refs.rhythmWrap) return;
     const wrap = panel.refs.rhythmWrap;
+    // El repintado completo corre a 1-2 Hz con las mismas muestras casi
+    // siempre. La firma incluye el nodo para que un panel remontado pinte una
+    // vez aunque las muestras no hayan cambiado.
+    const sig = `${rhythmSamples.length}:${rhythmSamples.join(',')}:${raceWpm()}`;
+    if (wrap === rhythmPaintEl && sig === rhythmPaintSig) return;
+    rhythmPaintEl = wrap;
+    rhythmPaintSig = sig;
     const ready = rhythmSamples.length >= RHYTHM_MIN;
     const readyFlag = ready ? '1' : '0';
     if (wrap.dataset.ready !== readyFlag) wrap.dataset.ready = readyFlag;
@@ -4435,10 +4464,15 @@
           event.stopPropagation();
           openUpdateDownload();
         });
+        // La consulta y su tick son por ventana, no por nodo: remontar el panel
+        // no debe dejar un intervalo huerfano por cada montaje.
         checkForUpdate();
-        // Tick corto: checkForUpdate no repite una comprobacion buena hasta
-        // los 5 min; al volver a la pestana tambien se pregunta sin esperar.
-        setInterval(checkForUpdate, UPDATE_RECHECK_MS);
+        if (!updateTickerBound) {
+          updateTickerBound = true;
+          // Tick corto: checkForUpdate no repite una comprobacion buena hasta
+          // los 5 min; al volver a la pestana tambien se pregunta sin esperar.
+          setInterval(checkForUpdate, UPDATE_RECHECK_MS);
+        }
       }
     }
 
