@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.74 — 2026-11-24
+
+- feat(panel): clean streak, result flash and install-now (#15)
+
 ## 8.14.73 — 2026-11-24
 
 - feat(panel): motion levels, ambient loops and auto-install countdown (#14)
