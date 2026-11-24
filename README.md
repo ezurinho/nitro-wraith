@@ -259,8 +259,8 @@ which already ships the browsers and their system libraries.
 
 ```bash
 npm run build       # concatenate src/ into nitro-wraith.user.js and .meta.js
-npm test            # synced build + queue unit tests + CLI checks, no browser needed
-npm run test:unit   # queue policy unit tests only (Node, no browser)
+npm test            # synced build + unit tests + CLI checks, no browser needed
+npm run test:unit   # unit tests only (Node, no browser)
 npm run test:live   # browser harness (needs Chrome)
 npm run test:browsers # Firefox + WebKit smoke: boot, theme, shortcuts, no page errors
 npm run live:test   # CLI checks only, without the build sync
@@ -303,7 +303,8 @@ colour of every text token in all six themes, composes the real surfaces
 (`--bg-lo`/`--bg-hi`/`--card`) and fails below WCAG AA (4.5:1) for both the
 race panel and the garage sheet. The RGB theme is pinned to its worst hue
 during the audit, because the animated accent must stay legible across the
-whole cycle.
+whole cycle. Parity is a check too: `npm test` compares the panel and garage
+palettes token by token, so a theme edited on one sheet cannot drift on the other.
 
 After an intentional UI change, review the new images and save them with
 `npm run visual:accept`. Baselines are tied to a browser and platform because

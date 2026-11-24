@@ -32,8 +32,12 @@ Constraints that outrank taste:
 Tokens are declared in exactly two places: the `.panel` block of
 `src/79-panel-css.js` (race panel) and the `.p` block of the garage sheet
 inside `src/90-queue.js`. The garage lives in its own shadow root, so it
-repeats the same names and values instead of inheriting them; the two blocks
-are kept in step by hand and both are audited. Names: `--acc`, `--acc-2`,
+repeats the same names and values instead of inheriting them; both blocks
+are audited, and `tests/unit/palette.test.js` fails the build when a themed
+palette drifts between the two sheets. Carbon is the one hand-kept
+divergence: the garage carries it in its base block with `--dim` raised for
+legibility over the race page, and skips the tokens it never draws
+(`--card`, `--ink-on-acc`, `--ink-warn-hi`, `--medal-1`/`2`/`3`). Names: `--acc`, `--acc-2`,
 `--ink`, `--dim`, `--dim-2`, `--warn`, `--bad`, `--info`, `--ink-warn`,
 `--ink-warn-hi`, `--ink-bad`, `--ink-on-acc`, `--medal-1`/`2`/`3`,
 `--card`, `--bg-hi`, `--bg-lo`, `--font-ui`, `--font-mono`. State inks are
@@ -95,7 +99,7 @@ applicable and are listed as such, not silently ignored.
 | F8 no invented metrics | Enforced by product rule: all values come from the session |
 | F12–F14 hero / word count / container | Not applicable: no landing page |
 | F15 CSS stamp | Not applicable: generated panel sheet, not an exported page |
-| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (407 Chrome checks + 24 visual baselines + an 18-check Firefox/WebKit smoke) |
+| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (409 Chrome checks, including idle-heartbeat DOM-write guards for both surfaces, + 24 visual baselines + an 18-check Firefox/WebKit smoke) |
 
 ### Floor audit
 
