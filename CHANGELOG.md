@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.69 — 2026-11-24
+
+- refactor(design): tokenise state inks and close the Hallmark floor (#8)
+
 ## 8.14.68 — 2026-11-24
 
 - test(live): widen the boot budget for shared CI runners (#7)

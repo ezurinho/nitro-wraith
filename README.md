@@ -19,7 +19,7 @@
   <a href="https://github.com/ezurinho/nitro-wraith/releases/latest"><img src="https://img.shields.io/github/v/release/ezurinho/nitro-wraith?style=flat-square&label=release&labelColor=0B1711&color=62E2D0" alt="Latest release"></a>
   <a href="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml"><img src="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml/badge.svg?branch=main" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-FFC66D?style=flat-square&labelColor=0B1711" alt="MIT license"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-8.14.68-5CF2A0?style=flat-square&labelColor=0B1711" alt="version"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-8.14.69-5CF2A0?style=flat-square&labelColor=0B1711" alt="version"></a>
 </p>
 
 <p align="center">
@@ -39,10 +39,9 @@ stats, and shows why it is waiting.
 <!-- release:start -->
 ## Current release
 
-**[8.14.68](https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.68)** · 2026-11-24
+**[8.14.69](https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.69)** · 2026-11-24
 
-- test(live): widen the boot budget for shared CI runners (#7)
-- fix(pace): keep the race drift inside the band the panel shows (#6)
+- refactor(design): tokenise state inks and close the Hallmark floor (#8)
 
 [Full changelog](CHANGELOG.md)
 <!-- release:end -->
