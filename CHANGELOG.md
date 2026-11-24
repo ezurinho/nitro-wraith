@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.80 — 2026-11-24
+
+- fix(guard): fail closed when coordination is unavailable (#24)
+
 ## 8.14.79 — 2026-11-24
 
 - fix(release): validate Gist metadata outside shell (#23)
