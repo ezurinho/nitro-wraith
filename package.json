@@ -6,10 +6,10 @@
   "scripts": {
     "build": "node tools/build.js",
     "build:check": "node tools/build.js --check",
-    "test": "node tools/build.js --check && node tests/unit/queue.test.js && node tests/live/live.test.js",
+    "test": "node tools/build.js --check && node tests/unit/palette.test.js && node tests/unit/queue.test.js && node tests/live/live.test.js",
     "test:live": "node tests/live/run.js",
     "test:browsers": "node tests/browsers/smoke.js",
-    "check": "node tools/build.js --check && node --check tools/build.js && node --check tools/canary.js && node --check tools/visual.js && node --check tools/panel-map.js && node --check nitro-wraith.user.js && node --check tests/live/run.js && node --check tests/live/visual-capture.js && node --check tests/live/live.js && node --check tests/live/live.test.js && node --check tests/live/fake-cdp.js && node --check tests/unit/harness.js && node --check tests/unit/queue.test.js && node --check tests/live/panel-read.js && node --check tests/live/history.js && node --check tests/live/report.js && node --check tests/live/chrome.js && node --check tests/browsers/smoke.js && node --check tests/live/tabs.js && node --check tools/export-downloads.js && node --check tools/release.js && node --check tools/readme.js && node tools/readme.js check && node tools/release.js check && npm test && npm run test:live",
+    "check": "node tools/build.js --check && node --check tools/build.js && node --check tools/canary.js && node --check tools/visual.js && node --check tools/panel-map.js && node --check nitro-wraith.user.js && node --check tests/live/run.js && node --check tests/live/visual-capture.js && node --check tests/live/live.js && node --check tests/live/live.test.js && node --check tests/live/fake-cdp.js && node --check tests/unit/harness.js && node --check tests/unit/palette.test.js && node --check tests/unit/queue.test.js && node --check tests/live/panel-read.js && node --check tests/live/history.js && node --check tests/live/report.js && node --check tests/live/chrome.js && node --check tests/browsers/smoke.js && node --check tests/live/tabs.js && node --check tools/export-downloads.js && node --check tools/release.js && node --check tools/readme.js && node tools/readme.js check && node tools/release.js check && npm test && npm run test:live",
     "release:check": "node tools/release.js check",
     "readme:sync": "node tools/readme.js sync",
     "readme:check": "node tools/readme.js check",
@@ -21,7 +21,7 @@
     "live:test": "node tests/live/live.test.js",
     "visual": "node tools/visual.js run",
     "visual:accept": "node tools/visual.js accept",
-    "test:unit": "node tests/unit/queue.test.js"
+    "test:unit": "node tests/unit/palette.test.js && node tests/unit/queue.test.js"
   },
   "engines": {
     "node": ">=22"
