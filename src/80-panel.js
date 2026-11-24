@@ -1804,6 +1804,11 @@
     return chCache;
   }
 
+  function invalidateChallengeProgress() {
+    chReadAt = 0;
+    clearPersistRaw();
+  }
+
   function challengeProgressAll() {
     readChallengeProgress();
     return chAllCache;
@@ -1814,8 +1819,7 @@
   window.__ntaDebug.challengeProgressAll = () => challengeProgressAll();
   window.__ntaDebug.challengeReset = () => chResetAt;
   window.__ntaDebug.refreshChallenges = () => {
-    chReadAt = 0;
-    clearPersistRaw();
+    invalidateChallengeProgress();
     return readChallengeProgress();
   };
 

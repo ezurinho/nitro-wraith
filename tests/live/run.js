@@ -3986,6 +3986,40 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('a completed challenge is counted for the day',
     challengeNotice.dayKeys > 0, challengeNotice);
 
+  const challengeResultRefresh = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const shadow = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    if (!d || !d.challengeProgress || !d.applyRaceResult) return { has: false };
+    const soon = Math.floor(Date.now() / 1000) + 3600;
+    const historyKey = 'autoTyperRaceHistory';
+    const savedRows = JSON.parse(w.localStorage.getItem(historyKey) || '[]');
+    w.NTGLOBALS = {
+      CHALLENGES: [{ challengeID: 31, type: 1, goal: 100, expiration: soon }],
+      CHALLENGE_TYPES: { 1: ['Type \${goal} \${field}', 'word'] },
+    };
+    const seed = (progress) => w.localStorage.setItem('persist:nt', JSON.stringify({
+      user: JSON.stringify({ challenges: [{ challengeID: 31, progress }] }),
+    }));
+    seed(40);
+    d.refreshChallenges();
+    const before = d.challengeProgress()[0].progress;
+    seed(41);
+    const cached = d.challengeProgress()[0].progress;
+    d.seedRaceCounters({ chars: 320, errors: 0, correct: 320, nitroChars: 0, startedAt: Date.now() - 60000 });
+    d.recordRace();
+    d.applyRaceResult({ place: 1 });
+    const after = d.challengeProgress()[0].progress;
+    d.paint(true);
+    const text = shadow.querySelector('[data-field="chList"]').textContent;
+    d.seedHistory(savedRows);
+    return { has: true, before, cached, after, text };
+  })()`, true);
+  check('a server race result refreshes the challenge cache immediately',
+    challengeResultRefresh.has && challengeResultRefresh.before === 40
+      && challengeResultRefresh.cached === 40 && challengeResultRefresh.after === 41
+      && /41\/100/.test(challengeResultRefresh.text), challengeResultRefresh);
+
   // Aviso de calibracion a mitad de sesion: se restaura una tanda de 14
   // carreras y se fuerza una calibracion que mueve el rango (120 -> 113-120).
   // El aviso tiene que quedar en el anillo de LOG, que es donde se ve. Se parte
