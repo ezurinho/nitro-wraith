@@ -285,6 +285,11 @@ inside one IIFE. `nitro-wraith.user.js` is still the only installable file and
 `npm run check`. `build:check` prevents testing or publishing an artifact that
 does not match `src/`.
 
+Visual work follows the locked system in [`DESIGN.md`](DESIGN.md) and the
+vendored [Hallmark](.qoder/skills/hallmark/SKILL.md) design skill: its Floor
+gates are binding and every waiver is on the record there. Contributors (human
+or agent) start from [`AGENTS.md`](AGENTS.md).
+
 The main configuration lives in `CONFIG` (`src/10-config.js`) and daily settings
 in `TUNE`, stored in `localStorage`. The **Updates** card checks the latest release
 meta (with the Gist as mirror) on

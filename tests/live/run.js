@@ -396,7 +396,7 @@ const READ = `(() => {
     seasonEnds: txt('[data-field="seasonEnds"]'),
     seasonAlert: txt('[data-field="seasonAlert"]'),
     seasonNote: txt('[data-field="seasonNote"]'),
-    seasonFill: q('[data-field="seasonFill"]') ? q('[data-field="seasonFill"]').style.width : null,
+    seasonFill: q('[data-field="seasonFill"]') ? q('[data-field="seasonFill"]').style.transform : null,
   };
 })()`;
 
@@ -1633,14 +1633,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       ends: q('[data-field="seasonEnds"]').textContent,
       note: q('[data-field="seasonNote"]').textContent,
       alert: q('[data-field="seasonAlert"]').style.display,
-      fill: q('[data-field="seasonFill"]').style.width,
+      fill: q('[data-field="seasonFill"]').style.transform,
     };
   })()`);
   check('season card shows current tier, exact XP, XP left and the end date',
     seasonCard.tag === 'T6 · 34%' && seasonCard.name === 'Spirit Racers'
       && seasonCard.tier === 'T6' && seasonCard.xp === '76,701 / 90,000 XP'
       && seasonCard.next === '13,299 XP to go' && /Nov 29/.test(seasonCard.ends)
-      && seasonCard.alert === 'none' && seasonCard.fill === '34%', seasonCard);
+      && seasonCard.alert === 'none' && seasonCard.fill === 'scaleX(0.34)', seasonCard);
 
   const seasonEmpty = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
@@ -1650,12 +1650,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     return {
       tag: s.querySelector('[data-field="seasonTag"]').textContent,
       note: s.querySelector('[data-field="seasonNote"]').textContent,
-      fill: s.querySelector('[data-field="seasonFill"]').style.width,
+      fill: s.querySelector('[data-field="seasonFill"]').style.transform,
     };
   })()`);
   check('season card waits for account XP when there is no snapshot',
     seasonEmpty.tag === 'no snapshot' && /account xp/i.test(seasonEmpty.note)
-      && seasonEmpty.fill === '0%', seasonEmpty);
+      && seasonEmpty.fill === 'scaleX(0)', seasonEmpty);
 
   // Sin abrir /season: el XP persistido por el juego y el bootstrap bastan
   // para pintar el tier actual, el siguiente y el progreso.

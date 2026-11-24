@@ -3939,7 +3939,7 @@
       setText(panel.refs.seasonPace, '—');
       setText(panel.refs.seasonEnds, '—');
       setText(panel.refs.seasonNote, 'Waiting for your account XP...');
-      if (panel.refs.seasonFill) panel.refs.seasonFill.style.width = '0%';
+      if (panel.refs.seasonFill) panel.refs.seasonFill.style.transform = 'scaleX(0)';
       return;
     }
 
@@ -4000,7 +4000,10 @@
     setText(panel.refs.seasonNote, snap.auto
       ? 'auto · account XP'
       : `snapshot ${elapsedText(snap.at, true)} · open Season to refresh`);
-    if (panel.refs.seasonFill) panel.refs.seasonFill.style.width = `${progress}%`;
+    if (panel.refs.seasonFill) {
+      const scale = `scaleX(${(progress / 100).toFixed(4)})`;
+      if (panel.refs.seasonFill.style.transform !== scale) panel.refs.seasonFill.style.transform = scale;
+    }
 
     // Solo avisa cuando de verdad hay prisa: tres dias o menos de temporada,
     // menos de 5.000 XP para el siguiente premio o un ritmo que no alcanza.
@@ -4391,8 +4394,9 @@
     const racePct = total > 0 ? progressPct(pos, total) : 0;
     setText(panel.refs.progress, total > 0 ? `${pos}/${total}` : '—');
     if (panel.refs.progFill) {
-      const width = `${racePct.toFixed(1)}%`;
-      if (panel.refs.progFill.style.width !== width) panel.refs.progFill.style.width = width;
+      // scaleX en vez de width: el navegador anima el transform sin re-layout.
+      const scale = `scaleX(${(racePct / 100).toFixed(4)})`;
+      if (panel.refs.progFill.style.transform !== scale) panel.refs.progFill.style.transform = scale;
     }
     if (panel.root) {
       const fill = (racePct / 100).toFixed(4);
