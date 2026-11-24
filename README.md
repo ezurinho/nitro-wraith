@@ -253,8 +253,9 @@ canary copy to the normal channel.
 
 The userscript has no runtime dependencies. The harness needs Node 22+ and
 Chrome; the cross-engine smoke also needs Playwright's Firefox and WebKit
-builds (`npx playwright install firefox webkit`), which CI installs for its own
-job.
+builds (`npx playwright install firefox webkit`). CI runs that job inside the
+[matching Playwright image](https://mcr.microsoft.com/en-us/artifact/mar/playwright),
+which already ships the browsers and their system libraries.
 
 ```bash
 npm run build       # concatenate src/ into nitro-wraith.user.js and .meta.js
@@ -275,7 +276,8 @@ answer for them: the race and garage panels mount, the skin paints, Alt+T
 reaches both panels, Alt+G folds the garage sheet, Alt+M cycles the footer HUD,
 and no uncaught exception reaches the page. It answers the update-check request
 locally, so the run is offline and deterministic. The `browsers` job in
-`check.yml` runs it on every pull request and on `main`.
+`check.yml` runs it on every pull request and on `main`, inside the Playwright
+image pinned to the same version as the dev dependency.
 
 ### Visual regression
 
