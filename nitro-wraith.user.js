@@ -292,7 +292,8 @@ TUNE view (the ⚙ button, next to Stop) is split into Rhythm (pace profile and
 calibration), Limits (session, daily budget and active hours) and Automation
 (switches for breaks, Mystery Box, stickers, Auto nitro, the safety guard and
 the sound, plus the theme, the motion level, export/import/report/csv tools and
-the Updates card: auto-install countdown, its switch and "check now"). "csv" downloads
+the Updates card: auto-install countdown with "install now" on click and Escape
+to cancel, its switch and "check now"). "csv" downloads
 one spreadsheet with the closed sessions (the same ones Alt+H prints) and,
 below them, the 7-day summary: a
 `kind` column separates `session` rows from `day` rows, and the columns are the
@@ -323,6 +324,12 @@ hover feedback, and full (the default) also runs the ambient loops while a
 race is live (the header scan, the status ring, the Live equalizer, the
 progress sheen). Entrances are short on purpose and the whole set switches
 off when the system asks for reduced motion.
+
+The Live card also shows the clean streak (correct keys in a row in the race
+being typed, reset by any mistake); every 25 clean keys the figure pulses
+once, in standard and full motion. When a race closes and the game publishes
+its place and prize, the result row flashes once, so the close is visible from
+the corner of the eye.
 
 Esc or Alt+S (or the Stop button): stop. Mid-race it does NOT cut dead, because
 leaving a live race is a guaranteed disqualification: it lets the race finish and
@@ -1202,6 +1209,22 @@ All of this only aims at believable statistics. It is your call and your risk.
     return autoUpdateState();
   }
 
+  // El atajo del aviso: el jugador no espera los 12 s. Cancela la cuenta y
+  // entrega la release al instalador ya, con las mismas guardas de siempre.
+  function installAutoUpdateNow() {
+    if (!updateInfo()) return null;
+    if (!autoUpdateSafe()) return cancelAutoUpdate('race');
+    if (autoUpdateTickTimer) clearInterval(autoUpdateTickTimer);
+    autoUpdateTickTimer = null;
+    autoUpdateArm = null;
+    const url = installUpdate();
+    if (typeof log === 'function') {
+      log(`Auto-update: installing v${updateInfo().latest} now.`);
+    }
+    paintAutoUpdate(true);
+    return url;
+  }
+
   function armAutoUpdate() {
     const info = updateInfo();
     if (!info || !autoUpdateEnabled() || autoUpdateArm) return autoUpdateState();
@@ -1217,7 +1240,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       autoUpdateTickTimer = setInterval(() => autoUpdateTick(), 1000);
     }
     if (typeof log === 'function') {
-      log(`Auto-update: v${info.latest} installs in 12 s unless a race starts. Click the countdown row to cancel.`);
+      log(`Auto-update: v${info.latest} installs in 12 s unless a race starts. Click the countdown row to install now; Escape cancels.`);
     }
     paintAutoUpdate(true);
     return autoUpdateState();
@@ -1251,7 +1274,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (refs.upAuto) {
       const seconds = Math.max(0, Math.ceil(state.leftMs / 1000));
       const text = state.phase === 'armed'
-        ? `v${state.version} in ${seconds}s · cancel`
+        ? `v${state.version} · install in ${seconds}s`
         : state.phase === 'waiting'
           ? `v${state.version} · paused`
           : state.phase === 'off'
@@ -5396,6 +5419,9 @@ function dayCurveAt(at = Date.now()) {
     startedAt: 0,
     endedAt: 0,          // congelado al cerrar la carrera: el reloj no sigue
     lastErrorAt: 0,
+    cleanStreak: 0,      // teclas correctas seguidas en esta carrera
+    cleanBest: 0,        // mejor racha de la tanda (sobrevive al reset de carrera)
+    streakPulseAt: 0,    // ultimo hito de 25 limpio: el panel lo celebra una vez
     lastLogAt: 0,
     lastKeyAt: 0,        // ultima tecla enviada (aunque el juego no la acepte)
     lastAcceptedAt: 0,   // ultima tecla que el juego conto: la que evita la DQ
@@ -6011,6 +6037,8 @@ function dayCurveAt(at = Date.now()) {
     session.startedAt = 0;
     session.endedAt = 0;
     session.lastErrorAt = 0;
+    session.cleanStreak = 0;
+    session.streakPulseAt = 0;
     session.lastLogAt = 0;
     session.lastKeyAt = 0;
     session.lastAcceptedAt = 0;
@@ -6031,6 +6059,20 @@ function dayCurveAt(at = Date.now()) {
     session.clockDone = false;
     session.lastHudWpm = 0;
     session.lastProgress = null;
+  }
+
+  // Cada tecla que manda el bucle de carrera pasa por aqui: una correcta alarga
+  // la racha limpia, una erronea la devuelve a cero. Cada 25 seguidas se marca
+  // el hito para que el panel lo celebre una sola vez (sin temporizador propio).
+  function noteKeystroke(ok) {
+    if (!ok) {
+      session.cleanStreak = 0;
+      return session.cleanStreak;
+    }
+    session.cleanStreak++;
+    if (session.cleanStreak > session.cleanBest) session.cleanBest = session.cleanStreak;
+    if (session.cleanStreak % 25 === 0) session.streakPulseAt = Date.now();
+    return session.cleanStreak;
   }
 
   // Formula exacta del cliente (dist/site/js/ra.js, citada por el userscript
@@ -7901,6 +7943,7 @@ function dayCurveAt(at = Date.now()) {
         noteRaceStart(session.startedAt);
         session.chars++;
         session.correct++;
+        noteKeystroke(true);
         session.total = content.length;
         session.pos = index + 1;
         // Desde donde se cuenta esta carrera: el guardia mide con esto, no con
@@ -9135,6 +9178,7 @@ function dayCurveAt(at = Date.now()) {
         session.correct++;
         expectedAfter = freshIndex + 1;
       }
+      noteKeystroke(!fail);
 
       logProgress();
 
@@ -9522,6 +9566,19 @@ function dayCurveAt(at = Date.now()) {
         @keyframes nt-warm {
           0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acc) 0%, transparent); }
           50%      { box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 28%, transparent); }
+        }
+        /* Hito de racha limpia: la cifra da un salto corto hacia el acento. */
+        @keyframes nt-streak {
+          0%   { transform: scale(1); color: var(--acc-2); }
+          35%  { transform: scale(1.28); color: var(--acc); }
+          100% { transform: scale(1); color: var(--acc-2); }
+        }
+        /* Destello de cierre: la fila de resultado enciende el acento un instante
+           cuando llega una carrera terminada. Solo transform y background. */
+        @keyframes nt-flash {
+          0%   { transform: translateY(2px); background: color-mix(in srgb, var(--acc) 0%, transparent); }
+          40%  { transform: translateY(0); background: color-mix(in srgb, var(--acc) 24%, transparent); }
+          100% { transform: translateY(0); background: color-mix(in srgb, var(--acc) 0%, transparent); }
         }
 
         /* Escaner: una banda de luz cruza la cabecera solo mientras hay carrera.
@@ -9934,6 +9991,14 @@ function dayCurveAt(at = Date.now()) {
         .recent-pair i[data-good="1"] { color: var(--acc); }
         .recent-pair i[data-good="0"] { color: var(--warn); }
         .recent-pair i.bump { animation: nt-bump .32s cubic-bezier(.34, 1.4, .5, 1); }
+        /* Racha limpia: numeros corrientes en el acento suave; el hito de 25
+           solo late en standard y full, y calm se queda con el color. */
+        .row.streak-row b { color: var(--acc-2); }
+        .panel[data-motion="standard"] .row.streak-row b.nt-pulse,
+        .panel[data-motion="full"] .row.streak-row b.nt-pulse { animation: nt-streak .24s cubic-bezier(.34, 1.4, .5, 1); }
+        /* Cierre de carrera: el resultado parpadea una vez al entrar. */
+        .panel[data-motion="standard"] .result-row.nt-flash,
+        .panel[data-motion="full"] .result-row.nt-flash { animation: nt-flash .24s ease-out; }
         .row .num { width: 58px; flex: none; padding: 2px 5px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0, 0, 0, .24); color: var(--ink-2); font: 600 10px/1.4 var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; color-scheme: dark; }
         .row .num:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; border-color: var(--acc); }
         .row .num::placeholder { color: var(--dim-2); }
@@ -10425,6 +10490,7 @@ function dayCurveAt(at = Date.now()) {
           .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title,
           .panel .head::before, .panel .head .dot::after, .panel .mark svg, .panel .livedots i,
           .panel .race-line::after, .panel .theme[aria-pressed="true"] i, .panel .update-card,
+          .panel .row.streak-row b, .panel .result-row,
           .panel[data-theme="rgb"], .panel[data-theme="rgb"]::after { animation: none !important; }
         }
       `;
@@ -11582,6 +11648,7 @@ function dayCurveAt(at = Date.now()) {
     return autoUpdateState();
   };
   window.__ntaDebug.tickAutoUpdate = (advanceMs = 0) => autoUpdateTick(Number(advanceMs) || 0);
+  window.__ntaDebug.installAutoUpdateNow = () => installAutoUpdateNow();
   window.__ntaDebug.cancelAutoUpdate = () => cancelAutoUpdate('user');
   window.__ntaDebug.lastAutoUpdate = () => window.__ntaAutoUpdateLast || null;
   window.__ntaDebug.live = () => liveSituation();
@@ -11606,6 +11673,8 @@ function dayCurveAt(at = Date.now()) {
   // Las pruebas que siembran el historico necesitan un pintado real sin
   // depender de que la pestana este visible o de la cache de 1.5 s.
   window.__ntaDebug.panelRefresh = () => {
+    todayCache = null;
+    todayCacheAt = 0;
     dayHistCache = null;
     dayHistCacheRaw = '';
     dayHistCacheAt = 0;
@@ -11718,9 +11787,23 @@ function dayCurveAt(at = Date.now()) {
   window.__ntaDebug.countRace = () => countRace();
   window.__ntaDebug.freshTanda = (reason) => startFreshTanda(String(reason || ''));
   window.__ntaDebug.tandaSummary = () => tandaSummary();
+  // Cada tecla del bucle real pasa por noteKeystroke; el banco usa el mismo
+  // camino para probar la racha limpia sin teclear una carrera.
+  window.__ntaDebug.keyStroke = (ok = true) => noteKeystroke(Boolean(ok));
+  window.__ntaDebug.cleanStreak = () => ({
+    now: session.cleanStreak,
+    best: session.cleanBest,
+    pulseAt: session.streakPulseAt,
+  });
+
   // El banco aplica el paquete oficial por el mismo camino que el juego y lee
   // la aportacion guardada para comprobar la correccion de la media.
   window.__ntaDebug.serverWpm = (value, key = '') => applyServerWpm(Number(value), String(key || ''));
+  // Cierre de carrera con premio por el mismo camino que el evento del juego.
+  window.__ntaDebug.applyRaceResult = (result = {}) => {
+    applyRaceResult({ ...result }, 'debug');
+    return raceHistory[raceHistory.length - 1] || null;
+  };
   window.__ntaDebug.sessionTotals = () => {
     const avg = tandaAverages();
     return {
@@ -12011,6 +12094,10 @@ function dayCurveAt(at = Date.now()) {
     try { localStorage.setItem(KEYS.history, JSON.stringify(raceHistory)); } catch { /* bloqueado */ }
     if (panel.refs) {
       panel.historySig = '';
+      // Sembrar no es cerrar una carrera: el destello de resultado no se dispara
+      // por una foto del banco.
+      panel.resultSig = undefined;
+      panel.resultCount = undefined;
       renderHistory();
     }
     return raceHistory.length;
@@ -12413,6 +12500,31 @@ function dayCurveAt(at = Date.now()) {
       });
     } else {
       el.classList.add('bump');
+    }
+  }
+
+  // Un pulso de una sola vez: quita la clase y la vuelve a poner en el
+  // siguiente frame para que la animacion se reinicie sin forzar un layout
+  // sincrono dentro de la carrera. El CSS decide si el nivel de movimiento
+  // lo deja correr; la clase solo marca el hecho.
+  function pulseOnce(el, className) {
+    if (!el) return;
+    if (!el.__ntaPulseCleanup) {
+      el.__ntaPulseCleanup = true;
+      el.addEventListener('animationend', (event) => {
+        if (event.target !== el) return;
+        el.classList.remove('nt-pulse', 'nt-flash');
+      });
+    }
+    el.classList.remove(className);
+    if (typeof requestAnimationFrame === 'function') {
+      if (el.__ntaPulseFrame) cancelAnimationFrame(el.__ntaPulseFrame);
+      el.__ntaPulseFrame = requestAnimationFrame(() => {
+        el.__ntaPulseFrame = 0;
+        if (el.isConnected) el.classList.add(className);
+      });
+    } else {
+      el.classList.add(className);
     }
   }
 
@@ -13012,6 +13124,8 @@ function dayCurveAt(at = Date.now()) {
       clock: pick('[data-field="clock"]'),
       resultRow: pick('.result-row'),
       result: pick('[data-field="result"]'),
+      streakRow: pick('.streak-row'),
+      streak: pick('[data-field="streak"]'),
       guardRow: pick('.guard-row'),
       guard: pick('[data-field="guard"]'),
       watchRow: pick('.watch-row'),
@@ -13304,8 +13418,9 @@ function dayCurveAt(at = Date.now()) {
       });
     }
 
-    // Auto-instalacion: el interruptor vive en la tarjeta Updates y el
-    // contador es el boton que cancela. Ningun aviso de version se convierte en
+    // Auto-instalacion: el interruptor vive en la tarjeta Updates. El contador
+    // es un boton doble: clic = instalar ya, Escape = cancelar (el aviso sigue
+    // ahi y el reintento llega a los 30 min). Ningun aviso se convierte en
     // instalacion sin pasar por aqui.
     if (panel.refs.updateAuto) {
       panel.refs.updateAuto.addEventListener('click', (event) => {
@@ -13315,6 +13430,13 @@ function dayCurveAt(at = Date.now()) {
     }
     if (panel.refs.updateCancel) {
       panel.refs.updateCancel.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (autoUpdateState().phase === 'armed') installAutoUpdateNow();
+        else cancelAutoUpdate('user');
+      });
+      panel.refs.updateCancel.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
         event.stopPropagation();
         cancelAutoUpdate('user');
       });
@@ -15010,6 +15132,20 @@ function dayCurveAt(at = Date.now()) {
     setText(panel.refs.races, session.raceLimit
       ? `${session.races} / ${session.raceLimit}`
       : String(session.races));
+    // Racha limpia: teclas correctas seguidas en la carrera viva. Cada 25 se
+    // celebra una vez con un pulso corto; una tecla erronea la devuelve a cero
+    // y esconde la fila.
+    if (panel.refs.streakRow) {
+      const streak = session.cleanStreak | 0;
+      const showStreak = Boolean(session.typing) && !session.endedAt && streak > 0;
+      setDisplay(panel.refs.streakRow, showStreak);
+      if (showStreak) setText(panel.refs.streak, `×${streak}`);
+      const pulseAt = session.streakPulseAt | 0;
+      if (panel.streakPulse !== pulseAt) {
+        panel.streakPulse = pulseAt;
+        if (showStreak && pulseAt) pulseOnce(panel.refs.streak, 'nt-pulse');
+      }
+    }
     // XP del dia, el mismo que suma la tarjeta de 7 dias: aqui se ve sin
     // cambiar de vista, mientras la sesion corre. Sin XP no se inventa un 0.
     if (panel.refs.dayXp) {
@@ -15369,7 +15505,19 @@ function dayCurveAt(at = Date.now()) {
     if (panel.refs.resultRow) {
       const lastResult = raceHistory[raceHistory.length - 1];
       const hasResult = Boolean(lastResult && (lastResult.place || lastResult.cash || lastResult.xp));
+      // Destello de cierre: una carrera nueva (o el primer premio que llega
+      // tarde para la ultima fila) enciende la fila una vez. El arranque con
+      // historico guardado no destella: panel.resultSig empieza sin definir.
+      const sig = hasResult
+        ? `${raceHistory.length}:${lastResult.at || 0}:${lastResult.place || 0}:${lastResult.cash || 0}:${lastResult.xp || 0}`
+        : '';
+      const grew = panel.resultCount !== undefined && raceHistory.length > panel.resultCount;
+      const firstResult = panel.resultSig === '' && sig !== '';
+      const fresh = Boolean(sig) && (grew || firstResult);
+      panel.resultSig = sig;
+      panel.resultCount = raceHistory.length;
       setDisplay(panel.refs.resultRow, hasResult);
+      if (!hasResult) panel.refs.resultRow.classList.remove('nt-flash');
       if (hasResult) {
         const bits = [
           ordinal(lastResult.place),
@@ -15378,6 +15526,7 @@ function dayCurveAt(at = Date.now()) {
         ].filter(Boolean);
         setText(panel.refs.result, bits.join(' · '));
         panel.refs.resultRow.title = `Last race: ${bits.join(' · ')} (read from the game's own race result).`;
+        if (fresh) pulseOnce(panel.refs.resultRow, 'nt-flash');
       }
     }
 
@@ -16275,6 +16424,7 @@ function dayCurveAt(at = Date.now()) {
                   <div class="row"><span>target</span><b data-field="target">—</b></div>
                   <div class="row" title="Recent pace and accuracy: WPM and accuracy over the last 6 seconds of accepted keys, independent of the session averages"><span>recent</span><b class="recent-pair"><i data-field="liveNow">—</i><i class="recent-acc" data-field="liveNowAcc">—</i></b></div>
                   <div class="row race-row secondary" title="Race progress"><span>race</span><b data-field="progress">—</b></div>
+                  <div class="row streak-row" style="display:none" title="Clean streak: correct keys in a row this race. A mistake resets it, and every 25 clean keys the row pulses once"><span>clean</span><b data-field="streak">×0</b></div>
                   <div class="row"><span>races</span><b data-field="races">0</b></div>
                   <div class="row day-xp-row" title="XP the game awarded today, read from the same daily summary as the 7-day card"><span>today</span><b data-field="dayXp">—</b></div>
                   <div class="row tanda-row" title="Average of every measured race in this session, not just the ones in the list"><span>session</span><b data-field="tanda">—</b></div>
@@ -16693,11 +16843,11 @@ function dayCurveAt(at = Date.now()) {
                 <div class="card-h"><span class="card-t">Updates</span><span class="card-s">GitHub releases</span></div>
                 <div class="rows">
                   <div class="row" title="Last public update check: the last result, its error and the next retry"><span>check</span><b data-field="upInfo">—</b></div>
-                  <button class="row up-auto-row" type="button" data-act="updateCancel" title="Auto-update is counting down. Click to cancel; the badge stays so you can install when you want"><span>install</span><b data-field="upAuto">—</b></button>
+                  <button class="row up-auto-row" type="button" data-act="updateCancel" title="Auto-update is counting down. Click the row to hand the release to the installer now, or press Escape to cancel; the badge stays so you can install later"><span>install</span><b data-field="upAuto">—</b></button>
                 </div>
                 <div class="set-row">
                   <span class="set-lbl">Auto-update<i>install a newer build when no race is running</i></span>
-                  <span class="set-val"><button class="sw" type="button" role="switch" aria-checked="true" data-update-toggle="auto" data-on="1" title="Auto-update: when a newer release is found, the panel shows a 12 s countdown and then opens the installer. It never fires while you are typing; cancel from the countdown row"></button></span>
+                  <span class="set-val"><button class="sw" type="button" role="switch" aria-checked="true" data-update-toggle="auto" data-on="1" title="Auto-update: when a newer release is found, the panel shows a 12 s countdown and then opens the installer. It never fires while you are typing; click the countdown row to install now, Escape or this switch to cancel"></button></span>
                 </div>
                 <div class="season-actions">
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>

@@ -25,6 +25,9 @@
     startedAt: 0,
     endedAt: 0,          // congelado al cerrar la carrera: el reloj no sigue
     lastErrorAt: 0,
+    cleanStreak: 0,      // teclas correctas seguidas en esta carrera
+    cleanBest: 0,        // mejor racha de la tanda (sobrevive al reset de carrera)
+    streakPulseAt: 0,    // ultimo hito de 25 limpio: el panel lo celebra una vez
     lastLogAt: 0,
     lastKeyAt: 0,        // ultima tecla enviada (aunque el juego no la acepte)
     lastAcceptedAt: 0,   // ultima tecla que el juego conto: la que evita la DQ
@@ -640,6 +643,8 @@
     session.startedAt = 0;
     session.endedAt = 0;
     session.lastErrorAt = 0;
+    session.cleanStreak = 0;
+    session.streakPulseAt = 0;
     session.lastLogAt = 0;
     session.lastKeyAt = 0;
     session.lastAcceptedAt = 0;
@@ -660,6 +665,20 @@
     session.clockDone = false;
     session.lastHudWpm = 0;
     session.lastProgress = null;
+  }
+
+  // Cada tecla que manda el bucle de carrera pasa por aqui: una correcta alarga
+  // la racha limpia, una erronea la devuelve a cero. Cada 25 seguidas se marca
+  // el hito para que el panel lo celebre una sola vez (sin temporizador propio).
+  function noteKeystroke(ok) {
+    if (!ok) {
+      session.cleanStreak = 0;
+      return session.cleanStreak;
+    }
+    session.cleanStreak++;
+    if (session.cleanStreak > session.cleanBest) session.cleanBest = session.cleanStreak;
+    if (session.cleanStreak % 25 === 0) session.streakPulseAt = Date.now();
+    return session.cleanStreak;
   }
 
   // Formula exacta del cliente (dist/site/js/ra.js, citada por el userscript

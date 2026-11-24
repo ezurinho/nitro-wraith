@@ -931,6 +931,7 @@
         session.correct++;
         expectedAfter = freshIndex + 1;
       }
+      noteKeystroke(!fail);
 
       logProgress();
 

@@ -95,6 +95,7 @@
                   <div class="row"><span>target</span><b data-field="target">—</b></div>
                   <div class="row" title="Recent pace and accuracy: WPM and accuracy over the last 6 seconds of accepted keys, independent of the session averages"><span>recent</span><b class="recent-pair"><i data-field="liveNow">—</i><i class="recent-acc" data-field="liveNowAcc">—</i></b></div>
                   <div class="row race-row secondary" title="Race progress"><span>race</span><b data-field="progress">—</b></div>
+                  <div class="row streak-row" style="display:none" title="Clean streak: correct keys in a row this race. A mistake resets it, and every 25 clean keys the row pulses once"><span>clean</span><b data-field="streak">×0</b></div>
                   <div class="row"><span>races</span><b data-field="races">0</b></div>
                   <div class="row day-xp-row" title="XP the game awarded today, read from the same daily summary as the 7-day card"><span>today</span><b data-field="dayXp">—</b></div>
                   <div class="row tanda-row" title="Average of every measured race in this session, not just the ones in the list"><span>session</span><b data-field="tanda">—</b></div>
@@ -513,11 +514,11 @@
                 <div class="card-h"><span class="card-t">Updates</span><span class="card-s">GitHub releases</span></div>
                 <div class="rows">
                   <div class="row" title="Last public update check: the last result, its error and the next retry"><span>check</span><b data-field="upInfo">—</b></div>
-                  <button class="row up-auto-row" type="button" data-act="updateCancel" title="Auto-update is counting down. Click to cancel; the badge stays so you can install when you want"><span>install</span><b data-field="upAuto">—</b></button>
+                  <button class="row up-auto-row" type="button" data-act="updateCancel" title="Auto-update is counting down. Click the row to hand the release to the installer now, or press Escape to cancel; the badge stays so you can install later"><span>install</span><b data-field="upAuto">—</b></button>
                 </div>
                 <div class="set-row">
                   <span class="set-lbl">Auto-update<i>install a newer build when no race is running</i></span>
-                  <span class="set-val"><button class="sw" type="button" role="switch" aria-checked="true" data-update-toggle="auto" data-on="1" title="Auto-update: when a newer release is found, the panel shows a 12 s countdown and then opens the installer. It never fires while you are typing; cancel from the countdown row"></button></span>
+                  <span class="set-val"><button class="sw" type="button" role="switch" aria-checked="true" data-update-toggle="auto" data-on="1" title="Auto-update: when a newer release is found, the panel shows a 12 s countdown and then opens the installer. It never fires while you are typing; click the countdown row to install now, Escape or this switch to cancel"></button></span>
                 </div>
                 <div class="season-actions">
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>

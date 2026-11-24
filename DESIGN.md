@@ -55,6 +55,10 @@ the mono stack when they change at 4 Hz so digits do not reflow.
   adds the short entrances and hover feedback, **full** (default) also runs the
   ambient loops while a race is live.
 - Entrances and feedback: durations ≤ 250 ms; `transform`/`opacity` only.
+- Feedback that marks a real event: the Live clean streak pulses on every 25
+  clean keys (0.24 s) and the result row flashes once (0.24 s) when a closed
+  race publishes its place and prize. Both are standard/full only and vanish
+  under reduced motion.
 - Ambient loops (header scan, status ring, mark glow, Live equalizer, progress
   sheen) are the only long animations. They run only with
   `data-state="running"` and `data-motion="full"`, never on an idle panel.
@@ -91,7 +95,7 @@ applicable and are listed as such, not silently ignored.
 | F8 no invented metrics | Enforced by product rule: all values come from the session |
 | F12–F14 hero / word count / container | Not applicable: no landing page |
 | F15 CSS stamp | Not applicable: generated panel sheet, not an exported page |
-| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (405 checks + 24 visual baselines) |
+| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (407 checks + 24 visual baselines) |
 
 ### Floor audit
 

@@ -846,13 +846,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
 
   // Auto-instalacion: 12 s de cuenta, solo sin carrera tecleando y con la
   // ventana visible. El dry-run devuelve la URL en vez de navegar, asi que la
-  // prueba comprueba todo el recorrido sin salir de la pagina.
+  // prueba comprueba todo el recorrido sin salir de la pagina, incluido el
+  // clic "instalar ahora" y el Escape que cancela.
   const newerVersion = scriptVersion.replace(/(\d+)$/, (digits) => String(Number(digits) + 1));
   const autoUpdateLab = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     const d = w.__ntaDebug;
     const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
-    if (!d || !d.armAutoUpdate || !d.autoUpdate) return { has: false };
+    if (!d || !d.armAutoUpdate || !d.autoUpdate || !d.installAutoUpdateNow) return { has: false };
     const row = s.querySelector('[data-act="updateCancel"]');
     const badge = s.querySelector('[data-field="upAuto"]');
     const toggle = s.querySelector('[data-update-toggle="auto"]');
@@ -880,16 +881,28 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const checked = toggle.getAttribute('aria-checked');
       const half = d.tickAutoUpdate(6000);
       const halfText = badge.textContent;
-      w.__ntaAutoUpdateDryRun = true;
-      const fired = d.tickAutoUpdate(20000);
-      const last = d.lastAutoUpdate();
+      // "Instalar ahora": un clic en la fila entrega la release ya, sin esperar.
+      row.click();
+      const clicked = d.lastAutoUpdate();
+      const clickPhase = d.autoUpdate().phase;
+      const clickText = badge.textContent;
+      // Con una carrera tecleando la cuenta se pausa sola.
       d.patchSession({ typing: true });
       d.setAutoUpdate(true);
       const typingArm = d.armAutoUpdate();
       const typingText = badge.textContent;
       d.patchSession({ typing: false });
       d.setAutoUpdate(true);
+      // Escape cancela sin instalar: el aviso sigue y el reintento espera 30 min.
       d.armAutoUpdate();
+      row.focus();
+      row.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      const escPhase = d.autoUpdate().phase;
+      const escRow = badge.textContent;
+      // Si nadie toca nada, la cuenta termina e instala sola.
+      d.armAutoUpdate();
+      const fired = d.tickAutoUpdate(20000);
+      const last = d.lastAutoUpdate();
       const cancelled = d.cancelAutoUpdate();
       const afterCancel = d.autoUpdate();
       return {
@@ -899,9 +912,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         armedPhase: armed.phase, armedLeft: armed.leftMs, armedVersion: armed.version,
         armedText, armedFlag, armedShown, toggleOn, checked,
         halfLeft: half.leftMs, halfText, halfPhase: half.phase,
+        clickPhase, clickText,
+        clickUrl: clicked && clicked.url, clickVersion: clicked && clicked.version,
+        typingPhase: typingArm.phase, typingText,
+        escPhase, escRow,
         firedPhase: fired.phase, installed: fired.installed,
         lastUrl: last && last.url, lastVersion: last && last.version, lastAt: last && last.at,
-        typingPhase: typingArm.phase, typingText,
         cancelledPhase: cancelled.phase, afterCancelPhase: afterCancel.phase,
       };
     } finally {
@@ -911,7 +927,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       d.setAutoUpdate(true);
     }
   })()`, true);
-  check('auto-update counts down, installs the release and respects typing and cancel',
+  check('auto-update counts down, installs now on click, fires on time and respects typing and Escape',
     autoUpdateLab.has === true && !autoUpdateLab.missing
       && autoUpdateLab.offPhase === 'off' && autoUpdateLab.offEnabled === false
       && autoUpdateLab.offArmPhase === 'off' && autoUpdateLab.offToggle === '0'
@@ -919,19 +935,25 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && autoUpdateLab.armedPhase === 'armed'
       && autoUpdateLab.armedVersion === newerVersion
       && autoUpdateLab.armedLeft > 10500 && autoUpdateLab.armedLeft <= 12000
-      && /in \d+s · cancel$/.test(autoUpdateLab.armedText)
+      && /· install in \d+s$/.test(autoUpdateLab.armedText)
       && autoUpdateLab.armedFlag === 'armed' && autoUpdateLab.armedShown === true
       && autoUpdateLab.toggleOn === '1' && autoUpdateLab.checked === 'true'
       && autoUpdateLab.halfPhase === 'armed'
       && autoUpdateLab.halfLeft > 4500 && autoUpdateLab.halfLeft <= 6000
-      && /in \d+s · cancel$/.test(autoUpdateLab.halfText)
+      && /· install in \d+s$/.test(autoUpdateLab.halfText)
+      && autoUpdateLab.clickPhase === 'waiting'
+      && autoUpdateLab.clickUrl === updateDownload
+      && autoUpdateLab.clickVersion === newerVersion
+      && /· paused$/.test(autoUpdateLab.clickText)
+      && autoUpdateLab.typingPhase === 'waiting'
+      && /· paused$/.test(autoUpdateLab.typingText)
+      && autoUpdateLab.escPhase === 'waiting'
+      && /· paused$/.test(autoUpdateLab.escRow)
       && autoUpdateLab.firedPhase === 'waiting'
       && autoUpdateLab.installed === updateDownload
       && autoUpdateLab.lastUrl === updateDownload
       && autoUpdateLab.lastVersion === newerVersion
       && typeof autoUpdateLab.lastAt === 'number'
-      && autoUpdateLab.typingPhase === 'waiting'
-      && /· paused$/.test(autoUpdateLab.typingText)
       && autoUpdateLab.cancelledPhase === 'waiting'
       && autoUpdateLab.afterCancelPhase === 'waiting', autoUpdateLab);
 
@@ -4329,6 +4351,110 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && (spark.points || '').split(' ').length >= 2
       && (spark.area || '').startsWith('M0,24 L')
       && (spark.aria || '').includes('Accuracy model delta history'), spark);
+
+  // Racha limpia y destello de cierre: los dos viven en la tarjeta Live. El
+  // banco usa el mismo noteKeystroke del bucle y el mismo applyRaceResult del
+  // evento del juego; las animaciones se leen del computed style real.
+  const streakFlash = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    if (!d || !d.keyStroke || !d.applyRaceResult) return { has: false };
+    const panel = s.querySelector('.panel');
+    const streakRow = s.querySelector('.streak-row');
+    const streakBadge = s.querySelector('[data-field="streak"]');
+    const resultRow = s.querySelector('.result-row');
+    const resultBadge = s.querySelector('[data-field="result"]');
+    if (!streakRow || !streakBadge || !resultRow || !resultBadge) return { has: true, missing: true };
+    const frame = () => new Promise((resolve) => w.requestAnimationFrame(() => w.requestAnimationFrame(resolve)));
+    const calmBtn = s.querySelector('[data-motion-btn="calm"]');
+    const fullBtn = s.querySelector('[data-motion-btn="full"]');
+    // El premio sembrado suma al resumen de hoy por la clave de esta ventana;
+    // el banco fotografia todas las partes del dia y las restaura al salir.
+    const dayPrefixes = ['ntQueue:todayPart:', 'ntQueue:dayHist:'];
+    const dayKeys = () => Object.keys(w.localStorage).filter((key) => dayPrefixes.some((prefix) => key.startsWith(prefix)));
+    const daySaved = {};
+    for (const key of dayKeys()) daySaved[key] = w.localStorage.getItem(key);
+    d.patchSession({ typing: true });
+    d.keyStroke(false);
+    d.paint(true);
+    const emptyShown = w.getComputedStyle(streakRow).display !== 'none';
+    d.keyStroke(true); d.keyStroke(true); d.keyStroke(true);
+    d.paint(true);
+    const three = { now: d.cleanStreak().now, text: streakBadge.textContent, shown: w.getComputedStyle(streakRow).display !== 'none' };
+    d.keyStroke(false);
+    d.paint(true);
+    const miss = { now: d.cleanStreak().now, shown: w.getComputedStyle(streakRow).display !== 'none' };
+    for (let i = 0; i < 25; i++) d.keyStroke(true);
+    d.paint(true);
+    await frame();
+    const milestone = d.cleanStreak();
+    const pulse = { cls: streakBadge.classList.contains('nt-pulse'), anim: w.getComputedStyle(streakBadge).animationName };
+    if (calmBtn) calmBtn.click();
+    const calmFlag = panel.dataset.motion;
+    for (let i = 0; i < 25; i++) d.keyStroke(true);
+    d.paint(true);
+    await frame();
+    const calmPulse = w.getComputedStyle(streakBadge).animationName;
+    if (fullBtn) fullBtn.click();
+    const fullFlag = panel.dataset.motion;
+    d.patchSession({ typing: false });
+    d.seedHistory([]);
+    d.paint(true);
+    d.seedRaceCounters({ chars: 320, errors: 2, correct: 318, nitroChars: 0, startedAt: Date.now() - 60000 });
+    d.recordRace();
+    d.paint(true);
+    const beforeResult = {
+      shown: w.getComputedStyle(resultRow).display !== 'none',
+      flash: resultRow.classList.contains('nt-flash'),
+    };
+    d.applyRaceResult({ place: 2, cash: 450, xp: 560 });
+    d.paint(true);
+    await frame();
+    const flash = {
+      shown: w.getComputedStyle(resultRow).display !== 'none',
+      cls: resultRow.classList.contains('nt-flash'),
+      anim: w.getComputedStyle(resultRow).animationName,
+      text: resultBadge.textContent,
+      title: resultRow.getAttribute('title'),
+    };
+    if (calmBtn) calmBtn.click();
+    d.seedRaceCounters({ chars: 310, errors: 1, correct: 309, nitroChars: 0, startedAt: Date.now() - 60000 });
+    d.recordRace();
+    d.applyRaceResult({ place: 1, cash: 480, xp: 600 });
+    d.paint(true);
+    await frame();
+    const calmFlash = w.getComputedStyle(resultRow).animationName;
+    if (fullBtn) fullBtn.click();
+    d.seedHistory([]);
+    d.patchSession({ typing: false });
+    for (const key of dayKeys()) {
+      if (!(key in daySaved)) w.localStorage.removeItem(key);
+    }
+    for (const [key, value] of Object.entries(daySaved)) w.localStorage.setItem(key, value);
+    d.panelRefresh();
+    return {
+      has: true, emptyShown, three, miss, milestone, pulse, calmFlag, calmPulse, fullFlag,
+      beforeResult, flash, calmFlash,
+    };
+  })()`, true);
+  check('clean-keystroke streak tracks the live race, pulses at 25 and goes still in calm',
+    streakFlash.has === true && !streakFlash.missing
+      && streakFlash.emptyShown === false
+      && streakFlash.three.now === 3 && streakFlash.three.text === '×3' && streakFlash.three.shown === true
+      && streakFlash.miss.now === 0 && streakFlash.miss.shown === false
+      && streakFlash.milestone.now === 25 && streakFlash.milestone.best === 25
+      && streakFlash.milestone.pulseAt > 0
+      && streakFlash.pulse.cls === true && streakFlash.pulse.anim === 'nt-streak'
+      && streakFlash.calmFlag === 'calm' && streakFlash.calmPulse === 'none'
+      && streakFlash.fullFlag === 'full', streakFlash);
+  check('a closed race flashes the result row once, and calm motion keeps it still',
+    streakFlash.beforeResult.shown === false && streakFlash.beforeResult.flash === false
+      && streakFlash.flash.shown === true && streakFlash.flash.cls === true
+      && streakFlash.flash.anim === 'nt-flash'
+      && /2nd · \+\$450 · \+560 xp/.test(streakFlash.flash.text)
+      && /read from the game's own race result/.test(streakFlash.flash.title || '')
+      && streakFlash.calmFlash === 'none', streakFlash);
 
   // Auditoria de los tres topes en sus bordes: por debajo, justo en el tope y
   // por encima. Se mueven los contadores de la tanda con el gancho del banco y
