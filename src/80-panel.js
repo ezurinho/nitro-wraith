@@ -1650,6 +1650,9 @@
     supported: typingLocksAvailable(),
     held: typingLockHeld,
   });
+  window.__ntaDebug.acquireTypingLock = (options = {}) => acquireTypingLock(options);
+  window.__ntaDebug.claimTabLease = (reason = '', force = false) =>
+    claimTabLease(String(reason || ''), Boolean(force));
   window.__ntaDebug.dropTabLease = () => releaseTabLease(true);
   // La eleccion de copia, sobre un registro de mentira: el harness comprueba
   // que con seis copias el turno no cambia solo cuando el registro se recorta.

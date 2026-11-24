@@ -3,6 +3,8 @@
 > Generado: 2026-11-24 · Profundidad: deep · Fuentes: 33 · Revisión: solo lectura
 >
 > **Addendum de remediación:** R1 quedó corregido en la rama `fix/release-workflow-injection` con validación semver y paso por entorno; R9 quedó corregido en header, README y documentación. R2 y R3 siguen abiertos. La nota se mantiene en **6.6/10** hasta una nueva auditoría de esos dos críticos.
+>
+> **Segundo addendum (8.14.80):** la parte fail-open de R3 quedó corregida: Web Locks no disponible y errores de almacenamiento del lease ahora devuelven `false`, la cola espera y el rescate no marca turno sin lease. La parte no atómica del lease sigue abierta.
 
 ## TL;DR
 

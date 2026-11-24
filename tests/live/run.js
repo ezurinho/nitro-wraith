@@ -7361,6 +7361,39 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     dailyRestored.dailyRaceLimit === 37 && dailyRestored.dailyXpLimit === 44000,
     { dailyRaceLimit: dailyRestored.dailyRaceLimit, dailyXpLimit: dailyRestored.dailyXpLimit });
 
+  const coordinationFailClosed = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.acquireTypingLock || !d.claimTabLease) return { has: false };
+    const locksDescriptor = Object.getOwnPropertyDescriptor(w.navigator, 'locks');
+    let lockResult = null;
+    let supportedAfter = null;
+    try {
+      Object.defineProperty(w.navigator, 'locks', { value: undefined, configurable: true });
+      supportedAfter = d.typingLock().supported;
+      lockResult = await d.acquireTypingLock();
+    } finally {
+      if (locksDescriptor) Object.defineProperty(w.navigator, 'locks', locksDescriptor);
+      else delete w.navigator.locks;
+    }
+    const originalGetItem = w.Storage.prototype.getItem;
+    let leaseResult = null;
+    try {
+      w.Storage.prototype.getItem = function (key) {
+        if (String(key) === 'nta:tabLease') throw new w.DOMException('blocked', 'SecurityError');
+        return originalGetItem.call(this, key);
+      };
+      leaseResult = d.claimTabLease('fail-closed test');
+    } finally {
+      w.Storage.prototype.getItem = originalGetItem;
+    }
+    return { has: true, supportedAfter, lockResult, leaseResult };
+  })()`, true);
+  check('coordination fails closed when Web Locks or lease storage are unavailable',
+    coordinationFailClosed.has && coordinationFailClosed.supportedAfter === false
+      && coordinationFailClosed.lockResult === false && coordinationFailClosed.leaseResult === false,
+    coordinationFailClosed);
+
   // Dos pestañas REALES del mismo perfil. El guardia local elige una copia por
   // ventana; el lease de localStorage elige una pestaña. Solo la que lo tiene
   // puede escribir, mandar stickers o abrir/reclamar; la otra espera y releva.

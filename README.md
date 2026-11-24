@@ -231,7 +231,8 @@ The optional AFK keep-alive can reduce the freeze risk with near-silent local
 audio, but it is disabled by default and cannot guarantee that a browser,
 Energy Saver or a muted tab will keep running. The race loop also recovers a Web
 Lock left by a frozen tab and sends a watchdog key if a live race goes too long
-without an accepted character.
+without an accepted character. If Web Locks or the cross-tab lease storage are
+unavailable, automation waits instead of typing without coordination.
 
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never
