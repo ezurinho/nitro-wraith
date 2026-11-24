@@ -176,11 +176,18 @@
     scale: 100,
     highContrast: false,
     raceFocus: true,
+    motion: 'full',
   });
   const RGB_SPEEDS = [0.5, 1, 2];
   const RGB_RACE_MODES = ['static', 'border', 'full'];
   const PANEL_DENSITIES = ['comfortable', 'compact'];
   const PANEL_SCALES = [100, 115];
+  // Tres niveles de movimiento: calm solo deja transiciones de color, standard
+  // conserva entradas y hoveres sin bucles, full anade los bucles ambientales
+  // (escáner de la cabecera, anillo del estado, ecualizador de la tarjeta Live).
+  // El sistema operativo manda por encima de los tres: prefers-reduced-motion
+  // apaga tambien full.
+  const PANEL_MOTIONS = ['calm', 'standard', 'full'];
 
   function normalizeVisualColor(value, fallback) {
     const color = String(value || '').trim().toLowerCase();
@@ -202,6 +209,7 @@
       scale,
       highContrast: source.highContrast === true,
       raceFocus: source.raceFocus !== false,
+      motion: PANEL_MOTIONS.includes(source.motion) ? source.motion : VISUAL_DEFAULTS.motion,
     };
   }
 

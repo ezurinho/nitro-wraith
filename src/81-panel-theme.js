@@ -23,6 +23,7 @@
     root.style.setProperty('--nt-rgb-title-duration', `${6 / speed}s`);
     if (root.dataset.rgbRace !== visualPrefs.rgbRaceMode) root.dataset.rgbRace = visualPrefs.rgbRaceMode;
     if (root.dataset.density !== visualPrefs.density) root.dataset.density = visualPrefs.density;
+    if (root.dataset.motion !== visualPrefs.motion) root.dataset.motion = visualPrefs.motion;
     if (root.dataset.scale !== String(visualPrefs.scale)) root.dataset.scale = String(visualPrefs.scale);
     if (root.dataset.contrast !== (visualPrefs.highContrast ? 'high' : 'normal')) {
       root.dataset.contrast = visualPrefs.highContrast ? 'high' : 'normal';

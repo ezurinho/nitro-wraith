@@ -794,6 +794,19 @@
       button.dataset.active = selected ? '1' : '0';
     }
 
+    // Nivel de movimiento: el mismo segmentado que el perfil de ritmo. El
+    // indice mueve el deslizador; el texto de cada boton solo lo cuenta.
+    const motionSeg = panel.refs.motionSeg;
+    if (motionSeg) {
+      const index = Math.max(0, PANEL_MOTIONS.indexOf(visualPrefs.motion));
+      const value = String(index);
+      if (motionSeg.dataset.index !== value) motionSeg.dataset.index = value;
+      for (const button of motionSeg.querySelectorAll('[data-motion-btn]')) {
+        const selected = button.dataset.motionBtn === visualPrefs.motion;
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      }
+    }
+
     // Pantalla: densidad, escala, contraste y foco de carrera. Los dos selects y
     // los dos interruptores comparten el mismo modelo que el RGB Lab.
     if (panel.refs.panelDensity) panel.refs.panelDensity.value = visualPrefs.density;
@@ -1128,6 +1141,16 @@
   window.__ntaDebug.updateState = () => updateState();
   window.__ntaDebug.updateBusy = () => updateChecking;
   window.__ntaDebug.checkForUpdate = (force) => checkForUpdate(Boolean(force));
+  window.__ntaDebug.autoUpdate = () => autoUpdateState();
+  window.__ntaDebug.setAutoUpdate = (on) => setAutoUpdate(Boolean(on));
+  window.__ntaDebug.armAutoUpdate = () => {
+    autoUpdateBlockedUntil = 0;
+    if (!autoUpdateArm) armAutoUpdate();
+    return autoUpdateState();
+  };
+  window.__ntaDebug.tickAutoUpdate = (advanceMs = 0) => autoUpdateTick(Number(advanceMs) || 0);
+  window.__ntaDebug.cancelAutoUpdate = () => cancelAutoUpdate('user');
+  window.__ntaDebug.lastAutoUpdate = () => window.__ntaAutoUpdateLast || null;
   window.__ntaDebug.live = () => liveSituation();
   window.__ntaDebug.calibrationAuto = () => CONFIG.calibration.auto === true;
   window.__ntaDebug.calibrationHealth = () => ({
@@ -2736,6 +2759,10 @@
       cfgNote: pick('[data-field="cfgNote"]'),
       up: pick('[data-field="up"]'),
       upInfo: pick('[data-field="upInfo"]'),
+      upAuto: pick('[data-field="upAuto"]'),
+      updateAuto: pick('[data-update-toggle="auto"]'),
+      updateCancel: pick('[data-act="updateCancel"]'),
+      motionSeg: pick('[data-field="motionSeg"]'),
       updateCheck: pick('[data-act="updateCheck"]'),
       afkFreezeReset: pick('[data-act="afkFreezeReset"]'),
       nitroStrategy: pick('[data-field="nitroStrategy"]'),
@@ -2841,6 +2868,22 @@
           setText(button, 'check now');
           button.disabled = false;
         }, 1400);
+      });
+    }
+
+    // Auto-instalacion: el interruptor vive en la tarjeta Updates y el
+    // contador es el boton que cancela. Ningun aviso de version se convierte en
+    // instalacion sin pasar por aqui.
+    if (panel.refs.updateAuto) {
+      panel.refs.updateAuto.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setAutoUpdate(autoUpdateEnabled() !== true);
+      });
+    }
+    if (panel.refs.updateCancel) {
+      panel.refs.updateCancel.addEventListener('click', (event) => {
+        event.stopPropagation();
+        cancelAutoUpdate('user');
       });
     }
 
@@ -3243,6 +3286,9 @@
 
         if (chip.dataset.pace) {
           setPaceProfile(chip.dataset.pace);
+        } else if (chip.dataset.motionBtn) {
+          setVisualPref('motion', chip.dataset.motionBtn);
+          paintVisualControls();
         } else if (chip.dataset.visualToggle) {
           const key = chip.dataset.visualToggle;
           setVisualPref(key, key === 'highContrast' ? visualPrefs.highContrast !== true : visualPrefs.raceFocus === false);
@@ -4464,6 +4510,10 @@
     if (panel.refs.update) {
       paintUpdateBadge(panel.refs.update);
       paintUpdateHealth();
+      // La cuenta atras de auto-instalacion se rearma sola cuando vuelve a
+      // haber un hueco sin carrera; con el panel en segundo plano no corre.
+      maybeArmAutoUpdate();
+      paintAutoUpdate();
       if (panel.refs.update.dataset.bound !== '1') {
         panel.refs.update.dataset.bound = '1';
         panel.refs.update.addEventListener('pointerdown', (event) => event.stopPropagation());

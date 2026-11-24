@@ -219,6 +219,138 @@
         }
         @keyframes nt-rgb-title { to { background-position: 300% 0; } }
 
+        /* ---------- movimiento ------------------------------------------------ */
+        /* Tres niveles en data-motion. full mantiene los bucles ambientales que
+           dan vida al panel sin tocar el layout: un escaner tenue en la cabecera
+           mientras se escribe, un anillo que late en el punto de estado, el
+           ecualizador de la tarjeta Live, el reflejo de la barra de carrera y
+           las muestras de tema. standard conserva entradas y hoveres pero apaga
+           esos bucles; calm solo deja cambios de color. Todo se apoya en
+           transform, opacity y background-position: nada de width/height/top. */
+        @keyframes nt-scan {
+          from { transform: translateX(-120%); }
+          to   { transform: translateX(340%); }
+        }
+        @keyframes nt-ring {
+          0%   { transform: scale(.55); opacity: .8; }
+          70%, 100% { transform: scale(2.7); opacity: 0; }
+        }
+        @keyframes nt-glow {
+          0%, 100% { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--acc) 45%, transparent)); }
+          50%      { filter: drop-shadow(0 0 8px color-mix(in srgb, var(--acc) 85%, transparent)); }
+        }
+        @keyframes nt-eq {
+          0%, 100% { transform: scaleY(.3); }
+          50%      { transform: scaleY(1); }
+        }
+        @keyframes nt-warm {
+          0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acc) 0%, transparent); }
+          50%      { box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 28%, transparent); }
+        }
+
+        /* Escaner: una banda de luz cruza la cabecera solo mientras hay carrera.
+           Va en ::before (::after ya es la linea divisoria) y no captura clics. */
+        .head::before {
+          content: '';
+          position: absolute;
+          left: 0; top: 0; bottom: 0;
+          width: 34%;
+          background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 22%, transparent), transparent);
+          transform: translateX(-120%);
+          opacity: 0;
+          pointer-events: none;
+        }
+        .panel[data-state="running"] .head::before { opacity: 1; animation: nt-scan 3.4s ease-in-out infinite; }
+
+        /* Anillo del punto de estado: late hacia fuera al ritmo del pulso. */
+        .head .dot { position: relative; }
+        .head .dot::after {
+          content: '';
+          position: absolute;
+          inset: -3px;
+          border-radius: 50%;
+          border: 1px solid color-mix(in srgb, var(--acc) 70%, transparent);
+          opacity: 0;
+          pointer-events: none;
+        }
+        .panel[data-state="running"] .head .dot::after { animation: nt-ring 1.8s ease-out infinite; }
+
+        /* La marca respira: un halo que sube y baja muy despacio. */
+        .mark svg { animation: nt-glow 5.2s ease-in-out infinite; }
+
+        /* Ecualizador de la tarjeta Live: cinco barras que siguen al ritmo. */
+        .livedots { display: inline-flex; align-items: flex-end; gap: 2px; height: 9px; margin-left: 2px; }
+        .livedots i {
+          width: 2px; height: 9px; border-radius: 1px;
+          background: currentColor;
+          transform: scaleY(.3);
+          transform-origin: 50% 100%;
+          opacity: .5;
+        }
+        .panel[data-state="running"] .livedots i { opacity: .95; animation: nt-eq 1s ease-in-out infinite; }
+        .panel[data-state="running"] .livedots i:nth-child(2) { animation-delay: -.72s; }
+        .panel[data-state="running"] .livedots i:nth-child(3) { animation-delay: -.38s; }
+        .panel[data-state="running"] .livedots i:nth-child(4) { animation-delay: -.86s; }
+        .panel[data-state="running"] .livedots i:nth-child(5) { animation-delay: -.18s; }
+        .panel[data-state="paused"] .livedots i { color: var(--warn); }
+
+        /* Reflejo de la barra de carrera: ademas del brillo de la vista Live. */
+        .race-line { position: relative; }
+        .race-line::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent);
+          transform: translateX(-100%);
+          opacity: 0;
+          pointer-events: none;
+        }
+        .panel[data-state="running"] .race-line::after { opacity: 1; animation: nt-sheen 1.9s ease-in-out infinite; }
+
+        /* Micro-feedback de puntero: sube un pixel y vuelve. Solo con hover real,
+           para que en tactil no se quede pegado. */
+        @media (hover: hover) {
+          .card:hover { transform: translateY(-1px); }
+          .act:hover, .toggle:hover, .rail-btn:hover, .gear:hover, .iconbtn:hover { transform: translateY(-1px); }
+          .gear svg { transition: transform .32s cubic-bezier(.34, 1.4, .5, 1); }
+          .gear:hover svg { transform: rotate(14deg); }
+          .log-item:hover, .hist-row:hover { transform: translateX(2px); }
+          .theme[aria-pressed="true"] i { animation: nt-glow 3.6s ease-in-out infinite; }
+        }
+        .act:active, .toggle:active, .rail-btn:active, .gear:active { transform: translateY(0) scale(.97); }
+
+        /* Un aviso de version pinta el borde de la tarjeta Updates; el
+           contador de instalacion lo enciende por completo. */
+        .panel[data-update="new"] .update-card { border-color: color-mix(in srgb, var(--acc) 40%, transparent); animation: nt-warm 2.4s ease-in-out infinite; }
+        .panel[data-update="armed"] .update-card { border-color: var(--acc); box-shadow: 0 0 22px -12px var(--acc), inset 0 0 18px -14px var(--acc); }
+        .row.up-auto-row { display: none; }
+        button.row.up-auto-row { appearance: none; width: 100%; margin: 0; border: 0; border-bottom: 1px solid rgba(255, 255, 255, .03); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+        .panel[data-update="armed"] .row.up-auto-row,
+        .panel[data-update="waiting"] .row.up-auto-row { display: flex; }
+        .up-auto-row b { color: var(--acc); font-variant-numeric: tabular-nums; }
+        .panel[data-update="waiting"] .up-auto-row b { color: var(--ink-warn); }
+        .up-auto-row { cursor: pointer; }
+        .up-auto-row:hover b { text-decoration: underline dotted; }
+
+        /* standard y calm apagan los bucles ambientales; calm apaga tambien las
+           entradas. Los tres respetan prefers-reduced-motion, que va aparte. */
+        .panel[data-motion="standard"] .head::before,
+        .panel[data-motion="standard"] .head .dot::after,
+        .panel[data-motion="standard"] .mark svg,
+        .panel[data-motion="standard"] .livedots i,
+        .panel[data-motion="standard"] .race-line::after,
+        .panel[data-motion="standard"] .theme[aria-pressed="true"] i,
+        .panel[data-motion="standard"][data-update="new"] .update-card,
+        .panel[data-motion="calm"] .head::before,
+        .panel[data-motion="calm"] .head .dot::after,
+        .panel[data-motion="calm"] .mark svg,
+        .panel[data-motion="calm"] .livedots i,
+        .panel[data-motion="calm"] .race-line::after,
+        .panel[data-motion="calm"] .theme[aria-pressed="true"] i,
+        .panel[data-motion="calm"][data-update="new"] .update-card,
+        .panel[data-motion="calm"] .views .card,
+        .panel[data-motion="calm"] .views .view { animation: none; }
+
         /* ---------- cabecera ------------------------------------------------- */
         .head { position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; cursor: grab; touch-action: none; }
         .head::after {
@@ -675,6 +807,13 @@
         .seg-btn { all: unset; position: relative; z-index: 1; padding: 5px 0; text-align: center; border-radius: 7px; cursor: pointer; font: 700 9px/1 var(--font-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); transition: color .2s ease; }
         .seg-btn:hover { color: var(--acc-2); }
         .seg[data-index="0"] .seg-btn[data-pace="soft"], .seg[data-index="1"] .seg-btn[data-pace="balanced"], .seg[data-index="2"] .seg-btn[data-pace="fast"] { color: var(--acc); }
+        /* Mismo segmentado para el nivel de movimiento; el indice mueve el
+           deslizador y el color marca el elegido. */
+        .seg.motion-seg { margin-top: 6px; }
+        .set-lbl.motion-lbl { margin-top: 9px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .03); }
+        .seg.motion-seg[data-index="0"] .seg-btn[data-motion-btn="calm"],
+        .seg.motion-seg[data-index="1"] .seg-btn[data-motion-btn="standard"],
+        .seg.motion-seg[data-index="2"] .seg-btn[data-motion-btn="full"] { color: var(--acc); }
 
         .sld { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 2px 0 0; background: transparent; cursor: pointer; }
         .sld::-webkit-slider-runnable-track { height: 4px; border-radius: 99px; background: linear-gradient(90deg, var(--acc) 0 var(--fill, 0%), rgba(255, 255, 255, .1) var(--fill, 0%) 100%); }
@@ -1008,6 +1147,8 @@
         @media (prefers-reduced-motion: reduce) {
           .panel, .panel[data-fresh="1"] .card, .view, .stat b.bump, .recent-pair i.bump, .prog::after,
           .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title,
+          .panel .head::before, .panel .head .dot::after, .panel .mark svg, .panel .livedots i,
+          .panel .race-line::after, .panel .theme[aria-pressed="true"] i, .panel .update-card,
           .panel[data-theme="rgb"], .panel[data-theme="rgb"]::after { animation: none !important; }
         }
       `;
