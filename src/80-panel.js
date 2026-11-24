@@ -45,6 +45,17 @@
     if (el.dataset.good !== value) el.dataset.good = value;
   }
 
+  // `hidden` y `data-warn` los repintan el panel y el garaje en cada latido con
+  // el valor que salga del estado. Comparar antes de escribir mantiene el
+  // latido en reposo sin tocar el DOM y deja una sola forma de hacerlo.
+  function setHidden(el, hide) {
+    if (el && el.hidden !== hide) el.hidden = hide;
+  }
+
+  function setWarn(el, value) {
+    if (el && el.dataset.warn !== value) el.dataset.warn = value;
+  }
+
   /* --------------------------------------------------------------------------
    * Ajustes del panel (boton ⚙)
    * ------------------------------------------------------------------------ */
