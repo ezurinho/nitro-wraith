@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.68 — 2026-11-24
+
+- test(live): widen the boot budget for shared CI runners (#7)
+- fix(pace): keep the race drift inside the band the panel shows (#6)
+
 ## 8.14.67 — 2026-11-24
 
 - fix(update): serve updates from releases and harden the panel (#4)
