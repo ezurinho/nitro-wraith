@@ -127,11 +127,29 @@ jobs:
           GH_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
           version="${{ steps.prepare.outputs.VERSION }}"
-          gh gist edit "$GIST_ID" --filename nitro-wraith.user.js nitro-wraith.user.js
-          gh gist edit "$GIST_ID" --filename nitro-wraith.meta.js nitro-wraith.meta.js
-          gh api --method PATCH "gists/$GIST_ID" \
-            -f description="NITRO WRAITH — human-paced Nitro Type userscript $version" \
-            >/dev/null
+          # Un solo PATCH para los dos archivos: dos `gh gist edit` seguidos
+          # chocan con el bloqueo de escritura del gist (HTTP 409) y lo dejan
+          # con el .user.js en una version y el .meta.js en la anterior.
+          node -e '
+            const fs = require("fs");
+            const payload = {
+              description: `NITRO WRAITH \u2014 human-paced Nitro Type userscript ${process.argv[1]}`,
+              files: {
+                "nitro-wraith.user.js": { content: fs.readFileSync("nitro-wraith.user.js", "utf8") },
+                "nitro-wraith.meta.js": { content: fs.readFileSync("nitro-wraith.meta.js", "utf8") },
+              },
+            };
+            fs.writeFileSync("gist-patch.json", JSON.stringify(payload));
+          ' "$version"
+          for attempt in 1 2 3 4; do
+            if gh api --method PATCH "gists/$GIST_ID" --input gist-patch.json >/dev/null; then
+              echo "Gist updated on attempt $attempt."
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          echo "::error::The Gist rejected the update after four attempts."
+          exit 1
 
       - name: Publish release
         if: >
