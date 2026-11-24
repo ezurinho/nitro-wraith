@@ -859,6 +859,46 @@
         .rgb-mode select { min-width: 0; max-width: 58%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, .04); color: var(--ink-2); font: 600 9px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
         .rgb-lab input:focus-visible, .rgb-lab button:focus-visible, .rgb-lab select:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
+        /* ---------- pantalla ------------------------------------------------- */
+        /* Densidad, escala, contraste y foco de carrera son atributos del nodo
+           raiz; el modelo vive en visualPrefs y el CSS hace el resto. */
+        .focus-strip { display: none; align-items: center; gap: 7px; margin: 3px 0 7px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--acc) 8%, transparent); }
+        .panel[data-state="running"][data-focus="on"] .focus-strip { display: flex; }
+        .panel[data-state="running"][data-focus="on"] .account-card { display: none; }
+        .focus-strip b { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 9.5px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); }
+        .focus-state { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--acc); color: #06110b; font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; }
+        .sr-only { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+        .rhythm { margin: 5px 2px 2px; }
+        .rhythm[data-ready="0"] { display: none; }
+        .rhythm-chart { display: block; width: 100%; height: 34px; overflow: visible; }
+        .rhythm-band { fill: color-mix(in srgb, var(--acc) 13%, transparent); }
+        .rhythm-target { stroke: color-mix(in srgb, var(--acc) 50%, transparent); stroke-width: .8; stroke-dasharray: 2 2; }
+        .rhythm-line { fill: none; stroke: var(--acc); stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+        .rhythm-note { margin-top: 2px; font: 600 8.5px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .03em; color: var(--dim); }
+
+        .panel[data-density="compact"] .card { margin-bottom: 6px; padding: 8px; }
+        .panel[data-density="compact"] .views { padding: 8px 9px 9px; }
+        .panel[data-density="compact"] .hero { padding: 7px 0; }
+        .panel[data-density="compact"] .stat b { font-size: 24px; }
+        .panel[data-density="compact"] .v-stats .live-card .rows .row,
+        .panel[data-density="compact"] .v-stats .season-card .rows .row { padding: 5px 7px; }
+
+        @media (min-width: 361px) {
+          .panel[data-scale="115"]:not([data-collapsed="true"]) { width: 380px; }
+        }
+
+        .panel[data-contrast="high"] {
+          --ink: #ffffff;
+          --ink-2: #eef6f1;
+          --dim: #bdcbc3;
+          --dim-2: #b7c6be;
+          --line: rgba(255, 255, 255, .22);
+          --line-strong: rgba(255, 255, 255, .4);
+        }
+        .panel[data-contrast="high"] .card-s,
+        .panel[data-contrast="high"] .row > span { color: var(--ink-2); }
+
         /* ---------- plegado -------------------------------------------------- */
         /* Plegado: cabecera con el LED y el nombre, y los tres botones. Todo lo
            demas fuera, que para eso esta el boton. */

@@ -22,6 +22,13 @@
     root.style.setProperty('--nt-rgb-angle-duration', `${8 / speed}s`);
     root.style.setProperty('--nt-rgb-title-duration', `${6 / speed}s`);
     if (root.dataset.rgbRace !== visualPrefs.rgbRaceMode) root.dataset.rgbRace = visualPrefs.rgbRaceMode;
+    if (root.dataset.density !== visualPrefs.density) root.dataset.density = visualPrefs.density;
+    if (root.dataset.scale !== String(visualPrefs.scale)) root.dataset.scale = String(visualPrefs.scale);
+    if (root.dataset.contrast !== (visualPrefs.highContrast ? 'high' : 'normal')) {
+      root.dataset.contrast = visualPrefs.highContrast ? 'high' : 'normal';
+    }
+    const focus = visualPrefs.raceFocus ? 'on' : 'off';
+    if (root.dataset.focus !== focus) root.dataset.focus = focus;
   }
 
   function paintTheme() {

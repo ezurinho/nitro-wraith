@@ -2131,9 +2131,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     rgbColorB: '#b06bff',
     rgbIntensity: 90,
     rgbRaceMode: 'static',
+    density: 'comfortable',
+    scale: 100,
+    highContrast: false,
+    raceFocus: true,
   });
   const RGB_SPEEDS = [0.5, 1, 2];
   const RGB_RACE_MODES = ['static', 'border', 'full'];
+  const PANEL_DENSITIES = ['comfortable', 'compact'];
+  const PANEL_SCALES = [100, 115];
 
   function normalizeVisualColor(value, fallback) {
     const color = String(value || '').trim().toLowerCase();
@@ -2144,12 +2150,17 @@ All of this only aims at believable statistics. It is your call and your risk.
     const source = value && typeof value === 'object' ? value : {};
     const speed = RGB_SPEEDS.includes(Number(source.rgbSpeed)) ? Number(source.rgbSpeed) : VISUAL_DEFAULTS.rgbSpeed;
     const intensity = clamp(Math.round(Number(source.rgbIntensity) || VISUAL_DEFAULTS.rgbIntensity), 25, 100);
+    const scale = PANEL_SCALES.includes(Number(source.scale)) ? Number(source.scale) : VISUAL_DEFAULTS.scale;
     return {
       rgbSpeed: speed,
       rgbColorA: normalizeVisualColor(source.rgbColorA, VISUAL_DEFAULTS.rgbColorA),
       rgbColorB: normalizeVisualColor(source.rgbColorB, VISUAL_DEFAULTS.rgbColorB),
       rgbIntensity: intensity,
       rgbRaceMode: RGB_RACE_MODES.includes(source.rgbRaceMode) ? source.rgbRaceMode : VISUAL_DEFAULTS.rgbRaceMode,
+      density: PANEL_DENSITIES.includes(source.density) ? source.density : VISUAL_DEFAULTS.density,
+      scale,
+      highContrast: source.highContrast === true,
+      raceFocus: source.raceFocus !== false,
     };
   }
 
@@ -2171,6 +2182,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     visualPrefs = next;
     if (options.persist !== false) saveVisualPrefs();
     if (typeof paintTheme === 'function') paintTheme();
+    if (typeof schedulePanelReclamp === 'function') schedulePanelReclamp();
     return true;
   }
 
@@ -9788,6 +9800,46 @@ function dayCurveAt(at = Date.now()) {
         .rgb-mode select { min-width: 0; max-width: 58%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, .04); color: var(--ink-2); font: 600 9px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
         .rgb-lab input:focus-visible, .rgb-lab button:focus-visible, .rgb-lab select:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
+        /* ---------- pantalla ------------------------------------------------- */
+        /* Densidad, escala, contraste y foco de carrera son atributos del nodo
+           raiz; el modelo vive en visualPrefs y el CSS hace el resto. */
+        .focus-strip { display: none; align-items: center; gap: 7px; margin: 3px 0 7px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--acc) 8%, transparent); }
+        .panel[data-state="running"][data-focus="on"] .focus-strip { display: flex; }
+        .panel[data-state="running"][data-focus="on"] .account-card { display: none; }
+        .focus-strip b { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 9.5px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); }
+        .focus-state { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--acc); color: #06110b; font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; }
+        .sr-only { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+        .rhythm { margin: 5px 2px 2px; }
+        .rhythm[data-ready="0"] { display: none; }
+        .rhythm-chart { display: block; width: 100%; height: 34px; overflow: visible; }
+        .rhythm-band { fill: color-mix(in srgb, var(--acc) 13%, transparent); }
+        .rhythm-target { stroke: color-mix(in srgb, var(--acc) 50%, transparent); stroke-width: .8; stroke-dasharray: 2 2; }
+        .rhythm-line { fill: none; stroke: var(--acc); stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+        .rhythm-note { margin-top: 2px; font: 600 8.5px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .03em; color: var(--dim); }
+
+        .panel[data-density="compact"] .card { margin-bottom: 6px; padding: 8px; }
+        .panel[data-density="compact"] .views { padding: 8px 9px 9px; }
+        .panel[data-density="compact"] .hero { padding: 7px 0; }
+        .panel[data-density="compact"] .stat b { font-size: 24px; }
+        .panel[data-density="compact"] .v-stats .live-card .rows .row,
+        .panel[data-density="compact"] .v-stats .season-card .rows .row { padding: 5px 7px; }
+
+        @media (min-width: 361px) {
+          .panel[data-scale="115"]:not([data-collapsed="true"]) { width: 380px; }
+        }
+
+        .panel[data-contrast="high"] {
+          --ink: #ffffff;
+          --ink-2: #eef6f1;
+          --dim: #bdcbc3;
+          --dim-2: #b7c6be;
+          --line: rgba(255, 255, 255, .22);
+          --line-strong: rgba(255, 255, 255, .4);
+        }
+        .panel[data-contrast="high"] .card-s,
+        .panel[data-contrast="high"] .row > span { color: var(--ink-2); }
+
         /* ---------- plegado -------------------------------------------------- */
         /* Plegado: cabecera con el LED y el nombre, y los tres botones. Todo lo
            demas fuera, que para eso esta el boton. */
@@ -10664,6 +10716,21 @@ function dayCurveAt(at = Date.now()) {
       button.setAttribute('aria-pressed', selected ? 'true' : 'false');
       button.dataset.active = selected ? '1' : '0';
     }
+
+    // Pantalla: densidad, escala, contraste y foco de carrera. Los dos selects y
+    // los dos interruptores comparten el mismo modelo que el RGB Lab.
+    if (panel.refs.panelDensity) panel.refs.panelDensity.value = visualPrefs.density;
+    if (panel.refs.panelScale) panel.refs.panelScale.value = String(visualPrefs.scale);
+    if (panel.refs.cfg) {
+      for (const button of panel.refs.cfg.querySelectorAll('[data-visual-toggle]')) {
+        const on = button.dataset.visualToggle === 'highContrast'
+          ? visualPrefs.highContrast === true
+          : visualPrefs.raceFocus !== false;
+        const value = on ? '1' : '0';
+        if (button.dataset.on !== value) button.dataset.on = value;
+        button.setAttribute('aria-checked', on ? 'true' : 'false');
+      }
+    }
   }
 
   function paintConfig() {
@@ -11081,7 +11148,7 @@ function dayCurveAt(at = Date.now()) {
       if (Number.isFinite(value)) session[key] = Math.max(0, value);
     }
     // El banco tambien puede sembrar el reloj de la carrera y sus muestras.
-    for (const key of ['startedAt', 'endedAt', 'chars', 'nitroChars', 'correct', 'errors', 'pos', 'startIndex', 'lastAcceptedAt']) {
+    for (const key of ['startedAt', 'endedAt', 'chars', 'nitroChars', 'correct', 'errors', 'pos', 'total', 'startIndex', 'lastAcceptedAt']) {
       if (patch[key] === undefined) continue;
       const value = Number(patch[key]);
       if (Number.isFinite(value)) session[key] = Math.max(0, value);
@@ -11105,6 +11172,11 @@ function dayCurveAt(at = Date.now()) {
     if (patch.nitroTries !== undefined) session.nitroTries = Math.max(0, Number(patch.nitroTries) || 0);
     updatePanel();
   };
+
+  // El banco dibuja la grafica de ritmo sin esperar una carrera: vacia las
+  // muestras y añade valores por el mismo camino que el muestreo real.
+  window.__ntaDebug.rhythmReset = () => rhythmReset();
+  window.__ntaDebug.rhythmAdd = (value) => rhythmAdd(Number(value));
 
   // Una carrera registrada por el camino normal (recordRace) y el estado de la
   // eleccion entre copias. Sirven para probar el XP real y el guardia sin
@@ -12255,6 +12327,22 @@ function dayCurveAt(at = Date.now()) {
     }
   }
 
+  let panelReclampTimer = 0;
+
+  // Escala, densidad o un cambio de ventana pueden dejar el panel fuera del
+  // viewport. Se vuelve a la ultima posicion guardada (placeHost la recorta al
+  // tamano nuevo) en vez de arrastrar una posicion que ya no cabe.
+  function schedulePanelReclamp() {
+    if (panelReclampTimer) return;
+    panelReclampTimer = setTimeout(() => {
+      panelReclampTimer = 0;
+      if (!panel.host) return;
+      if (!disk.get(KEYS.panelPosition)) return;
+      restorePosition();
+      savePosition();
+    }, 60);
+  }
+
   function makeDraggable(shadow) {
     const handle = shadow.querySelector('.head');
     if (!handle) return;
@@ -12291,6 +12379,37 @@ function dayCurveAt(at = Date.now()) {
 
     handle.addEventListener('pointerup', stop);
     handle.addEventListener('pointercancel', stop);
+
+    // La cabecera tambien es un control de teclado: flechas mueven 8 px,
+    // Shift+flecha 24 px y Home vuelve a la esquina. Es el mismo camino que el
+    // puntero (placeHost recorta y savePosition persiste), asi que no hay dos
+    // posiciones que se puedan desincronizar.
+    handle.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) return;
+      if (event.target !== handle && event.target.closest
+        && event.target.closest('button, input, select, textarea')) return;
+      event.preventDefault();
+      const rect = panel.host.getBoundingClientRect();
+      const step = event.shiftKey ? 24 : 8;
+      let left = rect.left;
+      let top = rect.top;
+      if (event.key === 'Home') {
+        left = 16;
+        top = 16;
+      } else if (event.key === 'ArrowLeft') left -= step;
+      else if (event.key === 'ArrowRight') left += step;
+      else if (event.key === 'ArrowUp') top -= step;
+      else top += step;
+      // El panel puede ser mas alto que la ventana: el teclado mantiene al
+      // menos la cabecera dentro (44 px) en vez de exigir el panel entero,
+      // que dejaria el modo teclado sin sitio para bajar.
+      const maxLeft = Math.max(0, window.innerWidth - panel.host.offsetWidth);
+      const maxTop = Math.max(0, window.innerHeight - 44);
+      panel.host.style.left = `${clamp(left, 0, maxLeft)}px`;
+      panel.host.style.top = `${clamp(top, 0, maxTop)}px`;
+      panel.host.style.bottom = 'auto';
+      savePosition();
+    });
   }
 
   function createPanel() {
@@ -12390,6 +12509,18 @@ function dayCurveAt(at = Date.now()) {
       views: pick('.views'),
       liveTag: pick('[data-field="liveTag"]'),
       liveAge: pick('[data-field="liveAge"]'),
+      focusStrip: pick('[data-field="focusStrip"]'),
+      focusState: pick('[data-field="focusState"]'),
+      focusNext: pick('[data-field="focusNext"]'),
+      focusAnnounce: pick('[data-field="focusAnnounce"]'),
+      rhythmWrap: pick('[data-field="rhythmWrap"]'),
+      rhythmChart: pick('[data-field="rhythmChart"]'),
+      rhythmLine: pick('[data-field="rhythmLine"]'),
+      rhythmBand: pick('[data-field="rhythmBand"]'),
+      rhythmTarget: pick('[data-field="rhythmTarget"]'),
+      rhythmNote: pick('[data-field="rhythmNote"]'),
+      panelDensity: pick('[data-field="panelDensity"]'),
+      panelScale: pick('[data-field="panelScale"]'),
       liveNow: pick('[data-field="liveNow"]'),
       liveNowAcc: pick('[data-field="liveNowAcc"]'),
       footState: pick('[data-field="footState"]'),
@@ -12900,6 +13031,7 @@ function dayCurveAt(at = Date.now()) {
     applyFootMode();
     restorePosition();
     makeDraggable(shadow);
+    window.addEventListener('resize', schedulePanelReclamp);
 
     panel.refs.toggle.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -12974,6 +13106,14 @@ function dayCurveAt(at = Date.now()) {
         paintVisualControls();
       });
     }
+    for (const [ref, key] of [[panel.refs.panelDensity, 'density'], [panel.refs.panelScale, 'scale']]) {
+      if (!ref) continue;
+      ref.addEventListener('change', (event) => {
+        event.stopPropagation();
+        setVisualPref(key, key === 'scale' ? Number(event.target.value) : event.target.value);
+        paintVisualControls();
+      });
+    }
 
     // ⚙ lleva a la vista de ajustes (y vuelve): es el mismo cajon de siempre,
     // ahora como una pestaña mas del rail.
@@ -13006,6 +13146,10 @@ function dayCurveAt(at = Date.now()) {
 
         if (chip.dataset.pace) {
           setPaceProfile(chip.dataset.pace);
+        } else if (chip.dataset.visualToggle) {
+          const key = chip.dataset.visualToggle;
+          setVisualPref(key, key === 'highContrast' ? visualPrefs.highContrast !== true : visualPrefs.raceFocus === false);
+          paintVisualControls();
         } else if (chip.dataset.toggle === 'useNitro') {
           setUseNitro(CONFIG.useNitro === false);
         } else if (chip.dataset.toggle === 'backgroundFarm') {
@@ -14012,6 +14156,136 @@ function dayCurveAt(at = Date.now()) {
         ? frozenWarning
         : 'Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.';
     }
+    return { pace: recentPace, accuracy: recentAcc, stale };
+  }
+
+  /* --------------------------------------------------------------------------
+   * Foco de carrera y grafica de ritmo
+   * ------------------------------------------------------------------------ */
+  // La tira de foco responde a tres preguntas durante la carrera sin obligar a
+  // mirar la tabla: sigo en marcha, cuanto queda y que ritmo mantener. El
+  // aria-live vive en una region aparte y solo cambia por tramos (cuartos de
+  // carrera), para no soltar una frase por tecla aceptada.
+  let focusAnnounceKey = '';
+
+  function paintRaceFocus(measured, wpm, acc) {
+    if (!panel.refs || !panel.refs.focusStrip) return;
+    const running = Boolean(session.typing) && !session.endedAt;
+    if (!running) {
+      focusAnnounceKey = '';
+      return;
+    }
+    const total = Math.max(0, Number(session.total) || 0);
+    const pos = clamp(session.pos, 0, total || 0);
+    const left = total > 0 ? Math.max(0, total - pos) : null;
+    const target = Math.round(raceWpm());
+    setText(panel.refs.focusState, 'LIVE');
+    setText(panel.refs.focusNext, left === null
+      ? `hold ${target} wpm`
+      : left === 0 ? `finish · hold ${target} wpm`
+        : `${left} left · hold ${target} wpm`);
+    const bucket = total > 0 ? Math.floor((pos / total) * 4) : 0;
+    const key = `${session.startedAt}:${bucket}`;
+    if (key !== focusAnnounceKey && panel.refs.focusAnnounce) {
+      focusAnnounceKey = key;
+      setText(panel.refs.focusAnnounce, measured
+        ? `Race in progress: ${pos} of ${total || '?'} at ${wpmInt(wpm)} wpm, ${acc.toFixed(1)}% accuracy.`
+        : 'Race in progress.');
+    }
+  }
+
+  // Ritmo: una muestra por segundo de la velocidad reciente (no la media de la
+  // carrera) contra el objetivo, con una banda de +-2 wpm. La grafica no
+  // aparece hasta tener tres muestras y se vacia al empezar otra carrera.
+  const RHYTHM_MAX = 24;
+  const RHYTHM_MIN = 3;
+  let rhythmSamples = [];
+  let rhythmLastSampleAt = 0;
+  let rhythmRaceKey = '';
+
+  function rhythmReset() {
+    rhythmSamples = [];
+    rhythmLastSampleAt = 0;
+    paintRhythm();
+    return true;
+  }
+
+  function rhythmAdd(value) {
+    const wpm = Math.round(Number(value));
+    if (!Number.isFinite(wpm) || wpm <= 0) return false;
+    rhythmSamples.push(wpm);
+    if (rhythmSamples.length > RHYTHM_MAX) rhythmSamples.shift();
+    paintRhythm();
+    return true;
+  }
+
+  function maybeSampleRhythm(measured, recent) {
+    if (!measured || !session.typing || session.endedAt || !recent) return;
+    if (recent.stale || recent.pace === null) return;
+    const key = `${session.startedAt}:${session.endedAt}`;
+    if (key !== rhythmRaceKey) {
+      rhythmRaceKey = key;
+      rhythmSamples = [];
+      rhythmLastSampleAt = 0;
+    }
+    const now = Date.now();
+    if (rhythmLastSampleAt && now - rhythmLastSampleAt < 1000) return;
+    rhythmLastSampleAt = now;
+    rhythmAdd(recent.pace);
+  }
+
+  function paintRhythm() {
+    if (!panel.refs || !panel.refs.rhythmWrap) return;
+    const wrap = panel.refs.rhythmWrap;
+    const ready = rhythmSamples.length >= RHYTHM_MIN;
+    const readyFlag = ready ? '1' : '0';
+    if (wrap.dataset.ready !== readyFlag) wrap.dataset.ready = readyFlag;
+    const line = panel.refs.rhythmLine;
+    if (!ready) {
+      if (line) line.setAttribute('points', '');
+      return;
+    }
+    const avgRaw = rhythmSamples.reduce((sum, value) => sum + value, 0) / rhythmSamples.length;
+    const avg = Math.round(avgRaw);
+    const planned = Number(raceWpm());
+    const target = Number.isFinite(planned) && planned > 0 ? Math.round(planned) : avg;
+    // El eje se ajusta a lo que se esta viendo, con un minimo de 8 wpm para que
+    // una racha plana no se convierta en una linea que salta de borde a borde.
+    let min = Math.min(...rhythmSamples, target - 2);
+    let max = Math.max(...rhythmSamples, target + 2);
+    if (max - min < 8) {
+      const mid = (min + max) / 2;
+      min = mid - 4;
+      max = mid + 4;
+    }
+    const pad = (max - min) * 0.12;
+    min -= pad;
+    max += pad;
+    const yFor = (value) => clamp(30 - ((value - min) / (max - min)) * 30, 0, 30);
+    const count = rhythmSamples.length;
+    if (line) {
+      const points = rhythmSamples
+        .map((value, index) => `${((index / (count - 1)) * 100).toFixed(2)},${yFor(value).toFixed(2)}`)
+        .join(' ');
+      line.setAttribute('points', points);
+    }
+    const bandTop = yFor(target + 2);
+    const bandBottom = yFor(target - 2);
+    if (panel.refs.rhythmBand) {
+      const height = Math.max(0.8, bandBottom - bandTop);
+      panel.refs.rhythmBand.setAttribute('y', bandTop.toFixed(2));
+      panel.refs.rhythmBand.setAttribute('height', height.toFixed(2));
+    }
+    if (panel.refs.rhythmTarget) {
+      const y = yFor(target).toFixed(2);
+      panel.refs.rhythmTarget.setAttribute('y1', y);
+      panel.refs.rhythmTarget.setAttribute('y2', y);
+    }
+    const summary = `${count} samples · ${avg} wpm avg · target ${target} wpm`;
+    setText(panel.refs.rhythmNote, summary);
+    if (panel.refs.rhythmChart) {
+      panel.refs.rhythmChart.setAttribute('aria-label', `Rhythm chart: ${summary}. The band is two wpm either side of the target.`);
+    }
   }
 
   function paintRaceProgress() {
@@ -14053,9 +14327,11 @@ function dayCurveAt(at = Date.now()) {
     const measured = session.chars > 0;
     const wpm = measured ? wpmNow() : 0;
     const acc = measured ? accuracyNow() : 0;
-    paintLiveNumbers(measured, wpm, acc);
+    const recent = paintLiveNumbers(measured, wpm, acc);
+    paintRaceFocus(measured, wpm, acc);
     paintRaceProgress();
     paintLiveClock(measured, wpm, acc);
+    maybeSampleRhythm(measured, recent);
   }
 
   // Un reto completado es un aviso, no un detalle de fondo: no espera al
@@ -14136,6 +14412,8 @@ function dayCurveAt(at = Date.now()) {
     // entera), que es lo que se mira durante la carrera. El mismo pintado corre
     // a 4 Hz entre repintados completos (updateLiveReadout).
     paintLiveNumbers(measured, wpm, acc);
+    paintRaceFocus(measured, wpm, acc);
+    paintRhythm();
     setText(panel.refs.session, `${profile.wpmSession}/${profile.wpm.length}`);
     setText(panel.refs.races, session.raceLimit
       ? `${session.races} / ${session.raceLimit}`
@@ -14906,6 +15184,13 @@ function dayCurveAt(at = Date.now()) {
     root.style.setProperty('--nt-rgb-angle-duration', `${8 / speed}s`);
     root.style.setProperty('--nt-rgb-title-duration', `${6 / speed}s`);
     if (root.dataset.rgbRace !== visualPrefs.rgbRaceMode) root.dataset.rgbRace = visualPrefs.rgbRaceMode;
+    if (root.dataset.density !== visualPrefs.density) root.dataset.density = visualPrefs.density;
+    if (root.dataset.scale !== String(visualPrefs.scale)) root.dataset.scale = String(visualPrefs.scale);
+    if (root.dataset.contrast !== (visualPrefs.highContrast ? 'high' : 'normal')) {
+      root.dataset.contrast = visualPrefs.highContrast ? 'high' : 'normal';
+    }
+    const focus = visualPrefs.raceFocus ? 'on' : 'off';
+    if (root.dataset.focus !== focus) root.dataset.focus = focus;
   }
 
   function paintTheme() {
@@ -15280,7 +15565,7 @@ function dayCurveAt(at = Date.now()) {
   const PANEL_HTML = `
       <style>${PANEL_CSS}</style>
       <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-context="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
-        <div class="head">
+        <div class="head" tabindex="0" aria-label="Panel header. Drag with the mouse or move with arrow keys; Shift moves 24 pixels and Home returns to the corner." aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight Home">
           <span class="mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
             <i class="dot"></i>
@@ -15332,7 +15617,12 @@ function dayCurveAt(at = Date.now()) {
               <div class="view-head"><span>Live</span><b>race telemetry</b></div>
               <div class="card live-card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
-                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag" role="status" aria-live="polite">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
+                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
+                <div class="focus-strip" data-field="focusStrip" role="group" aria-label="Race focus: pace, accuracy, progress and next action">
+                  <span class="focus-state" data-field="focusState">LIVE</span>
+                  <b data-field="focusNext">Waiting for the next key.</b>
+                </div>
+                <div class="sr-only" data-field="focusAnnounce" role="status" aria-live="polite" aria-atomic="true"></div>
                 <div class="hero">
                   <div class="stat"><b data-field="live">—</b><span>live wpm</span></div>
                   <i class="sep"></i>
@@ -15340,6 +15630,14 @@ function dayCurveAt(at = Date.now()) {
                 </div>
                 <div class="auto-pace" data-field="paceSource">auto · reading account</div>
                 <div class="prog"><i data-field="progfill"></i></div>
+                <div class="rhythm" data-field="rhythmWrap" data-ready="0">
+                  <svg class="rhythm-chart" data-field="rhythmChart" viewBox="0 0 100 30" preserveAspectRatio="none" role="img" aria-label="Rhythm chart: waiting for enough samples.">
+                    <rect class="rhythm-band" data-field="rhythmBand" x="0" y="0" width="100" height="0"></rect>
+                    <line class="rhythm-target" data-field="rhythmTarget" x1="0" y1="15" x2="100" y2="15"></line>
+                    <polyline class="rhythm-line" data-field="rhythmLine" points=""></polyline>
+                  </svg>
+                  <div class="rhythm-note" data-field="rhythmNote">Rhythm chart appears after a few seconds of typing.</div>
+                </div>
                 <svg class="spark" data-field="accSpark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img" aria-label="Accuracy model delta history: no samples yet.">
                   <line class="spark-zero" x1="0" y1="12" x2="100" y2="12"></line>
                   <path class="spark-area" data-field="accSparkArea" d=""></path>
@@ -15643,6 +15941,17 @@ function dayCurveAt(at = Date.now()) {
                     <label class="rgb-range">intensity <output data-field="rgbIntensityValue">90%</output><input type="range" min="25" max="100" step="1" value="90" data-field="rgbIntensity" aria-label="RGB intensity"></label>
                     <label class="rgb-mode">during races<select data-field="rgbRaceMode" aria-label="RGB behavior during races"><option value="static">Static</option><option value="border">Border only</option><option value="full">Full RGB</option></select></label>
                   </div>
+                </div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/><circle cx="9" cy="5" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="8" cy="19" r="2" fill="currentColor" stroke="none"/></svg></span>
+                  <div class="card-h"><span class="card-t">Display</span><span class="card-s">density · contrast · focus</span></div>
+                  <div class="rows">
+                    <div class="row" title="Comfortable keeps the roomy rhythm; compact trims padding so more rows fit while racing"><span>density</span><select class="cmp-select" data-field="panelDensity" aria-label="Panel density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></div>
+                    <div class="row" title="115% widens the panel and the type for long sessions and high-DPI screens"><span>scale</span><select class="cmp-select" data-field="panelScale" aria-label="Panel scale"><option value="100">100%</option><option value="115">115%</option></select></div>
+                    <div class="row" title="High contrast: pure white text and stronger hairlines on every theme"><span>contrast</span><button class="sw" type="button" role="switch" aria-checked="false" data-visual-toggle="highContrast" data-on="0" title="High contrast: pure white text and stronger hairlines on every theme"></button></div>
+                    <div class="row" title="Race focus: a pace, accuracy and next-action strip while racing, with the account card out of the way"><span>race focus</span><button class="sw" type="button" role="switch" aria-checked="true" data-visual-toggle="raceFocus" data-on="1" title="Race focus: a pace, accuracy and next-action strip while racing, with the account card out of the way"></button></div>
+                  </div>
+                  <div class="cfg-note">Display choices are saved with the theme and travel with an exported config.</div>
                 </div>
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/></svg></span>

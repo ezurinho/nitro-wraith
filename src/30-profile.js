@@ -172,9 +172,15 @@
     rgbColorB: '#b06bff',
     rgbIntensity: 90,
     rgbRaceMode: 'static',
+    density: 'comfortable',
+    scale: 100,
+    highContrast: false,
+    raceFocus: true,
   });
   const RGB_SPEEDS = [0.5, 1, 2];
   const RGB_RACE_MODES = ['static', 'border', 'full'];
+  const PANEL_DENSITIES = ['comfortable', 'compact'];
+  const PANEL_SCALES = [100, 115];
 
   function normalizeVisualColor(value, fallback) {
     const color = String(value || '').trim().toLowerCase();
@@ -185,12 +191,17 @@
     const source = value && typeof value === 'object' ? value : {};
     const speed = RGB_SPEEDS.includes(Number(source.rgbSpeed)) ? Number(source.rgbSpeed) : VISUAL_DEFAULTS.rgbSpeed;
     const intensity = clamp(Math.round(Number(source.rgbIntensity) || VISUAL_DEFAULTS.rgbIntensity), 25, 100);
+    const scale = PANEL_SCALES.includes(Number(source.scale)) ? Number(source.scale) : VISUAL_DEFAULTS.scale;
     return {
       rgbSpeed: speed,
       rgbColorA: normalizeVisualColor(source.rgbColorA, VISUAL_DEFAULTS.rgbColorA),
       rgbColorB: normalizeVisualColor(source.rgbColorB, VISUAL_DEFAULTS.rgbColorB),
       rgbIntensity: intensity,
       rgbRaceMode: RGB_RACE_MODES.includes(source.rgbRaceMode) ? source.rgbRaceMode : VISUAL_DEFAULTS.rgbRaceMode,
+      density: PANEL_DENSITIES.includes(source.density) ? source.density : VISUAL_DEFAULTS.density,
+      scale,
+      highContrast: source.highContrast === true,
+      raceFocus: source.raceFocus !== false,
     };
   }
 
@@ -212,6 +223,7 @@
     visualPrefs = next;
     if (options.persist !== false) saveVisualPrefs();
     if (typeof paintTheme === 'function') paintTheme();
+    if (typeof schedulePanelReclamp === 'function') schedulePanelReclamp();
     return true;
   }
 

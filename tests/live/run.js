@@ -996,6 +996,209 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('reduced motion disables the continuous RGB hue cycle',
     reducedRgb.reduced && !reducedRgb.running
       && reducedRgb.borderAnimation === 'none' && reducedRgb.titleAnimation === 'none', reducedRgb);
+
+  const displayLab = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = s.querySelector('.panel');
+    const density = s.querySelector('[data-field="panelDensity"]');
+    const scale = s.querySelector('[data-field="panelScale"]');
+    const contrast = s.querySelector('[data-visual-toggle="highContrast"]');
+    const focus = s.querySelector('[data-visual-toggle="raceFocus"]');
+    if (!density || !scale || !contrast || !focus) return { missing: true };
+    const setSelect = (el, value) => {
+      el.value = value;
+      el.dispatchEvent(new w.Event('change', { bubbles: true }));
+    };
+    setSelect(density, 'compact');
+    setSelect(scale, '115');
+    contrast.click();
+    focus.click();
+    const stored = JSON.parse(w.localStorage.getItem('autoTyperVisuals') || 'null');
+    s.querySelector('[data-act="export"]').click();
+    const exported = JSON.parse(s.querySelector('[data-field="cfgText"]').value).visuals;
+    const cs = w.getComputedStyle(panel);
+    const out = {
+      density: panel.dataset.density,
+      scale: panel.dataset.scale,
+      contrast: panel.dataset.contrast,
+      focus: panel.dataset.focus,
+      wideWidth: parseFloat(cs.width),
+      ink: cs.getPropertyValue('--ink').trim(),
+      contrastChecked: contrast.getAttribute('aria-checked'),
+      focusChecked: focus.getAttribute('aria-checked'),
+      stored,
+      exported,
+    };
+    setSelect(density, 'comfortable');
+    setSelect(scale, '100');
+    contrast.click();
+    focus.click();
+    out.reset = {
+      density: panel.dataset.density,
+      scale: panel.dataset.scale,
+      contrast: panel.dataset.contrast,
+      focus: panel.dataset.focus,
+    };
+    return out;
+  })()`);
+  check('display preferences drive density, 115% scale, high contrast and race focus',
+    !displayLab.missing
+      && displayLab.density === 'compact' && displayLab.scale === '115'
+      && displayLab.contrast === 'high' && displayLab.focus === 'off'
+      && displayLab.wideWidth > 360 && displayLab.ink === '#ffffff'
+      && displayLab.contrastChecked === 'true' && displayLab.focusChecked === 'false'
+      && displayLab.stored && displayLab.stored.density === 'compact'
+      && displayLab.stored.scale === 115 && displayLab.stored.highContrast === true
+      && displayLab.stored.raceFocus === false
+      && displayLab.exported && displayLab.exported.density === 'compact'
+      && displayLab.exported.scale === 115 && displayLab.exported.highContrast === true
+      && displayLab.exported.raceFocus === false
+      && displayLab.reset.density === 'comfortable' && displayLab.reset.scale === '100'
+      && displayLab.reset.contrast === 'normal' && displayLab.reset.focus === 'on', displayLab);
+
+  const raceFocus = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = s.querySelector('.panel');
+    const d = w.__ntaDebug;
+    const strip = s.querySelector('[data-field="focusStrip"]');
+    const announce = s.querySelector('[data-field="focusAnnounce"]');
+    if (!strip || !announce || !d || !d.patchSession) return { missing: true };
+    const now = Date.now();
+    d.patchSession({
+      typing: true, stopped: false, startedAt: now - 5000, endedAt: 0,
+      chars: 140, correct: 137, errors: 3, pos: 70, total: 140, lastAcceptedAt: now,
+    });
+    const account = s.querySelector('.account-card');
+    const out = {
+      visible: w.getComputedStyle(strip).display !== 'none',
+      wpm: s.querySelector('[data-field="live"]').textContent,
+      acc: s.querySelector('[data-field="acc"]').textContent,
+      progress: s.querySelector('[data-field="progress"]').textContent,
+      state: s.querySelector('[data-field="focusState"]').textContent,
+      next: s.querySelector('[data-field="focusNext"]').textContent,
+      cardLive: strip.getAttribute('aria-live'),
+      announceLive: announce.getAttribute('aria-live'),
+      announceText: announce.textContent,
+      accountHidden: account ? w.getComputedStyle(account).display === 'none' : false,
+    };
+    d.patchSession({
+      typing: false, stopped: false, startedAt: 0, endedAt: 0,
+      chars: 0, correct: 0, errors: 0, pos: 0, total: 0, lastAcceptedAt: 0,
+    });
+    out.hiddenAfter = w.getComputedStyle(strip).display === 'none';
+    return out;
+  })()`);
+  check('race focus shows live pace, accuracy, progress and the next action without a chatty live region',
+    !raceFocus.missing && raceFocus.visible
+      && /\d/.test(raceFocus.wpm) && /%/.test(raceFocus.acc)
+      && raceFocus.progress === '70/140'
+      && raceFocus.state === 'LIVE'
+      && /left|finish|wpm/i.test(raceFocus.next)
+      && raceFocus.cardLive !== 'polite' && raceFocus.announceLive === 'polite'
+      && /Race in progress|LIVE/.test(raceFocus.announceText)
+      && raceFocus.accountHidden && raceFocus.hiddenAfter, raceFocus);
+
+  const keyboardMove = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const host = w.document.getElementById('nt-autotyper-panel');
+    const head = s.querySelector('.head');
+    if (!head) return { missing: true };
+    host.style.left = '40px';
+    host.style.top = '50px';
+    host.style.bottom = 'auto';
+    head.focus();
+    const fire = (key, extra = {}) => head.dispatchEvent(new w.KeyboardEvent('keydown', {
+      key, bubbles: true, cancelable: true, ...extra,
+    }));
+    fire('ArrowRight');
+    const right = parseFloat(host.style.left);
+    fire('ArrowDown', { shiftKey: true });
+    const down = parseFloat(host.style.top);
+    fire('Home');
+    const home = { left: parseFloat(host.style.left), top: parseFloat(host.style.top) };
+    host.style.left = '99999px';
+    host.style.top = '99999px';
+    w.dispatchEvent(new w.Event('resize'));
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    const rect = host.getBoundingClientRect();
+    const stored = JSON.parse(w.localStorage.getItem('autoTyperPanelPosition') || 'null');
+    fire('Home');
+    return {
+      tabIndex: head.tabIndex,
+      right,
+      down,
+      home,
+      clamped: rect.right <= w.innerWidth + 1 && rect.bottom <= w.innerHeight + 1,
+      stored,
+      shortcuts: head.getAttribute('aria-keyshortcuts') || '',
+    };
+  })()`, true);
+  check('the panel moves 8 px with arrows, 24 px with Shift and returns Home; resize reclamps it',
+    !keyboardMove.missing
+      && keyboardMove.tabIndex === 0
+      && keyboardMove.right === 48 && keyboardMove.down === 74
+      && keyboardMove.home.left === 16 && keyboardMove.home.top === 16
+      && keyboardMove.clamped
+      && keyboardMove.stored && keyboardMove.stored.left === 16 && keyboardMove.stored.top === 16
+      && /Arrow/.test(keyboardMove.shortcuts), keyboardMove);
+
+  const rhythm = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const d = w.__ntaDebug;
+    const chart = s.querySelector('[data-field="rhythmChart"]');
+    const wrap = s.querySelector('[data-field="rhythmWrap"]');
+    const line = s.querySelector('[data-field="rhythmLine"]');
+    const band = s.querySelector('[data-field="rhythmBand"]');
+    const target = s.querySelector('[data-field="rhythmTarget"]');
+    const note = s.querySelector('[data-field="rhythmNote"]');
+    if (!chart || !wrap || !line || !band || !target || !note
+      || !d || typeof d.rhythmReset !== 'function' || typeof d.rhythmAdd !== 'function') {
+      return { missing: true };
+    }
+    const now = Date.now();
+    d.patchSession({
+      typing: true, stopped: false, startedAt: now - 7000, endedAt: 0,
+      chars: 150, correct: 148, errors: 2, pos: 70, total: 150, lastAcceptedAt: now,
+    });
+    d.rhythmReset();
+    const before = {
+      ready: wrap.dataset.ready,
+      display: w.getComputedStyle(wrap).display,
+    };
+    for (const wpm of [108, 110, 111, 109, 112, 113]) d.rhythmAdd(wpm);
+    const out = {
+      before,
+      ready: wrap.dataset.ready,
+      display: w.getComputedStyle(wrap).display,
+      points: (line.getAttribute('points') || '').trim().split(/\\s+/).filter(Boolean).length,
+      targetY: Number(target.getAttribute('y1')),
+      bandHeight: Number(band.getAttribute('height')),
+      summary: note.textContent,
+      label: chart.getAttribute('aria-label') || '',
+      ariaLive: chart.getAttribute('aria-live'),
+    };
+    d.patchSession({
+      typing: false, stopped: false, startedAt: 0, endedAt: 0,
+      chars: 0, correct: 0, errors: 0, pos: 0, total: 0, lastAcceptedAt: 0,
+    });
+    d.rhythmReset();
+    out.hiddenAfter = wrap.dataset.ready === '0' && w.getComputedStyle(wrap).display === 'none';
+    return out;
+  })()`);
+  check('the rhythm chart stays hidden until it has samples, then draws target and tolerance',
+    !rhythm.missing
+      && rhythm.before.ready === '0' && rhythm.before.display === 'none'
+      && rhythm.ready === '1' && rhythm.display !== 'none'
+      && rhythm.points >= 6 && rhythm.targetY >= 0 && rhythm.targetY <= 30
+      && rhythm.bandHeight > 0
+      && /samples/.test(rhythm.summary) && /wpm/.test(rhythm.summary) && /target/.test(rhythm.summary)
+      && /Rhythm chart/.test(rhythm.label) && rhythm.ariaLive === null
+      && rhythm.hiddenAfter, rhythm);
+
   check('challenge auto-close is on by default', state.ch === 'on', state.ch);
   check('pace auto-calibration is on by default', state.cal === 'on', state.cal);
   check('7-day card shows the two seeded days', state.weekRows === 2, { rows: state.weekRows, total: state.weekTotal });
