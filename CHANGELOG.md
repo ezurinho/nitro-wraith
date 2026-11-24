@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.67 — 2026-11-24
+
+- fix(update): serve updates from releases and harden the panel (#4)
+
 ## 8.14.66 — 2026-11-24
 
 - perf(panel): defer panel assets, test the queue policy and bound the repaint (#3)

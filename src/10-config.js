@@ -368,7 +368,7 @@
 
   };
 
-  const VERSION = '8.14.66';
+  const VERSION = '8.14.67';
 
   // Canal de publicacion: el build estable se instala y actualiza desde la
   // ultima release del repositorio (assets adjuntos por el workflow); el Gist
