@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.82 — 2026-11-24
+
+- fix(profile): reject stale account responses in flight (#26)
+
 ## 8.14.81 — 2026-11-24
 
 - fix(profile): clear race state when the account changes (#25)
