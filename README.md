@@ -52,7 +52,7 @@ stats, and shows why it is waiting.
 | Area | Behaviour |
 | --- | --- |
 | **Race loop** | Opens the next race after a short human delay. After a DQ it returns to the garage instead of pressing Try Again. |
-| **Typing** | Builds a WPM range from the account that is signed in, capped at 120. A slow streak cannot lower the target, and a high top can recover it by at most 25% above the real average. The panel shows `avg · target · top` together. Accuracy stays at 96% or above. |
+| **Typing** | Builds a WPM range from the account that is signed in, under an account-derived ceiling (120 WPM fallback, up to 300). A slow streak cannot lower the target, and a high top can recover it by at most 25% above the real average. The panel shows `avg · target · top` together. Accuracy stays at 96% or above. |
 | **Rewards** | Claims the Mystery Box, closes daily challenges and sends one sticker in every race when stickers are on. |
 | **Session care** | Renews the session when needed. Passwords and CAPTCHAs stay manual. |
 | **Limits** | Session races, time, XP, active hours and daily race/XP budgets. |

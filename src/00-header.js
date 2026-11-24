@@ -4,7 +4,7 @@
 // @version      8.14.78
 // @updateURL    https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js
 // @downloadURL  https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js
-// @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
+// @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under an account-derived ceiling (120 WPM fallback, up to 300), automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
 // @homepageURL  https://github.com/ezurinho/nitro-wraith
 // @supportURL   https://github.com/ezurinho/nitro-wraith/issues
 // @author       NITRO WRAITH
@@ -415,12 +415,13 @@ Ritmo (dentro de AUTO): SOLO LEGIT.
              target accuracy) and the pace auto-calibrates itself (+-10%).
              Target: the account's own recent average (profile balanced), with a
              proportional range (a 30 WPM account races around 30, a 110 WPM
-             account around 110). On top of that, a hard ceiling of 120 WPM is
-             enforced at three levels: the planner never plans above it, a live
-             governor holds the race average under it key by key, and the guard
-             aborts if the game's HUD ever shows more. Soft and fast move that
-             range down or up, never to a fixed fast range; the ceiling holds
-             for all three.
+             account around 110). On top of that, an account-derived ceiling is
+             enforced at three levels: 120 WPM until the account is read, then a
+             ceiling derived from its top speed up to the configured 300 maximum.
+             The planner never plans above it, a live governor holds the race
+             average under it key by key, and the guard aborts if the game's HUD
+             ever shows more. Soft and fast move that range down or up, never to
+             a fixed fast range; the ceiling holds for all three.
 
   There is no fast pace in the old sense. The BLATANT mode was removed completely
   in 5.0.0 and there is no way to bring it back: no key, no saved value and no
