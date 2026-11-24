@@ -247,6 +247,19 @@
           0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acc) 0%, transparent); }
           50%      { box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 28%, transparent); }
         }
+        /* Hito de racha limpia: la cifra da un salto corto hacia el acento. */
+        @keyframes nt-streak {
+          0%   { transform: scale(1); color: var(--acc-2); }
+          35%  { transform: scale(1.28); color: var(--acc); }
+          100% { transform: scale(1); color: var(--acc-2); }
+        }
+        /* Destello de cierre: la fila de resultado enciende el acento un instante
+           cuando llega una carrera terminada. Solo transform y background. */
+        @keyframes nt-flash {
+          0%   { transform: translateY(2px); background: color-mix(in srgb, var(--acc) 0%, transparent); }
+          40%  { transform: translateY(0); background: color-mix(in srgb, var(--acc) 24%, transparent); }
+          100% { transform: translateY(0); background: color-mix(in srgb, var(--acc) 0%, transparent); }
+        }
 
         /* Escaner: una banda de luz cruza la cabecera solo mientras hay carrera.
            Va en ::before (::after ya es la linea divisoria) y no captura clics. */
@@ -658,6 +671,14 @@
         .recent-pair i[data-good="1"] { color: var(--acc); }
         .recent-pair i[data-good="0"] { color: var(--warn); }
         .recent-pair i.bump { animation: nt-bump .32s cubic-bezier(.34, 1.4, .5, 1); }
+        /* Racha limpia: numeros corrientes en el acento suave; el hito de 25
+           solo late en standard y full, y calm se queda con el color. */
+        .row.streak-row b { color: var(--acc-2); }
+        .panel[data-motion="standard"] .row.streak-row b.nt-pulse,
+        .panel[data-motion="full"] .row.streak-row b.nt-pulse { animation: nt-streak .24s cubic-bezier(.34, 1.4, .5, 1); }
+        /* Cierre de carrera: el resultado parpadea una vez al entrar. */
+        .panel[data-motion="standard"] .result-row.nt-flash,
+        .panel[data-motion="full"] .result-row.nt-flash { animation: nt-flash .24s ease-out; }
         .row .num { width: 58px; flex: none; padding: 2px 5px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0, 0, 0, .24); color: var(--ink-2); font: 600 10px/1.4 var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; color-scheme: dark; }
         .row .num:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; border-color: var(--acc); }
         .row .num::placeholder { color: var(--dim-2); }
@@ -1149,6 +1170,7 @@
           .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title,
           .panel .head::before, .panel .head .dot::after, .panel .mark svg, .panel .livedots i,
           .panel .race-line::after, .panel .theme[aria-pressed="true"] i, .panel .update-card,
+          .panel .row.streak-row b, .panel .result-row,
           .panel[data-theme="rgb"], .panel[data-theme="rgb"]::after { animation: none !important; }
         }
       `;

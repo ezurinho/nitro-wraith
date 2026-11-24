@@ -1327,6 +1327,7 @@
         noteRaceStart(session.startedAt);
         session.chars++;
         session.correct++;
+        noteKeystroke(true);
         session.total = content.length;
         session.pos = index + 1;
         // Desde donde se cuenta esta carrera: el guardia mide con esto, no con

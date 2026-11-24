@@ -292,7 +292,8 @@ TUNE view (the ⚙ button, next to Stop) is split into Rhythm (pace profile and
 calibration), Limits (session, daily budget and active hours) and Automation
 (switches for breaks, Mystery Box, stickers, Auto nitro, the safety guard and
 the sound, plus the theme, the motion level, export/import/report/csv tools and
-the Updates card: auto-install countdown, its switch and "check now"). "csv" downloads
+the Updates card: auto-install countdown with "install now" on click and Escape
+to cancel, its switch and "check now"). "csv" downloads
 one spreadsheet with the closed sessions (the same ones Alt+H prints) and,
 below them, the 7-day summary: a
 `kind` column separates `session` rows from `day` rows, and the columns are the
@@ -323,6 +324,12 @@ hover feedback, and full (the default) also runs the ambient loops while a
 race is live (the header scan, the status ring, the Live equalizer, the
 progress sheen). Entrances are short on purpose and the whole set switches
 off when the system asks for reduced motion.
+
+The Live card also shows the clean streak (correct keys in a row in the race
+being typed, reset by any mistake); every 25 clean keys the figure pulses
+once, in standard and full motion. When a race closes and the game publishes
+its place and prize, the result row flashes once, so the close is visible from
+the corner of the eye.
 
 Esc or Alt+S (or the Stop button): stop. Mid-race it does NOT cut dead, because
 leaving a live race is a guaranteed disqualification: it lets the race finish and

@@ -739,6 +739,22 @@
     return autoUpdateState();
   }
 
+  // El atajo del aviso: el jugador no espera los 12 s. Cancela la cuenta y
+  // entrega la release al instalador ya, con las mismas guardas de siempre.
+  function installAutoUpdateNow() {
+    if (!updateInfo()) return null;
+    if (!autoUpdateSafe()) return cancelAutoUpdate('race');
+    if (autoUpdateTickTimer) clearInterval(autoUpdateTickTimer);
+    autoUpdateTickTimer = null;
+    autoUpdateArm = null;
+    const url = installUpdate();
+    if (typeof log === 'function') {
+      log(`Auto-update: installing v${updateInfo().latest} now.`);
+    }
+    paintAutoUpdate(true);
+    return url;
+  }
+
   function armAutoUpdate() {
     const info = updateInfo();
     if (!info || !autoUpdateEnabled() || autoUpdateArm) return autoUpdateState();
@@ -754,7 +770,7 @@
       autoUpdateTickTimer = setInterval(() => autoUpdateTick(), 1000);
     }
     if (typeof log === 'function') {
-      log(`Auto-update: v${info.latest} installs in 12 s unless a race starts. Click the countdown row to cancel.`);
+      log(`Auto-update: v${info.latest} installs in 12 s unless a race starts. Click the countdown row to install now; Escape cancels.`);
     }
     paintAutoUpdate(true);
     return autoUpdateState();
@@ -788,7 +804,7 @@
     if (refs.upAuto) {
       const seconds = Math.max(0, Math.ceil(state.leftMs / 1000));
       const text = state.phase === 'armed'
-        ? `v${state.version} in ${seconds}s · cancel`
+        ? `v${state.version} · install in ${seconds}s`
         : state.phase === 'waiting'
           ? `v${state.version} · paused`
           : state.phase === 'off'
