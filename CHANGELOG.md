@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.75 — 2026-11-24
+
+- perf(panel): keep idle ticks free of DOM writes (#18)
+- test(browsers): boot the userscript in Firefox and WebKit (#16)
+
 ## 8.14.74 — 2026-11-24
 
 - feat(panel): clean streak, result flash and install-now (#15)
