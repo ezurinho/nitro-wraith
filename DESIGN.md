@@ -95,7 +95,7 @@ applicable and are listed as such, not silently ignored.
 | F8 no invented metrics | Enforced by product rule: all values come from the session |
 | F12–F14 hero / word count / container | Not applicable: no landing page |
 | F15 CSS stamp | Not applicable: generated panel sheet, not an exported page |
-| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (407 checks + 24 visual baselines) |
+| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (407 Chrome checks + 24 visual baselines + an 18-check Firefox/WebKit smoke) |
 
 ### Floor audit
 

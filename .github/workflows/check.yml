@@ -30,3 +30,21 @@ jobs:
           "$CHROME" --version
       - name: Run checks
         run: npm run check
+
+  # The CDP harness only drives Chrome. This job boots the same userscript and
+  # fixtures in Firefox and WebKit so an engine-specific regression (shadow DOM,
+  # CSS, shortcut handling) fails before a release instead of on a user's browser.
+  browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install the cross-engine smoke tools
+        run: |
+          npm ci
+          npx playwright install --with-deps firefox webkit
+      - name: Run the Firefox and WebKit smoke
+        run: npm run test:browsers
