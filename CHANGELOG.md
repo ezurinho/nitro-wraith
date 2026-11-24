@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.70 — 2026-11-24
+
+- fix(panel): give the garage sheet the same design floor as the race panel (#10)
+
 ## 8.14.69 — 2026-11-24
 
 - refactor(design): tokenise state inks and close the Hallmark floor (#8)
