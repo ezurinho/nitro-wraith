@@ -250,6 +250,18 @@
     if (!userId) return;
 
     const handler = (event) => {
+      const currentUserId = (found.props && found.props.user && found.props.user.userID)
+        || (siteUser() && siteUser().userID)
+        || null;
+      if (currentUserId && String(currentUserId) !== String(userId)) {
+        try {
+          if (typeof resultServerObj.off === 'function') resultServerObj.off(RESULT_EVENT, handler);
+          else if (typeof resultServerObj.removeListener === 'function') resultServerObj.removeListener(RESULT_EVENT, handler);
+        } catch { /* server ya cerrado por el juego */ }
+        resultServerObj = null;
+        resultServerHandler = null;
+        return;
+      }
       const racers = event && event.racers;
       if (!Array.isArray(racers) || !racers.length) return;
 

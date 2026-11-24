@@ -11,7 +11,7 @@ fragment list, one generated IIFE, no runtime dependencies. Read
 npm run build       # rebuild the userscript from src/
 npm run check       # build sync, syntax, README/release checks, unit + browser suites
 npm test            # build sync + queue unit tests + CLI checks (no browser)
-npm run test:live   # 412-check browser harness (needs Chrome)
+npm run test:live   # 413-check browser harness (needs Chrome)
 npm run test:browsers # Firefox + WebKit smoke (needs `npx playwright install firefox webkit`)
 npm run visual      # 24-shot visual regression
 ```
@@ -53,7 +53,7 @@ changed visual surface (panel, garage, HUD, themes, README images):
 | --- | --- |
 | `src/` | Ordered fragments, one IIFE; `tools/build.js` concatenates them |
 | `tests/unit/` | Node VM unit tests (queue policy) |
-| `tests/live/` | CDP browser harness, fixtures and the 412-check suite |
+| `tests/live/` | CDP browser harness, fixtures and the 413-check suite |
 | `tests/browsers/` | Firefox + WebKit smoke (Playwright) |
 | `tests/visual/` | Pixel baselines and the capture matrix |
 | `tools/` | build, release, canary, readme and visual helpers |

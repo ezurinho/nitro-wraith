@@ -1117,6 +1117,7 @@
   window.__ntaDebug.calibrationAccount = () => disk.get(KEYS.calibrationAccount, '');
   window.__ntaDebug.ensureCalibrationAccount = () => ensureCalibrationAccount();
   window.__ntaDebug.needsAccountRead = () => calibrationNeedsAccountRead;
+  window.__ntaDebug.fetchAccountStats = () => fetchAccountStats();
   window.__ntaDebug.stickerChance = () => CONFIG.stickers.chance;
   window.__ntaDebug.progressWpm = (progress) => progressWpm(progress);
   window.__ntaDebug.lastProgress = () => session.lastProgress || null;

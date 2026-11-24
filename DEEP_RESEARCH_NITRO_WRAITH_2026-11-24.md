@@ -7,6 +7,8 @@
 > **Segundo addendum (8.14.80):** la parte fail-open de R3 quedó corregida: Web Locks no disponible y errores de almacenamiento del lease ahora devuelven `false`, la cola espera y el rescate no marca turno sin lease. La parte no atómica del lease sigue abierta.
 >
 > **Tercer addendum (8.14.81):** al detectar un cambio de cuenta se borran historial, sesión, serie de ritmo, tanda, día, caja, paradas, DQ, login y calibración; se conservan tema, perfil de ritmo y preferencias. La revalidación de peticiones asíncronas en vuelo sigue abierta.
+>
+> **Cuarto addendum (8.14.82):** la calibración vuelve a comprobar la identidad después de cada `await` y antes de persistir/aplicar; el listener de resultados ignora y se desengancha si el usuario de la carrera cambió. El lease no atómico sigue abierto.
 
 ## TL;DR
 
