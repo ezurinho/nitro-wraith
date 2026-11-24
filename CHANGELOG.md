@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.65 — 2026-11-24
+
+- feat(panel): RGB Lab, Race Focus and rhythm chart (#2)
+
 ## 8.14.64 — 2026-11-23
 
 - feat(panel): add contextual adaptive UI (#1)
