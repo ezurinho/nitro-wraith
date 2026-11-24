@@ -10,7 +10,7 @@
   const PANEL_HTML = `
       <style>${PANEL_CSS}</style>
       <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-context="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
-        <div class="head">
+        <div class="head" tabindex="0" aria-label="Panel header. Drag with the mouse or move with arrow keys; Shift moves 24 pixels and Home returns to the corner." aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight Home">
           <span class="mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
             <i class="dot"></i>
@@ -62,7 +62,12 @@
               <div class="view-head"><span>Live</span><b>race telemetry</b></div>
               <div class="card live-card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
-                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag" role="status" aria-live="polite">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
+                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
+                <div class="focus-strip" data-field="focusStrip" role="group" aria-label="Race focus: pace, accuracy, progress and next action">
+                  <span class="focus-state" data-field="focusState">LIVE</span>
+                  <b data-field="focusNext">Waiting for the next key.</b>
+                </div>
+                <div class="sr-only" data-field="focusAnnounce" role="status" aria-live="polite" aria-atomic="true"></div>
                 <div class="hero">
                   <div class="stat"><b data-field="live">—</b><span>live wpm</span></div>
                   <i class="sep"></i>
@@ -70,6 +75,14 @@
                 </div>
                 <div class="auto-pace" data-field="paceSource">auto · reading account</div>
                 <div class="prog"><i data-field="progfill"></i></div>
+                <div class="rhythm" data-field="rhythmWrap" data-ready="0">
+                  <svg class="rhythm-chart" data-field="rhythmChart" viewBox="0 0 100 30" preserveAspectRatio="none" role="img" aria-label="Rhythm chart: waiting for enough samples.">
+                    <rect class="rhythm-band" data-field="rhythmBand" x="0" y="0" width="100" height="0"></rect>
+                    <line class="rhythm-target" data-field="rhythmTarget" x1="0" y1="15" x2="100" y2="15"></line>
+                    <polyline class="rhythm-line" data-field="rhythmLine" points=""></polyline>
+                  </svg>
+                  <div class="rhythm-note" data-field="rhythmNote">Rhythm chart appears after a few seconds of typing.</div>
+                </div>
                 <svg class="spark" data-field="accSpark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img" aria-label="Accuracy model delta history: no samples yet.">
                   <line class="spark-zero" x1="0" y1="12" x2="100" y2="12"></line>
                   <path class="spark-area" data-field="accSparkArea" d=""></path>
@@ -359,6 +372,31 @@
                     <button class="theme" type="button" data-theme-btn="violet" aria-pressed="false" title="Violet: purple neon"><i class="sw-violet"></i><span>Violet</span></button>
                     <button class="theme" type="button" data-theme-btn="rgb" aria-pressed="false" title="RGB: animated rainbow border and title"><i class="sw-rgb"></i><span>RGB</span></button>
                   </div>
+                  <div class="rgb-lab" data-field="rgbLab" role="group" aria-label="RGB Lab">
+                    <div class="rgb-lab-h"><span>RGB Lab</span><b>shape the rainbow</b></div>
+                    <div class="rgb-colors">
+                      <label>primary<input type="color" data-field="rgbColorA" value="#ff5f6d" aria-label="RGB primary color"></label>
+                      <label>secondary<input type="color" data-field="rgbColorB" value="#b06bff" aria-label="RGB secondary color"></label>
+                    </div>
+                    <div class="rgb-speed" role="group" aria-label="RGB animation speed">
+                      <button type="button" data-rgb-speed="0.5" aria-pressed="false">0.5×</button>
+                      <button type="button" data-rgb-speed="1" aria-pressed="true">1×</button>
+                      <button type="button" data-rgb-speed="2" aria-pressed="false">2×</button>
+                    </div>
+                    <label class="rgb-range">intensity <output data-field="rgbIntensityValue">90%</output><input type="range" min="25" max="100" step="1" value="90" data-field="rgbIntensity" aria-label="RGB intensity"></label>
+                    <label class="rgb-mode">during races<select data-field="rgbRaceMode" aria-label="RGB behavior during races"><option value="static">Static</option><option value="border">Border only</option><option value="full">Full RGB</option></select></label>
+                  </div>
+                </div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/><circle cx="9" cy="5" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="8" cy="19" r="2" fill="currentColor" stroke="none"/></svg></span>
+                  <div class="card-h"><span class="card-t">Display</span><span class="card-s">density · contrast · focus</span></div>
+                  <div class="rows">
+                    <div class="row" title="Comfortable keeps the roomy rhythm; compact trims padding so more rows fit while racing"><span>density</span><select class="cmp-select" data-field="panelDensity" aria-label="Panel density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></div>
+                    <div class="row" title="115% widens the panel and the type for long sessions and high-DPI screens"><span>scale</span><select class="cmp-select" data-field="panelScale" aria-label="Panel scale"><option value="100">100%</option><option value="115">115%</option></select></div>
+                    <div class="row" title="High contrast: pure white text and stronger hairlines on every theme"><span>contrast</span><button class="sw" type="button" role="switch" aria-checked="false" data-visual-toggle="highContrast" data-on="0" title="High contrast: pure white text and stronger hairlines on every theme"></button></div>
+                    <div class="row" title="Race focus: a pace, accuracy and next-action strip while racing, with the account card out of the way"><span>race focus</span><button class="sw" type="button" role="switch" aria-checked="true" data-visual-toggle="raceFocus" data-on="1" title="Race focus: a pace, accuracy and next-action strip while racing, with the account card out of the way"></button></div>
+                  </div>
+                  <div class="cfg-note">Display choices are saved with the theme and travel with an exported config.</div>
                 </div>
                 <div class="card">
                   <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/></svg></span>

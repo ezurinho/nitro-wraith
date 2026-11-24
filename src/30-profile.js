@@ -166,6 +166,67 @@
     return THEMES.includes(saved) ? saved : 'carbon';
   })();
 
+  const VISUAL_DEFAULTS = Object.freeze({
+    rgbSpeed: 1,
+    rgbColorA: '#ff5f6d',
+    rgbColorB: '#b06bff',
+    rgbIntensity: 90,
+    rgbRaceMode: 'static',
+    density: 'comfortable',
+    scale: 100,
+    highContrast: false,
+    raceFocus: true,
+  });
+  const RGB_SPEEDS = [0.5, 1, 2];
+  const RGB_RACE_MODES = ['static', 'border', 'full'];
+  const PANEL_DENSITIES = ['comfortable', 'compact'];
+  const PANEL_SCALES = [100, 115];
+
+  function normalizeVisualColor(value, fallback) {
+    const color = String(value || '').trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
+  }
+
+  function normalizeVisualPrefs(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const speed = RGB_SPEEDS.includes(Number(source.rgbSpeed)) ? Number(source.rgbSpeed) : VISUAL_DEFAULTS.rgbSpeed;
+    const intensity = clamp(Math.round(Number(source.rgbIntensity) || VISUAL_DEFAULTS.rgbIntensity), 25, 100);
+    const scale = PANEL_SCALES.includes(Number(source.scale)) ? Number(source.scale) : VISUAL_DEFAULTS.scale;
+    return {
+      rgbSpeed: speed,
+      rgbColorA: normalizeVisualColor(source.rgbColorA, VISUAL_DEFAULTS.rgbColorA),
+      rgbColorB: normalizeVisualColor(source.rgbColorB, VISUAL_DEFAULTS.rgbColorB),
+      rgbIntensity: intensity,
+      rgbRaceMode: RGB_RACE_MODES.includes(source.rgbRaceMode) ? source.rgbRaceMode : VISUAL_DEFAULTS.rgbRaceMode,
+      density: PANEL_DENSITIES.includes(source.density) ? source.density : VISUAL_DEFAULTS.density,
+      scale,
+      highContrast: source.highContrast === true,
+      raceFocus: source.raceFocus !== false,
+    };
+  }
+
+  let visualPrefs = (() => {
+    try {
+      return normalizeVisualPrefs(JSON.parse(disk.get(KEYS.visuals, '{}')));
+    } catch {
+      return { ...VISUAL_DEFAULTS };
+    }
+  })();
+
+  function saveVisualPrefs() {
+    disk.set(KEYS.visuals, JSON.stringify(visualPrefs));
+  }
+
+  function setVisualPref(key, value, options = {}) {
+    const next = normalizeVisualPrefs({ ...visualPrefs, [key]: value });
+    if (JSON.stringify(next) === JSON.stringify(visualPrefs)) return false;
+    visualPrefs = next;
+    if (options.persist !== false) saveVisualPrefs();
+    if (typeof paintTheme === 'function') paintTheme();
+    if (typeof schedulePanelReclamp === 'function') schedulePanelReclamp();
+    return true;
+  }
+
   // @property no se registra dentro de un shadow root: el navegador lo ignora
   // y --nt-hue salta de 0 a 360 en seco, que es quedarse en rojo/amarillo.
   // CSS.registerProperty lo registra en el documento y los dos paneles lo

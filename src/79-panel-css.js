@@ -144,21 +144,21 @@
           --bg-lo: rgba(5, 5, 10, .995);
           animation:
             nt-boot .42s cubic-bezier(.2, .9, .25, 1) both,
-            nt-rgb-hue 16s linear infinite,
-            nt-rgb-angle 8s linear infinite;
+            nt-rgb-hue var(--nt-rgb-hue-duration, 16s) linear infinite;
         }
         @keyframes nt-rgb-hue { to { --nt-hue: 360; } }
         @keyframes nt-rgb-angle { to { --nt-angle: 360deg; } }
 
-        /* Con una carrera viva no se animan propiedades registradas del panel:
-           cada frame obligaria a recalcular todos los color-mix y el borde
-           conico, y el juego necesita ese tiempo. Al terminar la carrera los
-           colores vuelven a girar solos. */
-        .panel[data-theme="rgb"][data-state="running"] {
-          animation-play-state: paused;
-        }
-        .panel[data-theme="rgb"][data-state="running"] .title,
+        /* La politica de carrera separa el tinte, el borde y el titulo. Static
+           congela todo; border conserva solo el giro perimetral; full deja las
+           tres capas activas. El usuario decide el coste visual. */
+        .panel[data-theme="rgb"][data-state="running"][data-rgb-race="static"],
+        .panel[data-theme="rgb"][data-state="running"][data-rgb-race="static"]::after,
+        .panel[data-theme="rgb"][data-state="running"][data-rgb-race="static"] .title,
+        .panel[data-theme="rgb"][data-state="running"][data-rgb-race="border"],
+        .panel[data-theme="rgb"][data-state="running"][data-rgb-race="border"] .title,
         .panel[data-theme="rgb"][data-collapsed="true"],
+        .panel[data-theme="rgb"][data-collapsed="true"]::after,
         .panel[data-theme="rgb"][data-collapsed="true"] .title {
           animation-play-state: paused;
         }
@@ -173,24 +173,27 @@
           padding: 1px;
           border-radius: 14px;
           background: conic-gradient(from var(--nt-angle, 0deg),
-            #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+            var(--nt-rgb-a, #ff5f6d), #ffc371, #47ffa1, #5ad1ff, var(--nt-rgb-b, #b06bff), var(--nt-rgb-a, #ff5f6d));
           -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           -webkit-mask-composite: xor;
           mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           mask-composite: exclude;
           display: none;
-          opacity: .9;
+          opacity: var(--nt-rgb-border-opacity, .9);
           pointer-events: none;
         }
-        .panel[data-theme="rgb"]::after { display: block; }
+        .panel[data-theme="rgb"]::after {
+          display: block;
+          animation: nt-rgb-angle var(--nt-rgb-angle-duration, 8s) linear infinite;
+        }
         .panel[data-theme="rgb"] .title {
-          background: linear-gradient(90deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+          background: linear-gradient(90deg, var(--nt-rgb-a, #ff5f6d), #ffc371, #47ffa1, #5ad1ff, var(--nt-rgb-b, #b06bff), var(--nt-rgb-a, #ff5f6d));
           background-size: 300% 100%;
           -webkit-background-clip: text;
           background-clip: text;
           color: transparent;
           text-shadow: none;
-          animation: nt-rgb-title 6s linear infinite;
+          animation: nt-rgb-title var(--nt-rgb-title-duration, 6s) linear infinite;
         }
         @keyframes nt-rgb-title { to { background-position: 300% 0; } }
 
@@ -839,6 +842,63 @@
           background: conic-gradient(from 0deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
         }
 
+        .rgb-lab { display: grid; gap: 7px; margin-top: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: rgba(0, 0, 0, .2); }
+        .rgb-lab-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+        .rgb-lab-h span { color: var(--ink-2); font: 800 8px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; }
+        .rgb-lab-h b { color: var(--dim); font: 600 8px/1 ui-sans-serif, system-ui, sans-serif; }
+        .rgb-colors { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .rgb-colors label { display: grid; gap: 4px; color: var(--dim); font: 600 8px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+        .rgb-colors input { width: 100%; height: 24px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, .03); cursor: pointer; }
+        .rgb-speed { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+        .rgb-speed button { all: unset; padding: 5px 0; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, .025); color: var(--dim); text-align: center; cursor: pointer; font: 700 9px/1 ui-monospace, monospace; transition: color .16s ease, border-color .16s ease, background .16s ease; }
+        .rgb-speed button[aria-pressed="true"] { color: var(--acc); border-color: var(--line-strong); background: var(--acc-dim); }
+        .rgb-range { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 5px; color: var(--dim); font: 600 8px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+        .rgb-range output { color: var(--ink-2); font-family: ui-monospace, monospace; }
+        .rgb-range input { grid-column: 1 / -1; width: 100%; height: 14px; margin: 0; accent-color: var(--acc); cursor: pointer; }
+        .rgb-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--dim); font: 600 8px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+        .rgb-mode select { min-width: 0; max-width: 58%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, .04); color: var(--ink-2); font: 600 9px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
+        .rgb-lab input:focus-visible, .rgb-lab button:focus-visible, .rgb-lab select:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+        /* ---------- pantalla ------------------------------------------------- */
+        /* Densidad, escala, contraste y foco de carrera son atributos del nodo
+           raiz; el modelo vive en visualPrefs y el CSS hace el resto. */
+        .focus-strip { display: none; align-items: center; gap: 7px; margin: 3px 0 7px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--acc) 8%, transparent); }
+        .panel[data-state="running"][data-focus="on"] .focus-strip { display: flex; }
+        .panel[data-state="running"][data-focus="on"] .account-card { display: none; }
+        .focus-strip b { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 9.5px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); }
+        .focus-state { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--acc); color: #06110b; font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; }
+        .sr-only { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+        .rhythm { margin: 5px 2px 2px; }
+        .rhythm[data-ready="0"] { display: none; }
+        .rhythm-chart { display: block; width: 100%; height: 34px; overflow: visible; }
+        .rhythm-band { fill: color-mix(in srgb, var(--acc) 13%, transparent); }
+        .rhythm-target { stroke: color-mix(in srgb, var(--acc) 50%, transparent); stroke-width: .8; stroke-dasharray: 2 2; }
+        .rhythm-line { fill: none; stroke: var(--acc); stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+        .rhythm-note { margin-top: 2px; font: 600 8.5px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .03em; color: var(--dim); }
+
+        .panel[data-density="compact"] .card { margin-bottom: 6px; padding: 8px; }
+        .panel[data-density="compact"] .views { padding: 8px 9px 9px; }
+        .panel[data-density="compact"] .hero { padding: 7px 0; }
+        .panel[data-density="compact"] .stat b { font-size: 24px; }
+        .panel[data-density="compact"] .v-stats .live-card .rows .row,
+        .panel[data-density="compact"] .v-stats .season-card .rows .row { padding: 5px 7px; }
+
+        @media (min-width: 361px) {
+          .panel[data-scale="115"]:not([data-collapsed="true"]) { width: 380px; }
+        }
+
+        .panel[data-contrast="high"] {
+          --ink: #ffffff;
+          --ink-2: #eef6f1;
+          --dim: #bdcbc3;
+          --dim-2: #b7c6be;
+          --line: rgba(255, 255, 255, .22);
+          --line-strong: rgba(255, 255, 255, .4);
+        }
+        .panel[data-contrast="high"] .card-s,
+        .panel[data-contrast="high"] .row > span { color: var(--ink-2); }
+
         /* ---------- plegado -------------------------------------------------- */
         /* Plegado: cabecera con el LED y el nombre, y los tres botones. Todo lo
            demas fuera, que para eso esta el boton. */
@@ -926,6 +986,6 @@
         @media (prefers-reduced-motion: reduce) {
           .panel, .panel[data-fresh="1"] .card, .view, .stat b.bump, .recent-pair i.bump, .prog::after,
           .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title,
-          .panel[data-theme="rgb"] { animation: none !important; }
+          .panel[data-theme="rgb"], .panel[data-theme="rgb"]::after { animation: none !important; }
         }
       `;
