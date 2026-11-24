@@ -65,7 +65,7 @@
               <div class="view-head"><span>Live</span><b>race telemetry</b></div>
               <div class="card live-card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
-                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
+                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="livedots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
                 <div class="focus-strip" data-field="focusStrip" role="group" aria-label="Race focus: pace, accuracy, progress and next action">
                   <span class="focus-state" data-field="focusState">LIVE</span>
                   <b data-field="focusNext">Waiting for the next key.</b>
@@ -399,6 +399,13 @@
                     <div class="row" title="High contrast: pure white text and stronger hairlines on every theme"><span>contrast</span><button class="sw" type="button" role="switch" aria-checked="false" data-visual-toggle="highContrast" data-on="0" title="High contrast: pure white text and stronger hairlines on every theme"></button></div>
                     <div class="row" title="Race focus: a pace, accuracy and next-action strip while racing, with the account card out of the way"><span>race focus</span><button class="sw" type="button" role="switch" aria-checked="true" data-visual-toggle="raceFocus" data-on="1" title="Race focus: a pace, accuracy and next-action strip while racing, with the account card out of the way"></button></div>
                   </div>
+                  <div class="set-lbl motion-lbl">Motion<i>how alive the panel feels</i></div>
+                  <div class="seg motion-seg" data-field="motionSeg" data-index="2" role="group" aria-label="Panel motion">
+                    <i class="seg-glide"></i>
+                    <button class="seg-btn" type="button" data-motion-btn="calm" aria-pressed="false" title="Calm: only quick colour changes; no entrances, no loops">Calm</button>
+                    <button class="seg-btn" type="button" data-motion-btn="standard" aria-pressed="false" title="Standard: entrances and hover feedback, without the ambient loops">Std</button>
+                    <button class="seg-btn" type="button" data-motion-btn="full" aria-pressed="true" title="Full: ambient loops while racing (header scan, status ring, live equalizer)">Full</button>
+                  </div>
                   <div class="cfg-note">Display choices are saved with the theme and travel with an exported config.</div>
                 </div>
                 <div class="card">
@@ -505,13 +512,18 @@
               <div class="card update-card">
                 <div class="card-h"><span class="card-t">Updates</span><span class="card-s">GitHub releases</span></div>
                 <div class="rows">
-                  <div class="row" title="Last public update check. A newer build is downloaded from GitHub, never installed without your click."><span>check</span><b data-field="upInfo">—</b></div>
+                  <div class="row" title="Last public update check: the last result, its error and the next retry"><span>check</span><b data-field="upInfo">—</b></div>
+                  <button class="row up-auto-row" type="button" data-act="updateCancel" title="Auto-update is counting down. Click to cancel; the badge stays so you can install when you want"><span>install</span><b data-field="upAuto">—</b></button>
+                </div>
+                <div class="set-row">
+                  <span class="set-lbl">Auto-update<i>install a newer build when no race is running</i></span>
+                  <span class="set-val"><button class="sw" type="button" role="switch" aria-checked="true" data-update-toggle="auto" data-on="1" title="Auto-update: when a newer release is found, the panel shows a 12 s countdown and then opens the installer. It never fires while you are typing; cancel from the countdown row"></button></span>
                 </div>
                 <div class="season-actions">
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
                   <button class="act" type="button" data-act="updateCheck" title="Check the latest GitHub release for a newer version now">check now</button>
                 </div>
-                <div class="cfg-note">The latest release meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the release CDN is down, the Gist mirror is used. The installed copy changes only when you download a release.</div>
+                <div class="cfg-note">The latest release meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the release CDN is down, the Gist mirror is used. With auto-update on, a newer build is handed to the installer after a 12 s countdown that only runs while no race is typing; Tampermonkey still asks before replacing the script.</div>
               </div>
               <div class="card">
                 <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v${VERSION}</span></div>

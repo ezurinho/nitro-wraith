@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "capturedAt": "2026-11-24T03:59:37.952Z",
+  "capturedAt": "2026-11-24T04:35:04.266Z",
   "engine": {
     "product": "Chrome/158.0.8127.37",
     "browser": "Chrome",
@@ -32,111 +32,111 @@
   },
   "images": {
     "theme-carbon.png": {
-      "sha256": "1f22b44c330bf462b93ac280f07833cbbb49adb9a5282b6af847198ccc53ad7e",
+      "sha256": "beb467ab03aee220bcefc9e4ea9ee0426fcc2b6fe9f2bf9de23a8cf5978cf590",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "theme-aurora.png": {
-      "sha256": "39ae8c6367795f80758cecf9e7faa0d05f305559f28ebd84c9706c23fd968c8b",
+      "sha256": "c37adb3cc9944e0852261227b37a56afeeb26453532666cdec3f03749110d65f",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "theme-sunset.png": {
-      "sha256": "9e966c2d395ca69bd4440d2156393f4f1b90811923a442229e0c2259e781dcaa",
+      "sha256": "1ea650923a69a26785eb59cb4642dba9a5d1a8030d5ca7b05411c94a15bbd13e",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "theme-ice.png": {
-      "sha256": "1c4357eb822670228a7170c332fa46eba615a3a2976a5da880f1b1acd9a84271",
+      "sha256": "4f358d8289a10267d802cbe1a922caf6bb0089ba74d9b0f7f7825d3e42729a1e",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "theme-violet.png": {
-      "sha256": "b62ef318b278cef6547276642b7ece9d5c5b690e82586f19ecf2e48aa11a9333",
+      "sha256": "4de21ad3b894e8ed1f59668f340f3191b316ca7195f093c500279f8341d579ea",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "theme-rgb.png": {
-      "sha256": "192a8bb86f7dd84ddf87ac06a3ba2e028e7975507adef6ec4a73a308045ad463",
+      "sha256": "ee83ef3fd26a3a922a3aa8aa9acb4933054f15b35fe80c3f95758fe91d1ee7df",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-tune-idle.png": {
-      "sha256": "1542ef36fba163665636437c51eb6489f248dd3d9c16eeebe1e8c3ef305a59dc",
+      "sha256": "deefd9e0519a25b676dee9e5a2b8837b0e260ed65bc242ed68d243258eb31b76",
       "width": 732,
-      "height": 5840,
+      "height": 5996,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-tune-racing.png": {
-      "sha256": "5a27fc542c1e1f970abb16ba59ed6729da8a5e9ba5f8e005d662ee75adcd6a52",
+      "sha256": "2dcf19afdec188fa0e9edcde3965b7eee4f40e2a9698b24b0798bb76b1753697",
       "width": 732,
-      "height": 5840,
+      "height": 5996,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-tune-stopped.png": {
-      "sha256": "8edeefbdf871e49610dfa7a66ef51cd19c2fc371007633478680dc28b98d11cb",
+      "sha256": "a0dc4d3d68e8856e73b3d57286ade11160a0b0137d288f0de3c34282a23cb3b0",
       "width": 732,
-      "height": 5840,
+      "height": 5996,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-log-idle.png": {
-      "sha256": "555222fa4645d3bff42d7f1b9d074cca7b9da56de0519005737160d3a9cc462b",
+      "sha256": "f4ce9bc35d1a4bf20df2ab1a731af41fd10866e471c60e08c90432e1674fe164",
       "width": 732,
       "height": 2598,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-log-racing.png": {
-      "sha256": "4f52bebe4af507aef51fd5f52810cf7607e5bc18a1978c67a077595d5f7a5de6",
+      "sha256": "939d222aae208f4a2c4a1246a10909a636044df0da3dc37dbd2ab3db4a726a18",
       "width": 732,
       "height": 2598,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-log-stopped.png": {
-      "sha256": "b1e138bd77f651d4038479f235723bb83739567e11728f381620573171d91cd2",
+      "sha256": "bb3fe9fa44f266576b0132d315833ecce950cafbf6a3d5c5cf561b9c8dac4ce0",
       "width": 732,
       "height": 2598,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-garage-idle.png": {
@@ -144,8 +144,8 @@
       "width": 656,
       "height": 1050,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-garage-racing.png": {
@@ -153,8 +153,8 @@
       "width": 656,
       "height": 1152,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "view-garage-stopped.png": {
@@ -162,62 +162,62 @@
       "width": 656,
       "height": 1240,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-tune-idle.png": {
-      "sha256": "c7161986a3a190c025aaa2150ad7670a76f3b70306932c34e110d86d67214677",
+      "sha256": "2cb127913385a44c821c2b8ba0d28ff1c04445ee85c3940f743177c37bdf018d",
       "width": 624,
-      "height": 6066,
+      "height": 6220,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-tune-racing.png": {
-      "sha256": "0c11b7338228a90ec5d8056a424f34a1ac8ca8f25f357c9e4d498e1593a54aa1",
+      "sha256": "72e6ff31c237112f89de794faa6a5d0ff27fb26bb87061e5fb9fa2ceb4a38e51",
       "width": 624,
-      "height": 6066,
+      "height": 6220,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-tune-stopped.png": {
-      "sha256": "d3a06a868d4213356ebb2c06b8d34dc9cdad0b5dc4a34cbf329ccacb99dfb6ee",
+      "sha256": "81a2775c463b3f956ad61fc81cb024984d243febe95bb4125a97fc824eba1129",
       "width": 624,
-      "height": 6066,
+      "height": 6220,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-log-idle.png": {
-      "sha256": "d5d805a6a9c4abc56fa20e8a167b20c38f153cf987df8d5ecae974148a56ccdd",
+      "sha256": "a3ef2b8d4276296647fadf896eb414840f9b38429c3b328aef997d21584aebb0",
       "width": 624,
       "height": 2676,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-log-racing.png": {
-      "sha256": "95ada81cf591f0548997f10b5916a7731219a6379736f5485eea311553941527",
+      "sha256": "5d43cf94dff4030559dd7a3c44e80590409cd04fcab1ef531877484965059d11",
       "width": 624,
       "height": 2676,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-log-stopped.png": {
-      "sha256": "e75f222990af5010a4ce4278a63f81b23063c410d20414d36fe1524c284a26d5",
+      "sha256": "2f77a86f3f4fe599df8e6d58b8faf9b1a18e7694502afe94d2392730cfc9ab3a",
       "width": 624,
       "height": 2676,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-garage-idle.png": {
@@ -225,8 +225,8 @@
       "width": 608,
       "height": 1050,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-garage-racing.png": {
@@ -234,8 +234,8 @@
       "width": 608,
       "height": 1152,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     },
     "narrow-view-garage-stopped.png": {
@@ -243,8 +243,8 @@
       "width": 608,
       "height": 1240,
       "state": {
-        "version": "8.14.71",
-        "target": "196 · 98.7%"
+        "version": "8.14.72",
+        "target": "190 · 98.7%"
       }
     }
   }

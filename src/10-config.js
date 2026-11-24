@@ -598,7 +598,13 @@
       if (versionNewer(keep, VERSION)
         && (!previous || !previous.latest || versionNewer(keep, previous.latest))
         && typeof notifyUser === 'function') {
-        notifyUser('Nitro Wraith: update available', `v${keep} is available; this copy is v${VERSION}. Open the update badge to download it.`, 'update');
+        notifyUser(
+          'Nitro Wraith: update available',
+          autoUpdateEnabled()
+            ? `v${keep} is available; it installs after a 12 s countdown that only runs while no race is typing. Cancel from the Updates card.`
+            : `v${keep} is available; this copy is v${VERSION}. Open the update badge to download it.`,
+          'update',
+        );
       }
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
@@ -607,6 +613,8 @@
       if (previous && previous.error) {
         log(`Update check recovered: latest meta v${result.version}${result.via === 'gist' ? ' (fallback mirror)' : ''}.`);
       }
+      maybeArmAutoUpdate();
+      paintAutoUpdate(true);
       return true;
     } catch (error) {
       const message = error && error.name === 'AbortError'
@@ -627,6 +635,181 @@
     const url = info && info.via === 'gist' ? UPDATE_GIST_DOWNLOAD_URL : UPDATE_DOWNLOAD_URL;
     try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
   }
+
+  /* --------------------------------------------------------------------------
+   * Auto-instalacion
+   * ------------------------------------------------------------------------ */
+  // Detectar una version nueva no cambia la copia instalada: eso lo decide
+  // Tampermonkey. Lo que si puede hacer el panel es encadenar el aviso al
+  // instalador: cuenta 12 s, y solo cuando no hay una carrera tecleando ni la
+  // pestana esta oculta, abre la descarga de la release. El instalador sigue
+  // pidiendo confirmacion; si el usuario cancela o la carrera arranca durante
+  // la cuenta, no se navega nada. Va solo en la ventana superior (el panel real
+  // no vive en un iframe) y queda apagado con el interruptor de Updates.
+  const UPDATE_AUTO_KEY = 'nta:autoUpdate';
+  const UPDATE_AUTO_DELAY_MS = 12000;
+  const UPDATE_AUTO_RETRY_MS = 20000;
+  const UPDATE_AUTO_COOLDOWN_MS = 1800000;
+  let autoUpdateArm = null;
+  let autoUpdateBlockedUntil = 0;
+  let autoUpdateTickTimer = null;
+
+  function autoUpdateEnabled() {
+    try { return localStorage.getItem(UPDATE_AUTO_KEY) !== '0'; } catch { return true; }
+  }
+
+  function autoUpdateSafe() {
+    // `session` la declara otro fragmento; a esta altura ya existe siempre.
+    const typing = typeof session !== 'undefined' && session ? Boolean(session.typing) : false;
+    const hidden = typeof document !== 'undefined' && document.hidden === true;
+    return !typing && !hidden;
+  }
+
+  function autoUpdateState() {
+    const info = updateInfo();
+    const enabled = autoUpdateEnabled();
+    if (!info) return { phase: 'idle', enabled, version: null, leftMs: 0, safe: autoUpdateSafe() };
+    const version = info.latest;
+    if (!enabled) return { phase: 'off', enabled, version, leftMs: 0, safe: autoUpdateSafe() };
+    if (!autoUpdateArm) {
+      const waiting = autoUpdateBlockedUntil > Date.now();
+      return { phase: waiting ? 'waiting' : 'ready', enabled, version, leftMs: 0, safe: autoUpdateSafe() };
+    }
+    return {
+      phase: 'armed',
+      enabled,
+      version,
+      leftMs: Math.max(0, autoUpdateArm.at - Date.now()),
+      target: autoUpdateArm.url,
+      safe: autoUpdateSafe(),
+    };
+  }
+
+  function cancelAutoUpdate(reason = '') {
+    if (autoUpdateTickTimer) clearInterval(autoUpdateTickTimer);
+    autoUpdateTickTimer = null;
+    const hadArm = Boolean(autoUpdateArm);
+    autoUpdateArm = null;
+    if (reason === 'user') autoUpdateBlockedUntil = Date.now() + UPDATE_AUTO_COOLDOWN_MS;
+    if (hadArm && typeof log === 'function') {
+      log(reason === 'user'
+        ? 'Auto-update cancelled. The update badge stays available.'
+        : 'Auto-update paused: a race is typing.');
+    }
+    paintAutoUpdate(true);
+    return autoUpdateState();
+  }
+
+  // El navegador no navega de verdad en el banco ni en el dry-run: se guarda
+  // el destino para que la prueba pueda comprobarlo sin sacar la pagina.
+  function installUpdate() {
+    const info = updateInfo();
+    if (!info) return null;
+    const url = info.via === 'gist' ? UPDATE_GIST_DOWNLOAD_URL : UPDATE_DOWNLOAD_URL;
+    try {
+      window.__ntaAutoUpdateLast = { url, version: info.latest, at: Date.now() };
+    } catch { /* sin acceso */ }
+    if (typeof noteFlight === 'function') noteFlight('update-install', `v${info.latest}`);
+    autoUpdateBlockedUntil = Date.now() + UPDATE_AUTO_COOLDOWN_MS;
+    try {
+      if (window.__ntaAutoUpdateDryRun) return url;
+      location.assign(url);
+      return url;
+    } catch {
+      try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+      return url;
+    }
+  }
+
+  function autoUpdateTick(advanceMs = 0) {
+    if (!autoUpdateArm) return autoUpdateState();
+    if (advanceMs > 0) autoUpdateArm.at -= advanceMs;
+    if (!autoUpdateSafe()) return cancelAutoUpdate('race');
+    if (Date.now() >= autoUpdateArm.at) {
+      if (autoUpdateTickTimer) clearInterval(autoUpdateTickTimer);
+      autoUpdateTickTimer = null;
+      autoUpdateArm = null;
+      const url = installUpdate();
+      paintAutoUpdate(true);
+      const state = autoUpdateState();
+      state.installed = url;
+      return state;
+    }
+    paintAutoUpdate(true);
+    return autoUpdateState();
+  }
+
+  function armAutoUpdate() {
+    const info = updateInfo();
+    if (!info || !autoUpdateEnabled() || autoUpdateArm) return autoUpdateState();
+    if (Date.now() < autoUpdateBlockedUntil) return autoUpdateState();
+    if (!autoUpdateSafe()) {
+      autoUpdateBlockedUntil = Date.now() + UPDATE_AUTO_RETRY_MS;
+      paintAutoUpdate(true);
+      return autoUpdateState();
+    }
+    const url = info.via === 'gist' ? UPDATE_GIST_DOWNLOAD_URL : UPDATE_DOWNLOAD_URL;
+    autoUpdateArm = { at: Date.now() + UPDATE_AUTO_DELAY_MS, url };
+    if (!autoUpdateTickTimer) {
+      autoUpdateTickTimer = setInterval(() => autoUpdateTick(), 1000);
+    }
+    if (typeof log === 'function') {
+      log(`Auto-update: v${info.latest} installs in 12 s unless a race starts. Click the countdown row to cancel.`);
+    }
+    paintAutoUpdate(true);
+    return autoUpdateState();
+  }
+
+  // Solo la ventana superior arma sola. El panel real vive en la pagina de la
+  // carrera; un iframe (como el banco) no navega a la instalacion por su cuenta.
+  function maybeArmAutoUpdate() {
+    if (typeof panel === 'undefined' || !panel || !panel.root) return null;
+    try { if (window.top !== window) return null; } catch { return null; }
+    if (!updateInfo() || !autoUpdateEnabled() || autoUpdateArm) return null;
+    if (Date.now() < autoUpdateBlockedUntil) return null;
+    return armAutoUpdate();
+  }
+
+  function paintAutoUpdate(force = false) {
+    const state = autoUpdateState();
+    const refs = typeof panel !== 'undefined' && panel ? panel.refs : null;
+    if (typeof panel !== 'undefined' && panel && panel.root) {
+      const flag = state.phase === 'armed' ? 'armed'
+        : state.phase === 'waiting' ? 'waiting'
+          : state.version ? 'new' : '';
+      if (panel.root.dataset.update !== flag) panel.root.dataset.update = flag;
+    }
+    if (!refs) return;
+    if (refs.updateAuto) {
+      const value = state.enabled ? '1' : '0';
+      if (refs.updateAuto.dataset.on !== value) refs.updateAuto.dataset.on = value;
+      refs.updateAuto.setAttribute('aria-checked', state.enabled ? 'true' : 'false');
+    }
+    if (refs.upAuto) {
+      const seconds = Math.max(0, Math.ceil(state.leftMs / 1000));
+      const text = state.phase === 'armed'
+        ? `v${state.version} in ${seconds}s · cancel`
+        : state.phase === 'waiting'
+          ? `v${state.version} · paused`
+          : state.phase === 'off'
+            ? ''
+            : '';
+      if (refs.upAuto.textContent !== text) refs.upAuto.textContent = text;
+      const now = Date.now();
+      if (!force && panel.autoUpdateAt && now - panel.autoUpdateAt < 5000 && state.phase !== 'armed') return;
+      panel.autoUpdateAt = now;
+    }
+  }
+
+  function setAutoUpdate(on) {
+    try { localStorage.setItem(UPDATE_AUTO_KEY, on ? '1' : '0'); } catch { /* modo privado */ }
+    autoUpdateBlockedUntil = 0;
+    if (!on) cancelAutoUpdate('off');
+    paintAutoUpdate(true);
+    if (typeof log === 'function') log(`Auto-update: ${on ? 'on' : 'off'}.`);
+    return autoUpdateEnabled();
+  }
+
 
   // Handshake para el dry-run y el banco: la version se publica en el window
   // aunque esta ventana solo lleve la cola y no pinte panel.

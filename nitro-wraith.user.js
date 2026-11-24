@@ -291,7 +291,8 @@ same three sit in the TUNE view as a segmented control.
 TUNE view (the ⚙ button, next to Stop) is split into Rhythm (pace profile and
 calibration), Limits (session, daily budget and active hours) and Automation
 (switches for breaks, Mystery Box, stickers, Auto nitro, the safety guard and
-the sound, plus the theme and export/import/report/csv tools). "csv" downloads
+the sound, plus the theme, the motion level, export/import/report/csv tools and
+the Updates card: auto-install countdown, its switch and "check now"). "csv" downloads
 one spreadsheet with the closed sessions (the same ones Alt+H prints) and,
 below them, the 7-day summary: a
 `kind` column separates `session` rows from `day` rows, and the columns are the
@@ -316,9 +317,12 @@ Pause/Resume stops sending keys without losing the race state (inside a race it
 resumes by itself after 6 s, with a countdown on the button), Stop ends it after
 the current race and "-" minimizes the panel (header + chips + buttons). The
 whole panel can be dragged by its header and the position is remembered.
-Animations are short on purpose (panel entrance, cards coming in one after the
-other, the spring on every toggle and on the two sliders, the progress bar
-sheen) and they all switch off when the system asks for reduced motion.
+Motion has three levels in TUNE, stored with the other visual preferences:
+calm keeps only colour changes, standard adds the short entrances and the
+hover feedback, and full (the default) also runs the ambient loops while a
+race is live (the header scan, the status ring, the Live equalizer, the
+progress sheen). Entrances are short on purpose and the whole set switches
+off when the system asks for reduced motion.
 
 Esc or Alt+S (or the Stop button): stop. Mid-race it does NOT cut dead, because
 leaving a live race is a guaranteed disqualification: it lets the race finish and
@@ -1057,7 +1061,13 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (versionNewer(keep, VERSION)
         && (!previous || !previous.latest || versionNewer(keep, previous.latest))
         && typeof notifyUser === 'function') {
-        notifyUser('Nitro Wraith: update available', `v${keep} is available; this copy is v${VERSION}. Open the update badge to download it.`, 'update');
+        notifyUser(
+          'Nitro Wraith: update available',
+          autoUpdateEnabled()
+            ? `v${keep} is available; it installs after a 12 s countdown that only runs while no race is typing. Cancel from the Updates card.`
+            : `v${keep} is available; this copy is v${VERSION}. Open the update badge to download it.`,
+          'update',
+        );
       }
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
@@ -1066,6 +1076,8 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (previous && previous.error) {
         log(`Update check recovered: latest meta v${result.version}${result.via === 'gist' ? ' (fallback mirror)' : ''}.`);
       }
+      maybeArmAutoUpdate();
+      paintAutoUpdate(true);
       return true;
     } catch (error) {
       const message = error && error.name === 'AbortError'
@@ -1086,6 +1098,181 @@ All of this only aims at believable statistics. It is your call and your risk.
     const url = info && info.via === 'gist' ? UPDATE_GIST_DOWNLOAD_URL : UPDATE_DOWNLOAD_URL;
     try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
   }
+
+  /* --------------------------------------------------------------------------
+   * Auto-instalacion
+   * ------------------------------------------------------------------------ */
+  // Detectar una version nueva no cambia la copia instalada: eso lo decide
+  // Tampermonkey. Lo que si puede hacer el panel es encadenar el aviso al
+  // instalador: cuenta 12 s, y solo cuando no hay una carrera tecleando ni la
+  // pestana esta oculta, abre la descarga de la release. El instalador sigue
+  // pidiendo confirmacion; si el usuario cancela o la carrera arranca durante
+  // la cuenta, no se navega nada. Va solo en la ventana superior (el panel real
+  // no vive en un iframe) y queda apagado con el interruptor de Updates.
+  const UPDATE_AUTO_KEY = 'nta:autoUpdate';
+  const UPDATE_AUTO_DELAY_MS = 12000;
+  const UPDATE_AUTO_RETRY_MS = 20000;
+  const UPDATE_AUTO_COOLDOWN_MS = 1800000;
+  let autoUpdateArm = null;
+  let autoUpdateBlockedUntil = 0;
+  let autoUpdateTickTimer = null;
+
+  function autoUpdateEnabled() {
+    try { return localStorage.getItem(UPDATE_AUTO_KEY) !== '0'; } catch { return true; }
+  }
+
+  function autoUpdateSafe() {
+    // `session` la declara otro fragmento; a esta altura ya existe siempre.
+    const typing = typeof session !== 'undefined' && session ? Boolean(session.typing) : false;
+    const hidden = typeof document !== 'undefined' && document.hidden === true;
+    return !typing && !hidden;
+  }
+
+  function autoUpdateState() {
+    const info = updateInfo();
+    const enabled = autoUpdateEnabled();
+    if (!info) return { phase: 'idle', enabled, version: null, leftMs: 0, safe: autoUpdateSafe() };
+    const version = info.latest;
+    if (!enabled) return { phase: 'off', enabled, version, leftMs: 0, safe: autoUpdateSafe() };
+    if (!autoUpdateArm) {
+      const waiting = autoUpdateBlockedUntil > Date.now();
+      return { phase: waiting ? 'waiting' : 'ready', enabled, version, leftMs: 0, safe: autoUpdateSafe() };
+    }
+    return {
+      phase: 'armed',
+      enabled,
+      version,
+      leftMs: Math.max(0, autoUpdateArm.at - Date.now()),
+      target: autoUpdateArm.url,
+      safe: autoUpdateSafe(),
+    };
+  }
+
+  function cancelAutoUpdate(reason = '') {
+    if (autoUpdateTickTimer) clearInterval(autoUpdateTickTimer);
+    autoUpdateTickTimer = null;
+    const hadArm = Boolean(autoUpdateArm);
+    autoUpdateArm = null;
+    if (reason === 'user') autoUpdateBlockedUntil = Date.now() + UPDATE_AUTO_COOLDOWN_MS;
+    if (hadArm && typeof log === 'function') {
+      log(reason === 'user'
+        ? 'Auto-update cancelled. The update badge stays available.'
+        : 'Auto-update paused: a race is typing.');
+    }
+    paintAutoUpdate(true);
+    return autoUpdateState();
+  }
+
+  // El navegador no navega de verdad en el banco ni en el dry-run: se guarda
+  // el destino para que la prueba pueda comprobarlo sin sacar la pagina.
+  function installUpdate() {
+    const info = updateInfo();
+    if (!info) return null;
+    const url = info.via === 'gist' ? UPDATE_GIST_DOWNLOAD_URL : UPDATE_DOWNLOAD_URL;
+    try {
+      window.__ntaAutoUpdateLast = { url, version: info.latest, at: Date.now() };
+    } catch { /* sin acceso */ }
+    if (typeof noteFlight === 'function') noteFlight('update-install', `v${info.latest}`);
+    autoUpdateBlockedUntil = Date.now() + UPDATE_AUTO_COOLDOWN_MS;
+    try {
+      if (window.__ntaAutoUpdateDryRun) return url;
+      location.assign(url);
+      return url;
+    } catch {
+      try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+      return url;
+    }
+  }
+
+  function autoUpdateTick(advanceMs = 0) {
+    if (!autoUpdateArm) return autoUpdateState();
+    if (advanceMs > 0) autoUpdateArm.at -= advanceMs;
+    if (!autoUpdateSafe()) return cancelAutoUpdate('race');
+    if (Date.now() >= autoUpdateArm.at) {
+      if (autoUpdateTickTimer) clearInterval(autoUpdateTickTimer);
+      autoUpdateTickTimer = null;
+      autoUpdateArm = null;
+      const url = installUpdate();
+      paintAutoUpdate(true);
+      const state = autoUpdateState();
+      state.installed = url;
+      return state;
+    }
+    paintAutoUpdate(true);
+    return autoUpdateState();
+  }
+
+  function armAutoUpdate() {
+    const info = updateInfo();
+    if (!info || !autoUpdateEnabled() || autoUpdateArm) return autoUpdateState();
+    if (Date.now() < autoUpdateBlockedUntil) return autoUpdateState();
+    if (!autoUpdateSafe()) {
+      autoUpdateBlockedUntil = Date.now() + UPDATE_AUTO_RETRY_MS;
+      paintAutoUpdate(true);
+      return autoUpdateState();
+    }
+    const url = info.via === 'gist' ? UPDATE_GIST_DOWNLOAD_URL : UPDATE_DOWNLOAD_URL;
+    autoUpdateArm = { at: Date.now() + UPDATE_AUTO_DELAY_MS, url };
+    if (!autoUpdateTickTimer) {
+      autoUpdateTickTimer = setInterval(() => autoUpdateTick(), 1000);
+    }
+    if (typeof log === 'function') {
+      log(`Auto-update: v${info.latest} installs in 12 s unless a race starts. Click the countdown row to cancel.`);
+    }
+    paintAutoUpdate(true);
+    return autoUpdateState();
+  }
+
+  // Solo la ventana superior arma sola. El panel real vive en la pagina de la
+  // carrera; un iframe (como el banco) no navega a la instalacion por su cuenta.
+  function maybeArmAutoUpdate() {
+    if (typeof panel === 'undefined' || !panel || !panel.root) return null;
+    try { if (window.top !== window) return null; } catch { return null; }
+    if (!updateInfo() || !autoUpdateEnabled() || autoUpdateArm) return null;
+    if (Date.now() < autoUpdateBlockedUntil) return null;
+    return armAutoUpdate();
+  }
+
+  function paintAutoUpdate(force = false) {
+    const state = autoUpdateState();
+    const refs = typeof panel !== 'undefined' && panel ? panel.refs : null;
+    if (typeof panel !== 'undefined' && panel && panel.root) {
+      const flag = state.phase === 'armed' ? 'armed'
+        : state.phase === 'waiting' ? 'waiting'
+          : state.version ? 'new' : '';
+      if (panel.root.dataset.update !== flag) panel.root.dataset.update = flag;
+    }
+    if (!refs) return;
+    if (refs.updateAuto) {
+      const value = state.enabled ? '1' : '0';
+      if (refs.updateAuto.dataset.on !== value) refs.updateAuto.dataset.on = value;
+      refs.updateAuto.setAttribute('aria-checked', state.enabled ? 'true' : 'false');
+    }
+    if (refs.upAuto) {
+      const seconds = Math.max(0, Math.ceil(state.leftMs / 1000));
+      const text = state.phase === 'armed'
+        ? `v${state.version} in ${seconds}s · cancel`
+        : state.phase === 'waiting'
+          ? `v${state.version} · paused`
+          : state.phase === 'off'
+            ? ''
+            : '';
+      if (refs.upAuto.textContent !== text) refs.upAuto.textContent = text;
+      const now = Date.now();
+      if (!force && panel.autoUpdateAt && now - panel.autoUpdateAt < 5000 && state.phase !== 'armed') return;
+      panel.autoUpdateAt = now;
+    }
+  }
+
+  function setAutoUpdate(on) {
+    try { localStorage.setItem(UPDATE_AUTO_KEY, on ? '1' : '0'); } catch { /* modo privado */ }
+    autoUpdateBlockedUntil = 0;
+    if (!on) cancelAutoUpdate('off');
+    paintAutoUpdate(true);
+    if (typeof log === 'function') log(`Auto-update: ${on ? 'on' : 'off'}.`);
+    return autoUpdateEnabled();
+  }
+
 
   // Handshake para el dry-run y el banco: la version se publica en el window
   // aunque esta ventana solo lleve la cola y no pinte panel.
@@ -2157,11 +2344,18 @@ All of this only aims at believable statistics. It is your call and your risk.
     scale: 100,
     highContrast: false,
     raceFocus: true,
+    motion: 'full',
   });
   const RGB_SPEEDS = [0.5, 1, 2];
   const RGB_RACE_MODES = ['static', 'border', 'full'];
   const PANEL_DENSITIES = ['comfortable', 'compact'];
   const PANEL_SCALES = [100, 115];
+  // Tres niveles de movimiento: calm solo deja transiciones de color, standard
+  // conserva entradas y hoveres sin bucles, full anade los bucles ambientales
+  // (escáner de la cabecera, anillo del estado, ecualizador de la tarjeta Live).
+  // El sistema operativo manda por encima de los tres: prefers-reduced-motion
+  // apaga tambien full.
+  const PANEL_MOTIONS = ['calm', 'standard', 'full'];
 
   function normalizeVisualColor(value, fallback) {
     const color = String(value || '').trim().toLowerCase();
@@ -2183,6 +2377,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       scale,
       highContrast: source.highContrast === true,
       raceFocus: source.raceFocus !== false,
+      motion: PANEL_MOTIONS.includes(source.motion) ? source.motion : VISUAL_DEFAULTS.motion,
     };
   }
 
@@ -9300,6 +9495,138 @@ function dayCurveAt(at = Date.now()) {
         }
         @keyframes nt-rgb-title { to { background-position: 300% 0; } }
 
+        /* ---------- movimiento ------------------------------------------------ */
+        /* Tres niveles en data-motion. full mantiene los bucles ambientales que
+           dan vida al panel sin tocar el layout: un escaner tenue en la cabecera
+           mientras se escribe, un anillo que late en el punto de estado, el
+           ecualizador de la tarjeta Live, el reflejo de la barra de carrera y
+           las muestras de tema. standard conserva entradas y hoveres pero apaga
+           esos bucles; calm solo deja cambios de color. Todo se apoya en
+           transform, opacity y background-position: nada de width/height/top. */
+        @keyframes nt-scan {
+          from { transform: translateX(-120%); }
+          to   { transform: translateX(340%); }
+        }
+        @keyframes nt-ring {
+          0%   { transform: scale(.55); opacity: .8; }
+          70%, 100% { transform: scale(2.7); opacity: 0; }
+        }
+        @keyframes nt-glow {
+          0%, 100% { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--acc) 45%, transparent)); }
+          50%      { filter: drop-shadow(0 0 8px color-mix(in srgb, var(--acc) 85%, transparent)); }
+        }
+        @keyframes nt-eq {
+          0%, 100% { transform: scaleY(.3); }
+          50%      { transform: scaleY(1); }
+        }
+        @keyframes nt-warm {
+          0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acc) 0%, transparent); }
+          50%      { box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 28%, transparent); }
+        }
+
+        /* Escaner: una banda de luz cruza la cabecera solo mientras hay carrera.
+           Va en ::before (::after ya es la linea divisoria) y no captura clics. */
+        .head::before {
+          content: '';
+          position: absolute;
+          left: 0; top: 0; bottom: 0;
+          width: 34%;
+          background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 22%, transparent), transparent);
+          transform: translateX(-120%);
+          opacity: 0;
+          pointer-events: none;
+        }
+        .panel[data-state="running"] .head::before { opacity: 1; animation: nt-scan 3.4s ease-in-out infinite; }
+
+        /* Anillo del punto de estado: late hacia fuera al ritmo del pulso. */
+        .head .dot { position: relative; }
+        .head .dot::after {
+          content: '';
+          position: absolute;
+          inset: -3px;
+          border-radius: 50%;
+          border: 1px solid color-mix(in srgb, var(--acc) 70%, transparent);
+          opacity: 0;
+          pointer-events: none;
+        }
+        .panel[data-state="running"] .head .dot::after { animation: nt-ring 1.8s ease-out infinite; }
+
+        /* La marca respira: un halo que sube y baja muy despacio. */
+        .mark svg { animation: nt-glow 5.2s ease-in-out infinite; }
+
+        /* Ecualizador de la tarjeta Live: cinco barras que siguen al ritmo. */
+        .livedots { display: inline-flex; align-items: flex-end; gap: 2px; height: 9px; margin-left: 2px; }
+        .livedots i {
+          width: 2px; height: 9px; border-radius: 1px;
+          background: currentColor;
+          transform: scaleY(.3);
+          transform-origin: 50% 100%;
+          opacity: .5;
+        }
+        .panel[data-state="running"] .livedots i { opacity: .95; animation: nt-eq 1s ease-in-out infinite; }
+        .panel[data-state="running"] .livedots i:nth-child(2) { animation-delay: -.72s; }
+        .panel[data-state="running"] .livedots i:nth-child(3) { animation-delay: -.38s; }
+        .panel[data-state="running"] .livedots i:nth-child(4) { animation-delay: -.86s; }
+        .panel[data-state="running"] .livedots i:nth-child(5) { animation-delay: -.18s; }
+        .panel[data-state="paused"] .livedots i { color: var(--warn); }
+
+        /* Reflejo de la barra de carrera: ademas del brillo de la vista Live. */
+        .race-line { position: relative; }
+        .race-line::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent);
+          transform: translateX(-100%);
+          opacity: 0;
+          pointer-events: none;
+        }
+        .panel[data-state="running"] .race-line::after { opacity: 1; animation: nt-sheen 1.9s ease-in-out infinite; }
+
+        /* Micro-feedback de puntero: sube un pixel y vuelve. Solo con hover real,
+           para que en tactil no se quede pegado. */
+        @media (hover: hover) {
+          .card:hover { transform: translateY(-1px); }
+          .act:hover, .toggle:hover, .rail-btn:hover, .gear:hover, .iconbtn:hover { transform: translateY(-1px); }
+          .gear svg { transition: transform .32s cubic-bezier(.34, 1.4, .5, 1); }
+          .gear:hover svg { transform: rotate(14deg); }
+          .log-item:hover, .hist-row:hover { transform: translateX(2px); }
+          .theme[aria-pressed="true"] i { animation: nt-glow 3.6s ease-in-out infinite; }
+        }
+        .act:active, .toggle:active, .rail-btn:active, .gear:active { transform: translateY(0) scale(.97); }
+
+        /* Un aviso de version pinta el borde de la tarjeta Updates; el
+           contador de instalacion lo enciende por completo. */
+        .panel[data-update="new"] .update-card { border-color: color-mix(in srgb, var(--acc) 40%, transparent); animation: nt-warm 2.4s ease-in-out infinite; }
+        .panel[data-update="armed"] .update-card { border-color: var(--acc); box-shadow: 0 0 22px -12px var(--acc), inset 0 0 18px -14px var(--acc); }
+        .row.up-auto-row { display: none; }
+        button.row.up-auto-row { appearance: none; width: 100%; margin: 0; border: 0; border-bottom: 1px solid rgba(255, 255, 255, .03); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+        .panel[data-update="armed"] .row.up-auto-row,
+        .panel[data-update="waiting"] .row.up-auto-row { display: flex; }
+        .up-auto-row b { color: var(--acc); font-variant-numeric: tabular-nums; }
+        .panel[data-update="waiting"] .up-auto-row b { color: var(--ink-warn); }
+        .up-auto-row { cursor: pointer; }
+        .up-auto-row:hover b { text-decoration: underline dotted; }
+
+        /* standard y calm apagan los bucles ambientales; calm apaga tambien las
+           entradas. Los tres respetan prefers-reduced-motion, que va aparte. */
+        .panel[data-motion="standard"] .head::before,
+        .panel[data-motion="standard"] .head .dot::after,
+        .panel[data-motion="standard"] .mark svg,
+        .panel[data-motion="standard"] .livedots i,
+        .panel[data-motion="standard"] .race-line::after,
+        .panel[data-motion="standard"] .theme[aria-pressed="true"] i,
+        .panel[data-motion="standard"][data-update="new"] .update-card,
+        .panel[data-motion="calm"] .head::before,
+        .panel[data-motion="calm"] .head .dot::after,
+        .panel[data-motion="calm"] .mark svg,
+        .panel[data-motion="calm"] .livedots i,
+        .panel[data-motion="calm"] .race-line::after,
+        .panel[data-motion="calm"] .theme[aria-pressed="true"] i,
+        .panel[data-motion="calm"][data-update="new"] .update-card,
+        .panel[data-motion="calm"] .views .card,
+        .panel[data-motion="calm"] .views .view { animation: none; }
+
         /* ---------- cabecera ------------------------------------------------- */
         .head { position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; cursor: grab; touch-action: none; }
         .head::after {
@@ -9756,6 +10083,13 @@ function dayCurveAt(at = Date.now()) {
         .seg-btn { all: unset; position: relative; z-index: 1; padding: 5px 0; text-align: center; border-radius: 7px; cursor: pointer; font: 700 9px/1 var(--font-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); transition: color .2s ease; }
         .seg-btn:hover { color: var(--acc-2); }
         .seg[data-index="0"] .seg-btn[data-pace="soft"], .seg[data-index="1"] .seg-btn[data-pace="balanced"], .seg[data-index="2"] .seg-btn[data-pace="fast"] { color: var(--acc); }
+        /* Mismo segmentado para el nivel de movimiento; el indice mueve el
+           deslizador y el color marca el elegido. */
+        .seg.motion-seg { margin-top: 6px; }
+        .set-lbl.motion-lbl { margin-top: 9px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .03); }
+        .seg.motion-seg[data-index="0"] .seg-btn[data-motion-btn="calm"],
+        .seg.motion-seg[data-index="1"] .seg-btn[data-motion-btn="standard"],
+        .seg.motion-seg[data-index="2"] .seg-btn[data-motion-btn="full"] { color: var(--acc); }
 
         .sld { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 2px 0 0; background: transparent; cursor: pointer; }
         .sld::-webkit-slider-runnable-track { height: 4px; border-radius: 99px; background: linear-gradient(90deg, var(--acc) 0 var(--fill, 0%), rgba(255, 255, 255, .1) var(--fill, 0%) 100%); }
@@ -10089,6 +10423,8 @@ function dayCurveAt(at = Date.now()) {
         @media (prefers-reduced-motion: reduce) {
           .panel, .panel[data-fresh="1"] .card, .view, .stat b.bump, .recent-pair i.bump, .prog::after,
           .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title,
+          .panel .head::before, .panel .head .dot::after, .panel .mark svg, .panel .livedots i,
+          .panel .race-line::after, .panel .theme[aria-pressed="true"] i, .panel .update-card,
           .panel[data-theme="rgb"], .panel[data-theme="rgb"]::after { animation: none !important; }
         }
       `;
@@ -10891,6 +11227,19 @@ function dayCurveAt(at = Date.now()) {
       button.dataset.active = selected ? '1' : '0';
     }
 
+    // Nivel de movimiento: el mismo segmentado que el perfil de ritmo. El
+    // indice mueve el deslizador; el texto de cada boton solo lo cuenta.
+    const motionSeg = panel.refs.motionSeg;
+    if (motionSeg) {
+      const index = Math.max(0, PANEL_MOTIONS.indexOf(visualPrefs.motion));
+      const value = String(index);
+      if (motionSeg.dataset.index !== value) motionSeg.dataset.index = value;
+      for (const button of motionSeg.querySelectorAll('[data-motion-btn]')) {
+        const selected = button.dataset.motionBtn === visualPrefs.motion;
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      }
+    }
+
     // Pantalla: densidad, escala, contraste y foco de carrera. Los dos selects y
     // los dos interruptores comparten el mismo modelo que el RGB Lab.
     if (panel.refs.panelDensity) panel.refs.panelDensity.value = visualPrefs.density;
@@ -11225,6 +11574,16 @@ function dayCurveAt(at = Date.now()) {
   window.__ntaDebug.updateState = () => updateState();
   window.__ntaDebug.updateBusy = () => updateChecking;
   window.__ntaDebug.checkForUpdate = (force) => checkForUpdate(Boolean(force));
+  window.__ntaDebug.autoUpdate = () => autoUpdateState();
+  window.__ntaDebug.setAutoUpdate = (on) => setAutoUpdate(Boolean(on));
+  window.__ntaDebug.armAutoUpdate = () => {
+    autoUpdateBlockedUntil = 0;
+    if (!autoUpdateArm) armAutoUpdate();
+    return autoUpdateState();
+  };
+  window.__ntaDebug.tickAutoUpdate = (advanceMs = 0) => autoUpdateTick(Number(advanceMs) || 0);
+  window.__ntaDebug.cancelAutoUpdate = () => cancelAutoUpdate('user');
+  window.__ntaDebug.lastAutoUpdate = () => window.__ntaAutoUpdateLast || null;
   window.__ntaDebug.live = () => liveSituation();
   window.__ntaDebug.calibrationAuto = () => CONFIG.calibration.auto === true;
   window.__ntaDebug.calibrationHealth = () => ({
@@ -12833,6 +13192,10 @@ function dayCurveAt(at = Date.now()) {
       cfgNote: pick('[data-field="cfgNote"]'),
       up: pick('[data-field="up"]'),
       upInfo: pick('[data-field="upInfo"]'),
+      upAuto: pick('[data-field="upAuto"]'),
+      updateAuto: pick('[data-update-toggle="auto"]'),
+      updateCancel: pick('[data-act="updateCancel"]'),
+      motionSeg: pick('[data-field="motionSeg"]'),
       updateCheck: pick('[data-act="updateCheck"]'),
       afkFreezeReset: pick('[data-act="afkFreezeReset"]'),
       nitroStrategy: pick('[data-field="nitroStrategy"]'),
@@ -12938,6 +13301,22 @@ function dayCurveAt(at = Date.now()) {
           setText(button, 'check now');
           button.disabled = false;
         }, 1400);
+      });
+    }
+
+    // Auto-instalacion: el interruptor vive en la tarjeta Updates y el
+    // contador es el boton que cancela. Ningun aviso de version se convierte en
+    // instalacion sin pasar por aqui.
+    if (panel.refs.updateAuto) {
+      panel.refs.updateAuto.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setAutoUpdate(autoUpdateEnabled() !== true);
+      });
+    }
+    if (panel.refs.updateCancel) {
+      panel.refs.updateCancel.addEventListener('click', (event) => {
+        event.stopPropagation();
+        cancelAutoUpdate('user');
       });
     }
 
@@ -13340,6 +13719,9 @@ function dayCurveAt(at = Date.now()) {
 
         if (chip.dataset.pace) {
           setPaceProfile(chip.dataset.pace);
+        } else if (chip.dataset.motionBtn) {
+          setVisualPref('motion', chip.dataset.motionBtn);
+          paintVisualControls();
         } else if (chip.dataset.visualToggle) {
           const key = chip.dataset.visualToggle;
           setVisualPref(key, key === 'highContrast' ? visualPrefs.highContrast !== true : visualPrefs.raceFocus === false);
@@ -14561,6 +14943,10 @@ function dayCurveAt(at = Date.now()) {
     if (panel.refs.update) {
       paintUpdateBadge(panel.refs.update);
       paintUpdateHealth();
+      // La cuenta atras de auto-instalacion se rearma sola cuando vuelve a
+      // haber un hueco sin carrera; con el panel en segundo plano no corre.
+      maybeArmAutoUpdate();
+      paintAutoUpdate();
       if (panel.refs.update.dataset.bound !== '1') {
         panel.refs.update.dataset.bound = '1';
         panel.refs.update.addEventListener('pointerdown', (event) => event.stopPropagation());
@@ -15423,6 +15809,7 @@ function dayCurveAt(at = Date.now()) {
     root.style.setProperty('--nt-rgb-title-duration', `${6 / speed}s`);
     if (root.dataset.rgbRace !== visualPrefs.rgbRaceMode) root.dataset.rgbRace = visualPrefs.rgbRaceMode;
     if (root.dataset.density !== visualPrefs.density) root.dataset.density = visualPrefs.density;
+    if (root.dataset.motion !== visualPrefs.motion) root.dataset.motion = visualPrefs.motion;
     if (root.dataset.scale !== String(visualPrefs.scale)) root.dataset.scale = String(visualPrefs.scale);
     if (root.dataset.contrast !== (visualPrefs.highContrast ? 'high' : 'normal')) {
       root.dataset.contrast = visualPrefs.highContrast ? 'high' : 'normal';
@@ -15858,7 +16245,7 @@ function dayCurveAt(at = Date.now()) {
               <div class="view-head"><span>Live</span><b>race telemetry</b></div>
               <div class="card live-card">
                 <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
-                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
+                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="livedots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
                 <div class="focus-strip" data-field="focusStrip" role="group" aria-label="Race focus: pace, accuracy, progress and next action">
                   <span class="focus-state" data-field="focusState">LIVE</span>
                   <b data-field="focusNext">Waiting for the next key.</b>
@@ -16192,6 +16579,13 @@ function dayCurveAt(at = Date.now()) {
                     <div class="row" title="High contrast: pure white text and stronger hairlines on every theme"><span>contrast</span><button class="sw" type="button" role="switch" aria-checked="false" data-visual-toggle="highContrast" data-on="0" title="High contrast: pure white text and stronger hairlines on every theme"></button></div>
                     <div class="row" title="Race focus: a pace, accuracy and next-action strip while racing, with the account card out of the way"><span>race focus</span><button class="sw" type="button" role="switch" aria-checked="true" data-visual-toggle="raceFocus" data-on="1" title="Race focus: a pace, accuracy and next-action strip while racing, with the account card out of the way"></button></div>
                   </div>
+                  <div class="set-lbl motion-lbl">Motion<i>how alive the panel feels</i></div>
+                  <div class="seg motion-seg" data-field="motionSeg" data-index="2" role="group" aria-label="Panel motion">
+                    <i class="seg-glide"></i>
+                    <button class="seg-btn" type="button" data-motion-btn="calm" aria-pressed="false" title="Calm: only quick colour changes; no entrances, no loops">Calm</button>
+                    <button class="seg-btn" type="button" data-motion-btn="standard" aria-pressed="false" title="Standard: entrances and hover feedback, without the ambient loops">Std</button>
+                    <button class="seg-btn" type="button" data-motion-btn="full" aria-pressed="true" title="Full: ambient loops while racing (header scan, status ring, live equalizer)">Full</button>
+                  </div>
                   <div class="cfg-note">Display choices are saved with the theme and travel with an exported config.</div>
                 </div>
                 <div class="card">
@@ -16298,13 +16692,18 @@ function dayCurveAt(at = Date.now()) {
               <div class="card update-card">
                 <div class="card-h"><span class="card-t">Updates</span><span class="card-s">GitHub releases</span></div>
                 <div class="rows">
-                  <div class="row" title="Last public update check. A newer build is downloaded from GitHub, never installed without your click."><span>check</span><b data-field="upInfo">—</b></div>
+                  <div class="row" title="Last public update check: the last result, its error and the next retry"><span>check</span><b data-field="upInfo">—</b></div>
+                  <button class="row up-auto-row" type="button" data-act="updateCancel" title="Auto-update is counting down. Click to cancel; the badge stays so you can install when you want"><span>install</span><b data-field="upAuto">—</b></button>
+                </div>
+                <div class="set-row">
+                  <span class="set-lbl">Auto-update<i>install a newer build when no race is running</i></span>
+                  <span class="set-val"><button class="sw" type="button" role="switch" aria-checked="true" data-update-toggle="auto" data-on="1" title="Auto-update: when a newer release is found, the panel shows a 12 s countdown and then opens the installer. It never fires while you are typing; cancel from the countdown row"></button></span>
                 </div>
                 <div class="season-actions">
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
                   <button class="act" type="button" data-act="updateCheck" title="Check the latest GitHub release for a newer version now">check now</button>
                 </div>
-                <div class="cfg-note">The latest release meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the release CDN is down, the Gist mirror is used. The installed copy changes only when you download a release.</div>
+                <div class="cfg-note">The latest release meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the release CDN is down, the Gist mirror is used. With auto-update on, a newer build is handed to the installer after a 12 s countdown that only runs while no race is typing; Tampermonkey still asks before replacing the script.</div>
               </div>
               <div class="card">
                 <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v${VERSION}</span></div>

@@ -67,13 +67,19 @@ stats, and shows why it is waiting.
 
 - **Live:** WPM, accuracy, a **recent** pace and accuracy for the last six seconds of accepted keys, the AUTO pace badge, target range, race count, session average, result and the game HUD. The header carries a dot and a freshness label: the figures are repainted four times per second, and if the race stops accepting keys the label turns amber (`stalled 3s`) and both recent figures blank, instead of pretending the frozen numbers are live. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
 - **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops. The same panel has the **AFK off/on** control, the keep-alive state and whether the queue is visible, hidden or blocked by another gate.
-- **Tune:** pace profile, limits, breaks, stickers, sound, desktop alerts, AFK farming (off by default), the optional AFK keep-alive, the **AFK interlock**, the **AFK safety guard**, a live **AFK health** row and a **Health center** that summarizes account, AFK, update and freeze state. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
+- **Tune:** pace profile, limits, breaks, stickers, sound, desktop alerts, AFK farming (off by default), the optional AFK keep-alive, the **AFK interlock**, the **AFK safety guard**, a live **AFK health** row, a **Health center** that summarizes account, AFK, update and freeze state, and a **Motion** row with calm, standard and full. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
 The update badge only appears when the latest release has a newer version. The script
 checks every 5 minutes and again whenever you return to the tab, so a new
-release shows up without waiting an hour. If you do not see it, your copy is
-current. **versions** in TUNE opens the GitHub release history and **canary**
+release shows up without waiting an hour. When one does, the **Updates** card
+chains into the installer by itself: a 12-second countdown, shown on a row you
+can click to cancel, that only runs while no race is typing and the tab is
+visible (otherwise it waits for a pause and retries). Cancelling keeps the
+badge for 30 minutes, and the **Auto-update** switch in the same card turns the
+countdown off entirely. Tampermonkey still asks before replacing the script.
+If you do not see the badge, your copy is current. **versions** in TUNE opens
+the GitHub release history and **canary**
 installs the test channel (in a canary build that button reads **stable** and
 goes back), so a release that misbehaves can be replaced without touching the
 stable one; the diagnostic report now includes the recent flight recorder
@@ -304,7 +310,11 @@ The main configuration lives in `CONFIG` (`src/10-config.js`) and daily settings
 in `TUNE`, stored in `localStorage`. The **Updates** card checks the latest release
 meta (with the Gist as mirror) on
 open, every 5 minutes, when the network returns and when the tab becomes active;
-it also has **check now** and the garage badge for installing the new version.
+it also has **check now**, the auto-install countdown with its on/off switch and
+the garage badge for installing the new version. The **Motion** row in TUNE's
+Display card picks how alive the panel feels: **calm** (colour changes only),
+**standard** (entrances and hover feedback) and **full** (adds the ambient loops
+while racing). All three respect `prefers-reduced-motion`.
 
 README release notes are generated between the `release:start` and
 `release:end` markers. Run `npm run readme:sync` after editing the changelog.

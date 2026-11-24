@@ -291,7 +291,8 @@ same three sit in the TUNE view as a segmented control.
 TUNE view (the ⚙ button, next to Stop) is split into Rhythm (pace profile and
 calibration), Limits (session, daily budget and active hours) and Automation
 (switches for breaks, Mystery Box, stickers, Auto nitro, the safety guard and
-the sound, plus the theme and export/import/report/csv tools). "csv" downloads
+the sound, plus the theme, the motion level, export/import/report/csv tools and
+the Updates card: auto-install countdown, its switch and "check now"). "csv" downloads
 one spreadsheet with the closed sessions (the same ones Alt+H prints) and,
 below them, the 7-day summary: a
 `kind` column separates `session` rows from `day` rows, and the columns are the
@@ -316,9 +317,12 @@ Pause/Resume stops sending keys without losing the race state (inside a race it
 resumes by itself after 6 s, with a countdown on the button), Stop ends it after
 the current race and "-" minimizes the panel (header + chips + buttons). The
 whole panel can be dragged by its header and the position is remembered.
-Animations are short on purpose (panel entrance, cards coming in one after the
-other, the spring on every toggle and on the two sliders, the progress bar
-sheen) and they all switch off when the system asks for reduced motion.
+Motion has three levels in TUNE, stored with the other visual preferences:
+calm keeps only colour changes, standard adds the short entrances and the
+hover feedback, and full (the default) also runs the ambient loops while a
+race is live (the header scan, the status ring, the Live equalizer, the
+progress sheen). Entrances are short on purpose and the whole set switches
+off when the system asks for reduced motion.
 
 Esc or Alt+S (or the Stop button): stop. Mid-race it does NOT cut dead, because
 leaving a live race is a guaranteed disqualification: it lets the race finish and

@@ -50,11 +50,18 @@ the mono stack when they change at 4 Hz so digits do not reflow.
 
 ## Motion
 
-- Durations ≤ 250 ms; `transform`/`opacity` only.
+- Three levels on the panel root (`data-motion`), picked in TUNE and stored with
+  the other visual prefs: **calm** keeps only colour transitions, **standard**
+  adds the short entrances and hover feedback, **full** (default) also runs the
+  ambient loops while a race is live.
+- Entrances and feedback: durations ≤ 250 ms; `transform`/`opacity` only.
+- Ambient loops (header scan, status ring, mark glow, Live equalizer, progress
+  sheen) are the only long animations. They run only with
+  `data-state="running"` and `data-motion="full"`, never on an idle panel.
 - Never `transition: all`, never animate `width`, `height`, `top` or `left`
   (progress bars use `scaleX`).
-- Every animation has a `prefers-reduced-motion: reduce` kill switch; content is
-  visible with animation off.
+- Every animation has a `prefers-reduced-motion: reduce` kill switch that wins
+  over all three levels; content is visible with animation off.
 - Motion explains state (a value changed, a card arrived); it never decorates an
   idle panel. Idle ticks perform zero DOM writes.
 
@@ -84,7 +91,7 @@ applicable and are listed as such, not silently ignored.
 | F8 no invented metrics | Enforced by product rule: all values come from the session |
 | F12–F14 hero / word count / container | Not applicable: no landing page |
 | F15 CSS stamp | Not applicable: generated panel sheet, not an exported page |
-| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (402 checks + 24 visual baselines) |
+| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (405 checks + 24 visual baselines) |
 
 ### Floor audit
 

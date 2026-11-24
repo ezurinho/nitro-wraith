@@ -844,6 +844,97 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && scriptText.includes('__ntaNeedGarage: true, reason:')
       && scriptText.includes('Number(saved.holdMs) > 2 * 60000'));
 
+  // Auto-instalacion: 12 s de cuenta, solo sin carrera tecleando y con la
+  // ventana visible. El dry-run devuelve la URL en vez de navegar, asi que la
+  // prueba comprueba todo el recorrido sin salir de la pagina.
+  const newerVersion = scriptVersion.replace(/(\d+)$/, (digits) => String(Number(digits) + 1));
+  const autoUpdateLab = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    if (!d || !d.armAutoUpdate || !d.autoUpdate) return { has: false };
+    const row = s.querySelector('[data-act="updateCancel"]');
+    const badge = s.querySelector('[data-field="upAuto"]');
+    const toggle = s.querySelector('[data-update-toggle="auto"]');
+    const card = s.querySelector('.panel');
+    if (!row || !badge || !toggle) return { has: true, missing: true };
+    const key = 'nta:update';
+    const saved = w.localStorage.getItem(key);
+    w.__ntaAutoUpdateDryRun = true;
+    w.localStorage.setItem(key, JSON.stringify({
+      at: Date.now(), latest: '${newerVersion}', status: 200, error: null, via: 'github',
+    }));
+    try {
+      d.patchSession({ typing: false });
+      d.setAutoUpdate(false);
+      const off = d.autoUpdate();
+      const offArm = d.armAutoUpdate();
+      const offToggle = toggle.dataset.on;
+      d.setAutoUpdate(true);
+      const on = d.autoUpdate();
+      const armed = d.armAutoUpdate();
+      const armedText = badge.textContent;
+      const armedFlag = card.dataset.update;
+      const armedShown = w.getComputedStyle(row).display !== 'none';
+      const toggleOn = toggle.dataset.on;
+      const checked = toggle.getAttribute('aria-checked');
+      const half = d.tickAutoUpdate(6000);
+      const halfText = badge.textContent;
+      w.__ntaAutoUpdateDryRun = true;
+      const fired = d.tickAutoUpdate(20000);
+      const last = d.lastAutoUpdate();
+      d.patchSession({ typing: true });
+      d.setAutoUpdate(true);
+      const typingArm = d.armAutoUpdate();
+      const typingText = badge.textContent;
+      d.patchSession({ typing: false });
+      d.setAutoUpdate(true);
+      d.armAutoUpdate();
+      const cancelled = d.cancelAutoUpdate();
+      const afterCancel = d.autoUpdate();
+      return {
+        has: true,
+        offPhase: off.phase, offEnabled: off.enabled, offArmPhase: offArm.phase, offToggle,
+        onEnabled: on.enabled,
+        armedPhase: armed.phase, armedLeft: armed.leftMs, armedVersion: armed.version,
+        armedText, armedFlag, armedShown, toggleOn, checked,
+        halfLeft: half.leftMs, halfText, halfPhase: half.phase,
+        firedPhase: fired.phase, installed: fired.installed,
+        lastUrl: last && last.url, lastVersion: last && last.version, lastAt: last && last.at,
+        typingPhase: typingArm.phase, typingText,
+        cancelledPhase: cancelled.phase, afterCancelPhase: afterCancel.phase,
+      };
+    } finally {
+      w.__ntaAutoUpdateDryRun = false;
+      if (saved === null) w.localStorage.removeItem(key); else w.localStorage.setItem(key, saved);
+      d.patchSession({ typing: false });
+      d.setAutoUpdate(true);
+    }
+  })()`, true);
+  check('auto-update counts down, installs the release and respects typing and cancel',
+    autoUpdateLab.has === true && !autoUpdateLab.missing
+      && autoUpdateLab.offPhase === 'off' && autoUpdateLab.offEnabled === false
+      && autoUpdateLab.offArmPhase === 'off' && autoUpdateLab.offToggle === '0'
+      && autoUpdateLab.onEnabled === true
+      && autoUpdateLab.armedPhase === 'armed'
+      && autoUpdateLab.armedVersion === newerVersion
+      && autoUpdateLab.armedLeft > 10500 && autoUpdateLab.armedLeft <= 12000
+      && /in \d+s · cancel$/.test(autoUpdateLab.armedText)
+      && autoUpdateLab.armedFlag === 'armed' && autoUpdateLab.armedShown === true
+      && autoUpdateLab.toggleOn === '1' && autoUpdateLab.checked === 'true'
+      && autoUpdateLab.halfPhase === 'armed'
+      && autoUpdateLab.halfLeft > 4500 && autoUpdateLab.halfLeft <= 6000
+      && /in \d+s · cancel$/.test(autoUpdateLab.halfText)
+      && autoUpdateLab.firedPhase === 'waiting'
+      && autoUpdateLab.installed === updateDownload
+      && autoUpdateLab.lastUrl === updateDownload
+      && autoUpdateLab.lastVersion === newerVersion
+      && typeof autoUpdateLab.lastAt === 'number'
+      && autoUpdateLab.typingPhase === 'waiting'
+      && /· paused$/.test(autoUpdateLab.typingText)
+      && autoUpdateLab.cancelledPhase === 'waiting'
+      && autoUpdateLab.afterCancelPhase === 'waiting', autoUpdateLab);
+
   // Tema: se aplica en el DOM real, marca la muestra y queda guardado para la
   // proxima carga. Se vuelve a carbon para no dejar el resto del banco teñido.
   const themePick = await cdp.evaluate(`(() => {
@@ -1111,12 +1202,24 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     const root = w.document.getElementById('nt-autotyper-panel').shadowRoot;
     const panel = root.querySelector('.panel');
     const hue = panel.getAnimations().filter((animation) => animation.animationName === 'nt-rgb-hue');
+    // Los bucles ambientales nuevos tampoco deben correr sin movimiento.
+    const prevState = panel.dataset.state;
+    panel.dataset.state = 'running';
+    const loops = {
+      scan: w.getComputedStyle(root.querySelector('.head'), '::before').animationName,
+      ring: w.getComputedStyle(root.querySelector('.head .dot'), '::after').animationName,
+      mark: w.getComputedStyle(root.querySelector('.mark svg')).animationName,
+      eq: w.getComputedStyle(root.querySelector('.livedots i')).animationName,
+      sheen: w.getComputedStyle(root.querySelector('.race-line'), '::after').animationName,
+    };
+    if (prevState === undefined) delete panel.dataset.state; else panel.dataset.state = prevState;
     const result = {
       reduced: w.matchMedia('(prefers-reduced-motion: reduce)').matches,
       running: hue.some((animation) => animation.playState === 'running'),
       borderAnimation: w.getComputedStyle(panel, '::after').animationName,
       titleAnimation: w.getComputedStyle(root.querySelector('.title')).animationName,
       animations: hue.map((animation) => animation.animationName),
+      loops,
     };
     const carbon = root.querySelector('[data-theme-btn="carbon"]');
     if (carbon) carbon.click();
@@ -1128,6 +1231,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('reduced motion disables the continuous RGB hue cycle',
     reducedRgb.reduced && !reducedRgb.running
       && reducedRgb.borderAnimation === 'none' && reducedRgb.titleAnimation === 'none', reducedRgb);
+  check('reduced motion also stops the scan, ring, glow, equalizer and sheen loops',
+    reducedRgb.loops && reducedRgb.loops.scan === 'none' && reducedRgb.loops.ring === 'none'
+      && reducedRgb.loops.mark === 'none' && reducedRgb.loops.eq === 'none'
+      && reducedRgb.loops.sheen === 'none', reducedRgb.loops);
 
   const displayLab = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
@@ -1188,6 +1295,71 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && displayLab.exported.raceFocus === false
       && displayLab.reset.density === 'comfortable' && displayLab.reset.scale === '100'
       && displayLab.reset.contrast === 'normal' && displayLab.reset.focus === 'on', displayLab);
+
+  // Tres niveles de movimiento. Se leen los animation-name reales del DOM:
+  // full conserva escaner, anillo, ecualizador, brillo y entradas; standard
+  // apaga los bucles; calm ademas quita la entrada de la vista.
+  const motionLab = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = s.querySelector('.panel');
+    const seg = s.querySelector('[data-field="motionSeg"]');
+    const head = s.querySelector('.head');
+    const dot = s.querySelector('.head .dot');
+    const mark = s.querySelector('.mark svg');
+    const dots = s.querySelector('.livedots i');
+    const line = s.querySelector('.race-line');
+    const view = s.querySelector('.v-stats');
+    if (!seg || !head || !dot || !mark || !dots || !line || !view) return { missing: true };
+    const buttons = Array.from(seg.querySelectorAll('[data-motion-btn]'));
+    const prevState = panel.dataset.state;
+    panel.dataset.state = 'running';
+    const read = () => ({
+      motion: panel.dataset.motion,
+      index: seg.dataset.index,
+      pressed: buttons.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.motionBtn),
+      scan: w.getComputedStyle(head, '::before').animationName,
+      ring: w.getComputedStyle(dot, '::after').animationName,
+      glow: w.getComputedStyle(mark).animationName,
+      eq: w.getComputedStyle(dots).animationName,
+      sheen: w.getComputedStyle(line, '::after').animationName,
+      enter: w.getComputedStyle(view).animationName,
+    });
+    const pick = (name) => {
+      seg.querySelector('[data-motion-btn="' + name + '"]').click();
+      return read();
+    };
+    const out = {
+      count: buttons.length,
+      full: pick('full'),
+      standard: pick('standard'),
+      calm: pick('calm'),
+      back: pick('full'),
+    };
+    out.stored = JSON.parse(w.localStorage.getItem('autoTyperVisuals') || 'null');
+    s.querySelector('[data-act="export"]').click();
+    out.exported = JSON.parse(s.querySelector('[data-field="cfgText"]').value).visuals;
+    if (prevState === undefined) delete panel.dataset.state; else panel.dataset.state = prevState;
+    return out;
+  })()`);
+  check('motion levels drive the ambient loops and the view entrance',
+    !motionLab.missing && motionLab.count === 3
+      && motionLab.full.motion === 'full' && motionLab.full.index === '2'
+      && motionLab.full.pressed.join(',') === 'full'
+      && motionLab.full.scan === 'nt-scan' && motionLab.full.eq === 'nt-eq'
+      && motionLab.full.ring === 'nt-ring' && motionLab.full.glow === 'nt-glow'
+      && motionLab.full.sheen === 'nt-sheen' && motionLab.full.enter === 'nt-view'
+      && motionLab.standard.motion === 'standard' && motionLab.standard.index === '1'
+      && motionLab.standard.pressed.join(',') === 'standard'
+      && motionLab.standard.scan === 'none' && motionLab.standard.eq === 'none'
+      && motionLab.standard.ring === 'none' && motionLab.standard.sheen === 'none'
+      && motionLab.standard.enter === 'nt-view'
+      && motionLab.calm.motion === 'calm' && motionLab.calm.index === '0'
+      && motionLab.calm.scan === 'none' && motionLab.calm.eq === 'none'
+      && motionLab.calm.enter === 'none'
+      && motionLab.back.motion === 'full' && motionLab.back.scan === 'nt-scan'
+      && motionLab.stored && motionLab.stored.motion === 'full'
+      && motionLab.exported && motionLab.exported.motion === 'full', motionLab);
 
   const raceFocus = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
