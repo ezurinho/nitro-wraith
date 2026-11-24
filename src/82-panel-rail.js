@@ -63,9 +63,9 @@
     if (panel.root.dataset.cfg !== (tune ? '1' : '0')) panel.root.dataset.cfg = tune ? '1' : '0';
     if (panel.refs.gear) {
       panel.refs.gear.dataset.open = tune ? '1' : '0';
-      panel.refs.gear.title = tune
+      setTitle(panel.refs.gear, tune
         ? 'Back to the live stats'
-        : 'Settings: pace profile, switches, session limit and export/import of the config';
+        : 'Settings: pace profile, switches, session limit and export/import of the config');
     }
 
     if (tune) paintConfig();
@@ -81,10 +81,11 @@
     if (input.value !== String(index)) input.value = String(index);
     const fill = `${(index / (LIMIT_STEPS.length - 1)) * 100}%`;
     if (input.style.getPropertyValue('--fill') !== fill) input.style.setProperty('--fill', fill);
-    input.title = session.raceLimit
+    const title = session.raceLimit
       ? `Races per session: ${session.raceLimit}`
         + (session.raceLimit >= 25 ? ' · the session bonus is capped at 250 XP per race' : '')
       : 'Races per session: free (the bot keeps going until you stop it)';
+    if (input.title !== title) input.title = title;
   }
 
   // El mismo relleno, para el deslizador de minutos.
@@ -96,9 +97,10 @@
     if (input.value !== String(index)) input.value = String(index);
     const fill = `${(index / (TIME_LIMIT_STEPS.length - 1)) * 100}%`;
     if (input.style.getPropertyValue('--fill') !== fill) input.style.setProperty('--fill', fill);
-    input.title = session.timeLimit
+    const title = session.timeLimit
       ? `Minutes per session: ${session.timeLimit}`
       : 'Minutes per session: free (the bot keeps going until you stop it)';
+    if (input.title !== title) input.title = title;
   }
 
   // Y el mismo relleno, para el deslizador de XP.
@@ -110,9 +112,10 @@
     if (input.value !== String(index)) input.value = String(index);
     const fill = `${(index / (XP_LIMIT_STEPS.length - 1)) * 100}%`;
     if (input.style.getPropertyValue('--fill') !== fill) input.style.setProperty('--fill', fill);
-    input.title = session.xpLimit
+    const xpTitle = session.xpLimit
       ? `XP per session: ${session.xpLimit.toLocaleString()}`
       : 'XP per session: free (the bot keeps going until you stop it)';
+    if (input.title !== xpTitle) input.title = xpTitle;
   }
 
   function paintDailyRaceSlider() {
@@ -123,9 +126,10 @@
     if (input.value !== String(index)) input.value = String(index);
     const fill = `${(index / (DAILY_RACE_STEPS.length - 1)) * 100}%`;
     if (input.style.getPropertyValue('--fill') !== fill) input.style.setProperty('--fill', fill);
-    input.title = session.dailyRaceLimit
+    const title = session.dailyRaceLimit
       ? `Races per day: ${session.dailyRaceLimit}`
       : 'Races per day: free (no daily race budget)';
+    if (input.title !== title) input.title = title;
   }
 
   function paintDailyXpSlider() {
@@ -136,9 +140,10 @@
     if (input.value !== String(index)) input.value = String(index);
     const fill = `${(index / (DAILY_XP_STEPS.length - 1)) * 100}%`;
     if (input.style.getPropertyValue('--fill') !== fill) input.style.setProperty('--fill', fill);
-    input.title = session.dailyXpLimit
+    const title = session.dailyXpLimit
       ? `XP per day: ${session.dailyXpLimit.toLocaleString()}`
       : 'XP per day: free (no daily XP budget)';
+    if (input.title !== title) input.title = title;
   }
 
   function paintActiveSlider(which) {
@@ -150,5 +155,6 @@
     const fill = `${(hour / 23) * 100}%`;
     if (input.style.getPropertyValue('--fill') !== fill) input.style.setProperty('--fill', fill);
     const crosses = which === 'end' && session.activeStart >= hour;
-    input.title = `${which === 'start' ? 'Start' : 'End'} hour: ${padHour(hour)}${crosses ? ' (the window crosses midnight)' : ''}`;
+    const title = `${which === 'start' ? 'Start' : 'End'} hour: ${padHour(hour)}${crosses ? ' (the window crosses midnight)' : ''}`;
+    if (input.title !== title) input.title = title;
   }

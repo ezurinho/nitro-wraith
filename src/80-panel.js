@@ -623,7 +623,7 @@
       nitroPreview = null;
       setText(node, 'used');
       setGood(node, null);
-      node.title = 'Nitro target: the one nitro of this race was already spent.';
+      setTitle(node, 'Nitro target: the one nitro of this race was already spent.');
       return;
     }
 
@@ -631,23 +631,23 @@
       nitroPreview = null;
       setText(node, 'blocked');
       setGood(node, false);
-      node.title = 'Nitro target: Auto nitro tried three times this race; it will wait for the next race.';
+      setTitle(node, 'Nitro target: Auto nitro tried three times this race; it will wait for the next race.');
       return;
     }
 
     if (!nitroPreview) {
       setText(node, '—');
       setGood(node, null);
-      node.title = 'Nitro target: waiting for a race with a word of at least 4 letters that leaves enough lesson to pay it back.';
+      setTitle(node, 'Nitro target: waiting for a race with a word of at least 4 letters that leaves enough lesson to pay it back.');
       return;
     }
 
     setText(node, `${nitroPreview.word} · ${nitroPreview.chars} ch`);
     setGood(node, CONFIG.useNitro ? true : null);
-    node.title = `${CONFIG.useNitro ? 'Auto nitro will press Enter on' : 'Auto nitro is off; Enter would skip'}`
+    setTitle(node, `${CONFIG.useNitro ? 'Auto nitro will press Enter on' : 'Auto nitro is off; Enter would skip'}`
       + ` "${nitroPreview.word}" (${nitroPreview.chars} characters).`
       + ` Strategy: ${CONFIG.nitroStrategy}.`
-      + ' The saved time is paid back over the rest of the lesson, so WPM does not jump.';
+      + ' The saved time is paid back over the rest of the lesson, so WPM does not jump.');
   }
 
   function tuneFilterText(value) {
@@ -708,10 +708,10 @@
     }
 
     setText(panel.refs.tuneCount, query ? `${visible}/${cards.length}` : `${cards.length} settings`);
-    if (panel.refs.tuneClear) panel.refs.tuneClear.hidden = !query;
+    if (panel.refs.tuneClear && panel.refs.tuneClear.hidden !== !query) panel.refs.tuneClear.hidden = !query;
     if (panel.refs.tuneEmpty) {
       const empty = Boolean(query && visible === 0);
-      panel.refs.tuneEmpty.hidden = !empty;
+      if (panel.refs.tuneEmpty.hidden !== !empty) panel.refs.tuneEmpty.hidden = !empty;
       if (empty) setText(panel.refs.tuneEmpty, `No setting matches “${input.value.trim()}”.`);
     }
   }
@@ -728,11 +728,11 @@
       if (item.hidden !== !show) item.hidden = !show;
       if (show) visible += 1;
     }
-    if (panel.refs.logClear) panel.refs.logClear.hidden = !query;
+    if (panel.refs.logClear && panel.refs.logClear.hidden !== !query) panel.refs.logClear.hidden = !query;
     setText(panel.refs.logCountFiltered, query ? `${visible}/${items.length}` : `${items.length} entries`);
     if (panel.refs.logEmpty) {
       const empty = Boolean(query && visible === 0);
-      panel.refs.logEmpty.hidden = !empty;
+      if (panel.refs.logEmpty.hidden !== !empty) panel.refs.logEmpty.hidden = !empty;
       if (empty) setText(panel.refs.logEmpty, `No log entry matches “${input.value.trim()}”.`);
     }
   }
@@ -778,7 +778,7 @@
         ? `Review: ${[...new Set(issues)].join(', ')}. The report includes the flight recorder and the exact AFK state.`
         : `Account ${account}; AFK ${afkGate}; update ${up.text}; freezes ${freezeText}.`;
     setText(panel.refs.healthNote, note);
-    panel.refs.healthNote.title = `${note} Copy report puts the full diagnostic on the clipboard.`;
+    setTitle(panel.refs.healthNote, `${note} Copy report puts the full diagnostic on the clipboard.`);
   }
 
   function paintVisualControls() {
@@ -790,8 +790,10 @@
     setText(panel.refs.rgbIntensityValue, `${visualPrefs.rgbIntensity}%`);
     for (const button of panel.refs.rgbLab.querySelectorAll('[data-rgb-speed]')) {
       const selected = Number(button.dataset.rgbSpeed) === visualPrefs.rgbSpeed;
-      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
-      button.dataset.active = selected ? '1' : '0';
+      const pressed = selected ? 'true' : 'false';
+      const active = selected ? '1' : '0';
+      if (button.getAttribute('aria-pressed') !== pressed) button.setAttribute('aria-pressed', pressed);
+      if (button.dataset.active !== active) button.dataset.active = active;
     }
 
     // Nivel de movimiento: el mismo segmentado que el perfil de ritmo. El
@@ -802,8 +804,8 @@
       const value = String(index);
       if (motionSeg.dataset.index !== value) motionSeg.dataset.index = value;
       for (const button of motionSeg.querySelectorAll('[data-motion-btn]')) {
-        const selected = button.dataset.motionBtn === visualPrefs.motion;
-        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        const pressed = button.dataset.motionBtn === visualPrefs.motion ? 'true' : 'false';
+        if (button.getAttribute('aria-pressed') !== pressed) button.setAttribute('aria-pressed', pressed);
       }
     }
 
@@ -818,7 +820,8 @@
           : visualPrefs.raceFocus !== false;
         const value = on ? '1' : '0';
         if (button.dataset.on !== value) button.dataset.on = value;
-        button.setAttribute('aria-checked', on ? 'true' : 'false');
+        const checked = on ? 'true' : 'false';
+        if (button.getAttribute('aria-checked') !== checked) button.setAttribute('aria-checked', checked);
       }
     }
   }
@@ -830,7 +833,8 @@
     // Perfil de ritmo: los tres botones del segmentado y el deslizador que dice
     // cual manda (el indice, no el texto: es lo que mueve el CSS con muelle).
     for (const button of panel.refs.cfg.querySelectorAll('[data-pace]')) {
-      button.dataset.active = button.dataset.pace === paceProfile ? '1' : '0';
+      const active = button.dataset.pace === paceProfile ? '1' : '0';
+      if (button.dataset.active !== active) button.dataset.active = active;
     }
     if (panel.refs.seg) {
       const index = Math.max(0, PACE_ORDER.indexOf(paceProfile));
@@ -868,7 +872,8 @@
       const on = toggles[key] !== false;
       const value = on ? '1' : '0';
       if (button.dataset.on !== value) button.dataset.on = value;
-      button.setAttribute('aria-checked', on ? 'true' : 'false');
+      const checked = on ? 'true' : 'false';
+      if (button.getAttribute('aria-checked') !== checked) button.setAttribute('aria-checked', checked);
 
       const label = panel.refs.cfg.querySelector(`[data-sw-txt="${key}"]`);
       if (label) {
@@ -882,14 +887,14 @@
         if (label.dataset.state !== text) label.dataset.state = text;
       }
       if (key === 'keepAlive') {
-        button.title = keepAlive.title;
-        button.dataset.state = keepAlive.label;
-        if (label) label.title = keepAlive.title;
+        setTitle(button, keepAlive.title);
+        if (button.dataset.state !== keepAlive.label) button.dataset.state = keepAlive.label;
+        if (label) setTitle(label, keepAlive.title);
       }
       if (key === 'notifications') {
-        button.title = notifications.title;
-        button.dataset.state = notifications.label;
-        if (label) label.title = notifications.title;
+        setTitle(button, notifications.title);
+        if (button.dataset.state !== notifications.label) button.dataset.state = notifications.label;
+        if (label) setTitle(label, notifications.title);
       }
     }
 
@@ -905,9 +910,10 @@
       if (!el || (el.ownerDocument && el.ownerDocument.activeElement === el)) return;
       const next = Number(value) > 0 ? String(Math.round(Number(value))) : '';
       if (el.value !== next) el.value = next;
-      el.title = next
+      const title = next
         ? `Manual override active: ${next}. Empty or 0 returns to automatic calibration.`
         : 'Empty/auto: calibration comes from the account average, lifetime history and the top-based recovery floor.';
+      if (el.title !== title) el.title = title;
     };
     setNumberValue(panel.refs.customWpm, CONFIG.calibration.customWpm);
     setNumberValue(panel.refs.customAcc, CONFIG.calibration.customAccuracy);
@@ -916,13 +922,13 @@
     if (panel.refs.customWpm) {
       const max = String(Math.max(16, wpmInt(CONFIG.wpm.hardCap) - 1));
       if (panel.refs.customWpm.max !== max) panel.refs.customWpm.max = max;
-      panel.refs.customWpm.title = `Manual WPM target, 15-${max}. Empty or 0 returns to automatic calibration (${wpmInt(Number(CONFIG.calibration.topShare) * 100)}% of the account top).`;
+      setTitle(panel.refs.customWpm, `Manual WPM target, 15-${max}. Empty or 0 returns to automatic calibration (${wpmInt(Number(CONFIG.calibration.topShare) * 100)}% of the account top).`);
     }
 
     if (panel.refs.nitroStrategy) {
       const strategy = normalizeNitroStrategy(CONFIG.nitroStrategy);
       if (panel.refs.nitroStrategy.value !== strategy) panel.refs.nitroStrategy.value = strategy;
-      panel.refs.nitroStrategy.title = `Nitro strategy: ${strategy}. longest fills the most characters; first spends it as soon as a word fits; last waits for the last word that fits. The saved time is paid back over the rest of the lesson.`;
+      setTitle(panel.refs.nitroStrategy, `Nitro strategy: ${strategy}. longest fills the most characters; first spends it as soon as a word fits; last waits for the last word that fits. The saved time is paid back over the rest of the lesson.`);
     }
 
     paintPace();
@@ -964,16 +970,17 @@
     const values = accDeltas.slice(-20);
 
     if (values.length < 2) {
-      spark.dataset.empty = '1';
-      line.setAttribute('points', '');
-      area.setAttribute('d', '');
-      spark.setAttribute('aria-label', values.length
+      if (spark.dataset.empty !== '1') spark.dataset.empty = '1';
+      if (line.getAttribute('points') !== '') line.setAttribute('points', '');
+      if (area.getAttribute('d') !== '') area.setAttribute('d', '');
+      const label = values.length
         ? `Accuracy model delta: one sample, ${signedPts(values[0])} pts.`
-        : 'Accuracy model delta history: no samples yet.');
+        : 'Accuracy model delta history: no samples yet.';
+      if (spark.getAttribute('aria-label') !== label) spark.setAttribute('aria-label', label);
       return;
     }
 
-    spark.dataset.empty = '0';
+    if (spark.dataset.empty !== '0') spark.dataset.empty = '0';
     const top = Math.max(1, ...values.map((value) => Math.abs(value)));
     const width = 100;
     const height = 24;
@@ -984,9 +991,12 @@
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     });
 
-    line.setAttribute('points', points.join(' '));
-    area.setAttribute('d', `M0,${height} L${points.join(' L')} L${width},${height} Z`);
-    spark.setAttribute('aria-label', `Accuracy model delta history: ${values.map((value) => signedPts(value)).join(', ')} pts.`);
+    const pointsAttr = points.join(' ');
+    if (line.getAttribute('points') !== pointsAttr) line.setAttribute('points', pointsAttr);
+    const areaAttr = `M0,${height} L${points.join(' L')} L${width},${height} Z`;
+    if (area.getAttribute('d') !== areaAttr) area.setAttribute('d', areaAttr);
+    const label = `Accuracy model delta history: ${values.map((value) => signedPts(value)).join(', ')} pts.`;
+    if (spark.getAttribute('aria-label') !== label) spark.setAttribute('aria-label', label);
   }
 
   function paintAccuracyDelta() {
@@ -998,7 +1008,7 @@
 
     if (!accDeltas.length) {
       setText(panel.refs.calDelta, '—');
-      panel.refs.calDelta.title = 'No model Δ samples yet: the first race with a server result fills this row. Alt+Shift+C clears it.';
+      setTitle(panel.refs.calDelta, 'No model Δ samples yet: the first race with a server result fills this row. Alt+Shift+C clears it.');
       return;
     }
 
@@ -1009,11 +1019,11 @@
 
     // El tooltip lleva lo que la fila no cabe: de donde sale la media y como se
     // mueve. Asi una racha corta no se confunde con una tendencia.
-    panel.refs.calDelta.title = `Model Δ (ours − game): avg ${avg >= 0 ? '+' : ''}${avg.toFixed(1)} pts`
+    setTitle(panel.refs.calDelta, `Model Δ (ours − game): avg ${avg >= 0 ? '+' : ''}${avg.toFixed(1)} pts`
       + ` over ${accDeltas.length} race${accDeltas.length === 1 ? '' : 's'}`
       + ` · last ${last}`
       + `${accDeltas.length > 1 ? ` · range ${range.toFixed(1)}` : ''}`
-      + ' · Alt+Shift+C clears the trend.';
+      + ' · Alt+Shift+C clears the trend.');
   }
 
   // La tendencia se acumula entre sesiones a proposito, pero tras un cambio de
@@ -1812,9 +1822,9 @@
     if (panel.refs.chCount) {
       const resetMin = chResetAt > Date.now() ? Math.ceil((chResetAt - Date.now()) / 60000) : 0;
       const resetLeft = resetMin >= 60 ? `${Math.round(resetMin / 60)} h` : (resetMin > 0 ? `${resetMin} min` : '');
-      panel.refs.chCount.title = list.length
+      setTitle(panel.refs.chCount, list.length
         ? `${done} of ${list.length} Daily Challenges complete.${resetLeft ? ` Resets in ${resetLeft} (00:00 ET).` : ''}`
-        : '';
+        : '');
     }
 
     if (!list.length) {
@@ -2841,7 +2851,7 @@
     statusEl = panel.refs.status;
     if (statusEl) setText(statusEl, lastStatus || 'waiting…');
 
-    panel.refs.toggle.title = 'Pause or resume sending keys (inside a race the pause resumes by itself after 6 s)';
+    setTitle(panel.refs.toggle, 'Pause or resume sending keys (inside a race the pause resumes by itself after 6 s)');
     // El chip del ritmo sigue siendo LEGIT (no hay otro tipo de ritmo) y ahora
     // cicla el perfil: soft, normal, fast, todos con la misma cadencia humana.
     paintPace();
@@ -3437,7 +3447,7 @@
 
     panel.root.dataset.collapsed = collapsed ? 'true' : 'false';
     panel.refs.collapse.textContent = collapsed ? '+' : '−';
-    panel.refs.collapse.title = collapsed ? 'Expand' : 'Minimize';
+    setTitle(panel.refs.collapse, collapsed ? 'Expand' : 'Minimize');
     panel.refs.collapse.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     panel.refs.collapse.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
     disk.set(KEYS.panelCollapsed, collapsed ? '1' : '0');
@@ -4069,9 +4079,9 @@
     // diez. Sin historial no se inventa: deja un guion.
     setText(panel.refs.seasonRaces, racesLeft !== null ? `≈ ${racesLeft} races` : '—');
     if (panel.refs.seasonRaces) {
-      panel.refs.seasonRaces.title = racesLeft !== null
+      setTitle(panel.refs.seasonRaces, racesLeft !== null
         ? `${seasonXpText(left)} XP left at about ${seasonXpText(perRace)} XP per race in the last races.`
-        : 'Run a race to estimate how many races the next reward needs.';
+        : 'Run a race to estimate how many races the next reward needs.');
     }
 
     // El ritmo real de la semana, proyectado a los dias que quedan: dice si el
@@ -4092,7 +4102,7 @@
       paceTitle = `${seasonXpShort(pace.left)} XP left in ${pace.daysLeft}d: ${seasonXpShort(pace.perDay)}/day projects ${seasonXpShort(pace.projected)}, ${seasonXpShort(pace.short)} short of the next reward.`;
     }
     setText(panel.refs.seasonPace, paceText);
-    if (panel.refs.seasonPace) panel.refs.seasonPace.title = paceTitle;
+    if (panel.refs.seasonPace) setTitle(panel.refs.seasonPace, paceTitle);
 
     let ends = snap.endsText ? `ends ${snap.endsText}` : '—';
     let daysLeft = null;
@@ -4239,7 +4249,7 @@
         : session.stopped
           ? 'Resume now · Alt+A (daily budget and active hours still apply)'
           : 'Stop after the current race · Alt+S';
-      if (panel.refs.stop.title !== title) panel.refs.stop.title = title;
+      if (panel.refs.stop.title !== title) setTitle(panel.refs.stop, title);
       if (panel.refs.stop.disabled !== false) panel.refs.stop.disabled = false;
     }
   }
@@ -4675,12 +4685,12 @@
       }
       setText(panel.refs.dailyLeft, left.length ? left.join(' · ') : 'no caps');
 
-      panel.refs.dailyRaceRow.title = daily.raceCap
+      setTitle(panel.refs.dailyRaceRow, daily.raceCap
         ? `Daily races: ${daily.races} of ${daily.raceCap} (${Math.min(100, Math.round(racePct * 100))}%). Click to change (free, 100, 200, 300); resets at midnight.`
-        : 'Daily races: free. Click to set 100, 200 or 300; resets at midnight.';
-      panel.refs.dailyXpRow.title = daily.xpCap
+        : 'Daily races: free. Click to set 100, 200 or 300; resets at midnight.');
+      setTitle(panel.refs.dailyXpRow, daily.xpCap
         ? `Daily XP: ${daily.xp.toLocaleString()} of ${daily.xpCap.toLocaleString()} (${Math.min(100, Math.round(xpPct * 100))}%). Click to change (free, 50k, 100k, 200k); resets at midnight.`
-        : 'Daily XP: free. Click to set 50k, 100k or 200k; resets at midnight.';
+        : 'Daily XP: free. Click to set 50k, 100k or 200k; resets at midnight.');
       paintDailyRaceSlider();
       paintDailyXpSlider();
     }
@@ -4698,26 +4708,26 @@
       if (!win.on) {
         setText(panel.refs.activeNow, 'always');
         setGood(panel.refs.activeNow, null);
-        panel.refs.activeNow.title = 'Active hours are off: races can start at any time.';
+        setTitle(panel.refs.activeNow, 'Active hours are off: races can start at any time.');
       } else if (win.allDay) {
         setText(panel.refs.activeNow, 'open · all day');
         setGood(panel.refs.activeNow, true);
-        panel.refs.activeNow.title = `Active hours ${range}: all day. Races can start at any time.`;
+        setTitle(panel.refs.activeNow, `Active hours ${range}: all day. Races can start at any time.`);
       } else if (win.open) {
         setText(panel.refs.activeNow, `open · closes in ${activeLeftText(win.msUntilClose)}`);
         setGood(panel.refs.activeNow, true);
-        panel.refs.activeNow.title = `Active hours ${range}. Open now; closes at ${win.endText} in ${activeLeftText(win.msUntilClose)}. Races only start inside the window.`;
+        setTitle(panel.refs.activeNow, `Active hours ${range}. Open now; closes at ${win.endText} in ${activeLeftText(win.msUntilClose)}. Races only start inside the window.`);
       } else {
         setText(panel.refs.activeNow, `closed · opens in ${activeLeftText(win.msUntilOpen)}`);
         setGood(panel.refs.activeNow, false);
-        panel.refs.activeNow.title = `Active hours ${range}. Closed now; opens at ${win.startText} in ${activeLeftText(win.msUntilOpen)}. The bot finishes the race in progress and waits.`;
+        setTitle(panel.refs.activeNow, `Active hours ${range}. Closed now; opens at ${win.startText} in ${activeLeftText(win.msUntilOpen)}. The bot finishes the race in progress and waits.`);
       }
 
-      panel.refs.activeRow.title = win.on
+      setTitle(panel.refs.activeRow, win.on
         ? `Active hours ${range} (local time). Click to turn them off; Shift+click resets 08:00–23:00.`
-        : 'Active hours are off. Click to turn them on; Shift+click resets 08:00–23:00. The window can cross midnight.';
-      panel.refs.activeStartRow.title = `Start: ${win.startText}. Click +1 hour; Shift+click −1 hour. Same start and end means all day.`;
-      panel.refs.activeEndRow.title = `End: ${win.endText}. Click +1 hour; Shift+click −1 hour. An end before the start crosses midnight; the same hour as the start means all day.`;
+        : 'Active hours are off. Click to turn them on; Shift+click resets 08:00–23:00. The window can cross midnight.');
+      setTitle(panel.refs.activeStartRow, `Start: ${win.startText}. Click +1 hour; Shift+click −1 hour. Same start and end means all day.`);
+      setTitle(panel.refs.activeEndRow, `End: ${win.endText}. Click +1 hour; Shift+click −1 hour. An end before the start crosses midnight; the same hour as the start means all day.`);
     }
     // Ritmo de XP de la tanda: lo que llevaria en una hora a este paso. Se
     // mide desde la primera carrera, no desde que se abrio el panel, y no
@@ -4728,10 +4738,10 @@
       const rate = elapsed >= 60000 && xp > 0 ? xp / (elapsed / 3600000) : null;
       setText(panel.refs.rate, rate === null ? '—'
         : rate >= 1000 ? `${(rate / 1000).toFixed(1)}k XP/h` : `${Math.round(rate)} XP/h`);
-      panel.refs.rate.title = rate === null
+      setTitle(panel.refs.rate, rate === null
         ? 'Session rate: needs at least a minute of measured races and some XP.'
         : `Session rate: ${Math.round(rate).toLocaleString()} XP/h at the current pace`
-          + ` (${xp.toLocaleString()} XP in ${Math.max(1, Math.round(elapsed / 60000))}m).`;
+          + ` (${xp.toLocaleString()} XP in ${Math.max(1, Math.round(elapsed / 60000))}m).`);
     }
     paintNitroPreview();
     // Nitro de la tanda: cuantas carreras lo gastaron, cuantos caracteres
@@ -4752,10 +4762,10 @@
         if (last && Number(last.nitroChars) > 0) {
           title += ` Last race: ${Number(last.nitroWords) || 1} word, ${Number(last.nitroChars)} characters.`;
         }
-        panel.refs.nitro.title = title;
+        setTitle(panel.refs.nitro, title);
       } else {
         setText(panel.refs.nitro, '—');
-        panel.refs.nitro.title = 'Nitro this session: none used yet, or the races ended before the nitro could be spent.';
+        setTitle(panel.refs.nitro, 'Nitro this session: none used yet, or the races ended before the nitro could be spent.');
       }
     }
     // Comprobacion de WPM: media de las carreras con nitro contra las que no
@@ -4767,15 +4777,15 @@
         const sign = stats.delta > 0 ? '+' : '';
         setText(panel.refs.nitroDelta, `${sign}${stats.delta.toFixed(1)} wpm`);
         setGood(panel.refs.nitroDelta, stats.delta <= 0);
-        panel.refs.nitroDelta.title = `Nitro WPM check over the last ${stats.used + stats.plain} measured races:`
+        setTitle(panel.refs.nitroDelta, `Nitro WPM check over the last ${stats.used + stats.plain} measured races:`
           + ` ${stats.used} with nitro averaged ${stats.usedWpm.toFixed(1)} WPM;`
           + ` ${stats.plain} without averaged ${stats.plainWpm.toFixed(1)} WPM.`
           + ` Difference ${stats.delta >= 0 ? '+' : ''}${stats.delta.toFixed(1)} WPM; zero or below means no lift.`
-          + ' It is an observation, not a guarantee.';
+          + ' It is an observation, not a guarantee.');
       } else {
         setText(panel.refs.nitroDelta, '—');
         setGood(panel.refs.nitroDelta, null);
-        panel.refs.nitroDelta.title = 'Nitro WPM check: needs at least one measured race with nitro and one without in the last 10.';
+        setTitle(panel.refs.nitroDelta, 'Nitro WPM check: needs at least one measured race with nitro and one without in the last 10.');
       }
     }
     // Hueco entre carreras: mediana y mejor de los ultimos 20 huecos normales.
@@ -4791,13 +4801,13 @@
         const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
         const best = sorted[0];
         setText(panel.refs.cycle, `${(median / 1000).toFixed(1)}s med · ${(best / 1000).toFixed(1)}s best`);
-        panel.refs.cycle.title = `Dead time between races: median ${(median / 1000).toFixed(1)} s`
+        setTitle(panel.refs.cycle, `Dead time between races: median ${(median / 1000).toFixed(1)} s`
           + ` over ${gaps.length} gap${gaps.length === 1 ? '' : 's'}, best ${(best / 1000).toFixed(1)} s.`
-          + ` Gaps over ${GAP_MAX_MS / 1000} s (breaks, pauses, guard waits) are left out.`;
+          + ` Gaps over ${GAP_MAX_MS / 1000} s (breaks, pauses, guard waits) are left out.`);
       } else {
         setText(panel.refs.cycle, '—');
-        panel.refs.cycle.title = `Dead time between races: needs a finished race and the next start.`
-          + ` Gaps over ${GAP_MAX_MS / 1000} s (breaks, pauses, guard waits) are left out.`;
+        setTitle(panel.refs.cycle, `Dead time between races: needs a finished race and the next start.`
+          + ` Gaps over ${GAP_MAX_MS / 1000} s (breaks, pauses, guard waits) are left out.`);
       }
     }
     // Desglose del XP de la ultima carrera con las tablas del juego: puesto,
@@ -4807,16 +4817,16 @@
       if (split) {
         setText(panel.refs.xpBreak, `${split.base}+${split.speed}+${split.accuracy}+${split.session}`);
         const next = xpNextAccuracyTier(split.acc);
-        panel.refs.xpBreak.title = `Last race: ${split.place ? '#' + split.place + ' · ' : ''}`
+        setTitle(panel.refs.xpBreak, `Last race: ${split.place ? '#' + split.place + ' · ' : ''}`
           + `${split.base} base + ${split.speed} speed (2x WPM) + ${split.accuracy} accuracy`
           + ` + ${split.session} session/other = ${split.total.toLocaleString()} XP.`
           + ` Accuracy ${Math.round(split.acc)}% pays ${split.accuracy};`
           + (next
             ? ` ${next.pct}% would pay ${next.xp} (+${next.xp - split.accuracy}).`
-            : ' the top tier is already paid.');
+            : ' the top tier is already paid.'));
       } else {
         setText(panel.refs.xpBreak, '—');
-        panel.refs.xpBreak.title = 'Last race XP: waiting for the result packet and its real reward.';
+        setTitle(panel.refs.xpBreak, 'Last race XP: waiting for the result packet and its real reward.');
       }
     }
     // Live session average (everything measured, not just the few in the list):
@@ -4860,7 +4870,7 @@
           'click for the table',
         ].filter(Boolean);
 
-        panel.refs.prevRow.title = `${session.closed ? 'Session that just closed' : 'Previous closed session'}: ${bits.join(' · ')}.`;
+        setTitle(panel.refs.prevRow, `${session.closed ? 'Session that just closed' : 'Previous closed session'}: ${bits.join(' · ')}.`);
       }
     }
 
@@ -4882,9 +4892,9 @@
         setDisplay(panel.refs.timeLeftRow, show);
         if (show) {
           setText(panel.refs.timeLeft, timeLeft === null ? '—' : clockSpan(timeLeft));
-          panel.refs.timeLeftRow.title = timeLeft === null
+          setTitle(panel.refs.timeLeftRow, timeLeft === null
             ? `Time limit ${limitMinutesText(session.timeLimit)}: counting from the first race of the session`
-            : `Time limit ${limitMinutesText(session.timeLimit)} · ${clockSpan(timeLeft)} left. The bot finishes the race in progress and closes the session`;
+            : `Time limit ${limitMinutesText(session.timeLimit)} · ${clockSpan(timeLeft)} left. The bot finishes the race in progress and closes the session`);
         }
       }
 
@@ -4902,13 +4912,13 @@
           const xpPlan = xpEta();
           const guess = xpPlan && xpPlan.minutes !== null && left > 0 ? ` · ≈${xpPlan.minutes}m` : '';
           setText(panel.refs.xpTotal, `${session.xp.toLocaleString()} / ${session.xpLimit.toLocaleString()}${guess}`);
-          panel.refs.xpRow.title = left > 0
+          setTitle(panel.refs.xpRow, left > 0
             ? `XP limit ${limitXpText(session.xpLimit)} · ${left.toLocaleString()} XP left`
               + (xpPlan && xpPlan.races !== null
                 ? ` · ≈${xpPlan.races} race${xpPlan.races === 1 ? '' : 's'} at ${Math.round(xpPlan.perRace).toLocaleString()} XP per race (≈${xpPlan.minutes}m)`
                 : ' · no measured pace yet')
               + '. The bot finishes the race in progress and closes the session'
-            : 'XP limit reached: the next A opens a fresh session';
+            : 'XP limit reached: the next A opens a fresh session');
         }
       }
 
@@ -4937,7 +4947,7 @@
           else if (!CONFIG.breaks.enabled) text += ' · breaks off';
           title = `${text}. Click to change the limit (free, 20, 50, 100).`;
         }
-        if (panel.refs.raceLimitRow.title !== title) panel.refs.raceLimitRow.title = title;
+        if (panel.refs.raceLimitRow.title !== title) setTitle(panel.refs.raceLimitRow, title);
       }
     }
     const limitMode = session.raceLimit ? 'on' : 'off';
@@ -4984,7 +4994,10 @@
       setText(panel.refs.hud, Number.isFinite(cap) ? `${hud.toFixed(0)} / ${cap}` : hud.toFixed(0));
       setGood(panel.refs.hud, Number.isFinite(cap) ? hud < cap : null);
     }
-    if (panel.root) panel.root.dataset.capHit = Number.isFinite(cap) && hud !== null && hud >= cap ? '1' : '0';
+    if (panel.root) {
+      const capHit = Number.isFinite(cap) && hud !== null && hud >= cap ? '1' : '0';
+      if (panel.root.dataset.capHit !== capHit) panel.root.dataset.capHit = capHit;
+    }
 
     // Si el Worker del reloj no se pudo crear (CSP del sitio), la cadencia cae a
     // los temporizadores de la pagina: con la pestana en segundo plano el
@@ -5018,7 +5031,9 @@
       panel.resultSig = sig;
       panel.resultCount = raceHistory.length;
       setDisplay(panel.refs.resultRow, hasResult);
-      if (!hasResult) panel.refs.resultRow.classList.remove('nt-flash');
+      if (!hasResult && panel.refs.resultRow.classList.contains('nt-flash')) {
+        panel.refs.resultRow.classList.remove('nt-flash');
+      }
       if (hasResult) {
         const bits = [
           ordinal(lastResult.place),
@@ -5026,7 +5041,7 @@
           lastResult.xp ? `+${lastResult.xp} xp` : '',
         ].filter(Boolean);
         setText(panel.refs.result, bits.join(' · '));
-        panel.refs.resultRow.title = `Last race: ${bits.join(' · ')} (read from the game's own race result).`;
+        setTitle(panel.refs.resultRow, `Last race: ${bits.join(' · ')} (read from the game's own race result).`);
         if (fresh) pulseOnce(panel.refs.resultRow, 'nt-flash');
       }
     }
@@ -5075,7 +5090,7 @@
           : Math.round(live.acceptedAgeMs / 1000)}s`
         : '';
       setText(panel.refs.watch, `${live.phase} · ${owner}${age}${live.rescue ? ' · rescue' : ''}`);
-      panel.refs.watchRow.title = `Real-time watchdog: ${live.phase}; typing lease ${owner}${live.lease.expiresInMs ? ` (${Math.ceil(live.lease.expiresInMs / 1000)} s left)` : ''}; last accepted key ${live.acceptedAgeMs ? `${(live.acceptedAgeMs / 1000).toFixed(1)} s ago` : 'not yet'}; last sent key ${live.sentAgeMs ? `${(live.sentAgeMs / 1000).toFixed(1)} s ago` : 'not yet'}.`;
+      setTitle(panel.refs.watchRow, `Real-time watchdog: ${live.phase}; typing lease ${owner}${live.lease.expiresInMs ? ` (${Math.ceil(live.lease.expiresInMs / 1000)} s left)` : ''}; last accepted key ${live.acceptedAgeMs ? `${(live.acceptedAgeMs / 1000).toFixed(1)} s ago` : 'not yet'}; last sent key ${live.sentAgeMs ? `${(live.sentAgeMs / 1000).toFixed(1)} s ago` : 'not yet'}.`);
     }
 
     // Resumen del dia: carreras, media real frente a la media objetivo, cajas y
@@ -5114,7 +5129,7 @@
       if (day.xp > 0) detail.push(`${day.xp.toLocaleString()} XP awarded`);
       if (day.dq > 0) detail.push(`${day.dq} DQ (last ${clockText(day.dqAt) || '—'})`);
       detail.push('⚙ → report for the whole picture');
-      panel.refs.todayRow.title = `Today: ${detail.join(' · ')}.`;
+      setTitle(panel.refs.todayRow, `Today: ${detail.join(' · ')}.`);
     }
 
     // Daily Mystery Box: the queue records the last claim and when the site will
@@ -5160,27 +5175,27 @@
       // El tooltip lleva la ultima reclamacion completa (premio y cuando): es el
       // unico sitio donde cabe sin cargar la fila.
       const last = boxLog[0];
-      panel.refs.boxRow.title = boxReadySynced
+      setTitle(panel.refs.boxRow, boxReadySynced
         ? `Claim Now! seen in the garage; the box is ready.${last ? ` Last claim: ${last.text} · ${elapsedText(last.at)}.` : ''}`
         : (last
           ? `Last claim: ${last.text} · ${elapsedText(last.at)}${boxLog.length > 1 ? ` · ${boxLog.length} recorded` : ''}`
-          : 'Daily Mystery Box in the garage');
+          : 'Daily Mystery Box in the garage'));
+      let boxState = 'ready';
       if (boxReadySynced) {
-        panel.root.dataset.box = 'ready';
         setText(panel.refs.box, 'ready now');
       } else if (siteBoxAt > Date.now()) {
-        panel.root.dataset.box = 'waiting';
+        boxState = 'waiting';
         setText(panel.refs.box, `in ${boxWaitText(siteBoxAt - Date.now())}`);
       } else if (!boxLast && saneBoxNext) {
-        panel.root.dataset.box = 'coming';
+        boxState = 'coming';
         setText(panel.refs.box, 'never claimed');
       } else if (saneBoxNext) {
-        panel.root.dataset.box = 'waiting';
+        boxState = 'waiting';
         setText(panel.refs.box, `in ${boxWaitText(saneBoxNext - Date.now())}`);
       } else {
-        panel.root.dataset.box = 'ready';
         setText(panel.refs.box, 'ready now');
       }
+      if (panel.root.dataset.box !== boxState) panel.root.dataset.box = boxState;
     }
 
     // La sesion del sitio, para verla tambien mientras corre la carrera. Si el
@@ -5193,13 +5208,13 @@
         if (left <= 0) {
           setText(panel.refs.sessionLeft, 'expired');
           setColor(panel.refs.sessionLeft, 'var(--bad)');
-          panel.refs.sessionRow.title = 'Session token expired: the queue logs in again from the login page.';
+          setTitle(panel.refs.sessionRow, 'Session token expired: the queue logs in again from the login page.');
         } else {
           setText(panel.refs.sessionLeft, left >= 3600000
             ? `${(left / 3600000).toFixed(1)}h`
             : `${Math.max(1, Math.round(left / 60000))}m`);
           setColor(panel.refs.sessionLeft, left <= 5 * 60000 ? 'var(--warn)' : '');
-          panel.refs.sessionRow.title = `Site session: expires in ${Math.max(1, Math.round(left / 60000))} min. The queue renews it on the garage, between races.`;
+          setTitle(panel.refs.sessionRow, `Site session: expires in ${Math.max(1, Math.round(left / 60000))} min. The queue renews it on the garage, between races.`);
         }
       }
     }
