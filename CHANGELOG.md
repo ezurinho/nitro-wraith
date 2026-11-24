@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.78 — 2026-11-24
+
+- feat(api): expose a read-only integration surface (#22)
+
 ## 8.14.77 — 2026-11-24
 
 - fix(panel): refresh challenges on race results (#21)
