@@ -63,6 +63,10 @@
   function applyRaceResult(result, source) {
     if (!result || (!result.place && !result.cash && !result.xp)) return;
 
+    // El servidor publica el resultado con el usuario ya actualizado: forzar la
+    // siguiente lectura evita que el reto espere su cache de 5 s.
+    invalidateChallengeProgress();
+
     result.source = source;
     const last = raceHistory[raceHistory.length - 1];
 
