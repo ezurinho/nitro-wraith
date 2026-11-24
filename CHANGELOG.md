@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.77 — 2026-11-24
+
+- fix(panel): refresh challenges on race results (#21)
+- test(ui): guard palette parity between both sheets (#20)
+
 ## 8.14.76 — 2026-11-24
 
 - perf(panel): keep garage heartbeats free of DOM writes (#19)
