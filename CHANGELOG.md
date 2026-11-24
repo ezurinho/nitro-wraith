@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.73 — 2026-11-24
+
+- feat(panel): motion levels, ambient loops and auto-install countdown (#14)
+
 ## 8.14.72 — 2026-11-24
 
 - feat(a11y): audit WCAG contrast and add narrow visual baselines (#13)
