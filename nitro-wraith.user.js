@@ -437,6 +437,13 @@ All of this only aims at believable statistics. It is your call and your risk.
 (function () {
   'use strict';
 
+  // Reloj de arranque: la primera instruccion del IIFE y el final de boot()
+  // marcan cuanto cuesta levantar el script. El HTML y el CSS del panel son
+  // perezosos, asi que esta marca tambien delata si el arranque de garaje
+  // (donde no hay panel) empieza a pagar lo que no usa.
+  const BOOT_STARTED_AT = performance.now();
+  let BOOT_READY_AT = 0;
+
 
   /* ==========================================================================
    * 1. CONFIGURATION
@@ -1313,6 +1320,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     hudReads: 0, dayScans: 0, panelPaints: 0, userParses: 0,
     warningScans: 0, challengeScans: 0, captchaScans: 0, captchaUiScans: 0,
     resultsWatches: 0, storageReads: 0, panelNodes: 0,
+    panelCssBuilds: 0, panelHtmlBuilds: 0,
   };
 
   function noteStorageRead() {
@@ -4586,6 +4594,175 @@ function dayCurveAt(at = Date.now()) {
   const date = new Date(at);
   return dayCurve(date.getHours() + date.getMinutes() / 60);
 }
+  /* ==========================================================================
+   * 36. POLITICA DE LA COLA (PURO)
+   * ==========================================================================
+   */
+  // Lo que la cola decide mirando solo numeros: si la ventana de horas esta
+  // abierta, cuanto queda de la tanda, que tope se alcanzo y que estado y
+  // boton enseña el garaje. Nada de aqui toca DOM, almacenamiento ni `session`:
+  // reciben sus datos y devuelven la decision.
+  //
+  // Vive fuera de 50-state.js y 90-queue.js para que `tests/unit` pueda cargar
+  // este fragmento en Node y probar los bordes (medianoche, tope exacto, 80%)
+  // sin abrir Chrome. Los envoltorios de estado siguen donde estaban y solo
+  // pasan los valores; el comportamiento publicado no cambia.
+  const clampHour = (hour) => Math.min(23, Math.max(0, hour | 0));
+
+  // Hora local del navegador. Admite cruzar medianoche (22:00–02:00); con
+  // start === end la ventana es todo el dia, y apagada no limita nada.
+  function padHour(hour) {
+    return `${String(hour).padStart(2, '0')}:00`;
+  }
+
+  function activeWindowAt(settings, at = Date.now()) {
+    const on = Boolean(settings && settings.on);
+    const start = clampHour(settings && settings.start);
+    const end = clampHour(settings && settings.end);
+    const startText = padHour(start);
+    const endText = padHour(end);
+    const allDay = start === end;
+    const date = new Date(at);
+    const startAt = new Date(at);
+    const endAt = new Date(at);
+    startAt.setHours(start, 0, 0, 0);
+    endAt.setHours(end, 0, 0, 0);
+
+    const nextStart = () => {
+      const next = new Date(startAt);
+      if (next.getTime() <= at) next.setDate(next.getDate() + 1);
+      return next;
+    };
+    const nextEnd = () => {
+      const next = new Date(endAt);
+      if (next.getTime() <= at) next.setDate(next.getDate() + 1);
+      return next;
+    };
+
+    if (!on || allDay) {
+      return {
+        on, start, end, startText, endText, allDay: true, open: true,
+        nextAt: 0, closesAt: 0, nextText: startText, closesText: endText,
+        msUntilOpen: 0, msUntilClose: 0,
+      };
+    }
+
+    let open = false;
+    let nextAt = 0;
+    let closesAt = 0;
+
+    if (start < end) {
+      open = date >= startAt && date < endAt;
+      if (open) closesAt = endAt.getTime();
+      else nextAt = date < startAt ? startAt.getTime() : nextStart().getTime();
+    } else {
+      // Cruza medianoche: abierta desde start hasta las 24:00 y desde las
+      // 00:00 hasta end. Cerrada en el hueco entre end y start.
+      open = date >= startAt || date < endAt;
+      if (open) closesAt = date < endAt ? endAt.getTime() : nextEnd().getTime();
+      else nextAt = startAt.getTime();
+    }
+
+    return {
+      on, start, end, startText, endText, allDay, open,
+      nextAt, closesAt, nextText: startText, closesText: endText,
+      msUntilOpen: nextAt ? Math.max(0, nextAt - at) : 0,
+      msUntilClose: closesAt ? Math.max(0, closesAt - at) : 0,
+    };
+  }
+
+  // Presupuesto del dia: carreras y XP reales de hoy contra los dos topes.
+  // `warn` se enciende al 80% para que el panel avise antes de chocar.
+  function dailyCapsFor(day, caps) {
+    const races = Math.max(0, Number(day && day.races) || 0);
+    const xp = Math.max(0, Number(day && day.xp) || 0);
+    const raceCap = Math.max(0, Number(caps && caps.raceCap) || 0);
+    const xpCap = Math.max(0, Number(caps && caps.xpCap) || 0);
+    return {
+      races,
+      xp,
+      raceCap,
+      xpCap,
+      raceHit: raceCap > 0 && races >= raceCap,
+      xpHit: xpCap > 0 && xp >= xpCap,
+      warn: (raceCap > 0 && races >= raceCap * 0.8)
+        || (xpCap > 0 && xp >= xpCap * 0.8),
+    };
+  }
+
+  // Topes de sesion. Solo las carreras medidas cuentan: una DQ no llega a
+  // `races` y por eso no gasta tope. El reloj de la tanda se mira entre
+  // carreras, nunca a mitad de una.
+  function sessionLimitReached(state, daily, at = Date.now()) {
+    const s = state || {};
+    const races = Number(s.races) || 0;
+    const raceLimit = Number(s.raceLimit) || 0;
+    const xp = Number(s.xp) || 0;
+    const xpLimit = Number(s.xpLimit) || 0;
+    const timeLimit = Number(s.timeLimit) || 0;
+    const tandaStartedAt = Number(s.tandaStartedAt) || 0;
+    return (raceLimit > 0 && races >= raceLimit)
+      || (timeLimit > 0 && tandaStartedAt > 0
+        && at >= tandaStartedAt + timeLimit * 60000)
+      || (xpLimit > 0 && xp >= xpLimit)
+      || Boolean(daily && (daily.raceHit || daily.xpHit));
+  }
+
+  function timeLimitLeftFor(state, at = Date.now()) {
+    const s = state || {};
+    const timeLimit = Number(s.timeLimit) || 0;
+    if (!timeLimit) return null;
+    const startedAt = Number(s.tandaStartedAt) || 0;
+    if (!startedAt) return timeLimit * 60000;
+    return Math.max(0, startedAt + timeLimit * 60000 - at);
+  }
+
+  // Estado del panel pequeno del garaje: una sola frase y una pildora. El
+  // orden es el contrato: lo primero que aparece es lo que de verdad impide
+  // correr (social de solo lectura, baneo, sesion...), y el boton primario
+  // solo se enciende si esa accion existe.
+  function deriveGarageContext(input = {}) {
+    if (input.social) {
+      return { key: 'read', title: 'Read-only social', detail: 'Friends and team counters without actions.', pill: 'READ' };
+    }
+    if (input.banned) {
+      return { key: 'banned', title: 'Account blocked', detail: 'Review the account before clearing the ban.', pill: 'BAN' };
+    }
+    if (!input.signed) {
+      return { key: 'signin', title: 'Sign in required', detail: 'The queue waits for a valid session.', pill: 'LOGIN' };
+    }
+    if (input.offline) {
+      return { key: 'offline', title: 'Waiting for network', detail: 'Races resume when the connection returns.', pill: 'OFFLINE' };
+    }
+    if (input.activeStop) {
+      return { key: 'stopped', title: 'Queue stopped', detail: input.reason || 'Resume when you are ready.', pill: 'STOPPED' };
+    }
+    if (input.banCleared) {
+      return { key: 'cleared', title: 'Ban stop cleared', detail: 'Resume to arm the queue again.', pill: 'CLEARED' };
+    }
+    if (input.hasRetry) {
+      return { key: 'retry', title: 'Sign-in retry pending', detail: `Retry in ${input.retryText || 'a moment'}.`, pill: 'LOGIN' };
+    }
+    if (Array.isArray(input.gates) && input.gates.length) {
+      const gate = input.gates[0];
+      return { key: 'gate', title: gate.label || 'Queue waiting', detail: `Clears in ${gate.leftText || 'a moment'}.`, pill: 'WAIT' };
+    }
+    if (input.boxReady) {
+      return { key: 'reward', title: 'Mystery Box ready', detail: 'Claim the daily reward before the next race.', pill: 'REWARD' };
+    }
+    if (!input.armed) {
+      return { key: 'stopped', title: 'Queue disarmed', detail: 'Resume to arm the next race.', pill: 'STOPPED' };
+    }
+    return { key: 'ready', title: 'Queue ready', detail: 'The next race will start automatically.', pill: 'AUTO' };
+  }
+
+  function garagePrimaryFor(context, available = {}) {
+    if (context.key === 'reward' && available.box) return 'box';
+    if ((context.key === 'stopped' || context.key === 'banned' || context.key === 'cleared') && available.resume) return 'resume';
+    if (context.key === 'retry' && available.retry) return 'retry';
+    if (context.key === 'ready' && available.race) return 'race';
+    return '';
+  }
 
   /* ==========================================================================
    * 4. FINDING THE TYPING COMPONENT (REACT)
@@ -5139,31 +5316,21 @@ function dayCurveAt(at = Date.now()) {
   // Session limit: only measured races count towards it, never a DQ. The time
   // limit is checked between races, never mid-race: the loop asks before it
   // opens one, and a live race always finishes (leaving it is a DQ).
-  const timeLimitLeft = () => {
-    if (!session.timeLimit) return null;
-    if (!session.tandaStartedAt) return session.timeLimit * 60000;
-    return Math.max(0, session.tandaStartedAt + session.timeLimit * 60000 - Date.now());
-  };
+  const timeLimitLeft = () => timeLimitLeftFor({
+    timeLimit: session.timeLimit,
+    tandaStartedAt: session.tandaStartedAt,
+  });
 
   // Presupuesto del dia: carreras y XP reales de hoy. El override solo lo usa
   // el banco para probar los bordes sin mover el resumen del dia.
   let dailyCountsOverride = null;
+  // La cuenta es pura y vive en 36-queue-policy.js; aqui solo se elige de
+  // donde salen los numeros (resumen del dia o el override del banco).
   function dailyCaps() {
-    const day = dailyCountsOverride || todayRead();
-    const races = Math.max(0, Number(day.races) || 0);
-    const xp = Math.max(0, Number(day.xp) || 0);
-    const raceCap = Math.max(0, Number(session.dailyRaceLimit) || 0);
-    const xpCap = Math.max(0, Number(session.dailyXpLimit) || 0);
-    return {
-      races,
-      xp,
-      raceCap,
-      xpCap,
-      raceHit: raceCap > 0 && races >= raceCap,
-      xpHit: xpCap > 0 && xp >= xpCap,
-      warn: (raceCap > 0 && races >= raceCap * 0.8)
-        || (xpCap > 0 && xp >= xpCap * 0.8),
-    };
+    return dailyCapsFor(dailyCountsOverride || todayRead(), {
+      raceCap: session.dailyRaceLimit,
+      xpCap: session.dailyXpLimit,
+    });
   }
 
   const dailyLimitReached = () => {
@@ -5174,66 +5341,9 @@ function dayCurveAt(at = Date.now()) {
   /* --------------------------------------------------------------------------
    * Ventana de horas activas
    * ------------------------------------------------------------------------ */
-  // Hora local del navegador. Admite cruzar medianoche (22:00–02:00); con
-  // start === end la ventana es todo el dia, y apagada no limita nada.
-  const padHour = (hour) => `${String(hour).padStart(2, '0')}:00`;
-
-  function activeWindowAt(settings, at = Date.now()) {
-    const on = Boolean(settings && settings.on);
-    const start = clamp((settings && settings.start) | 0, 0, 23);
-    const end = clamp((settings && settings.end) | 0, 0, 23);
-    const startText = padHour(start);
-    const endText = padHour(end);
-    const allDay = start === end;
-    const date = new Date(at);
-    const startAt = new Date(at);
-    const endAt = new Date(at);
-    startAt.setHours(start, 0, 0, 0);
-    endAt.setHours(end, 0, 0, 0);
-
-    const nextStart = () => {
-      const next = new Date(startAt);
-      if (next.getTime() <= at) next.setDate(next.getDate() + 1);
-      return next;
-    };
-    const nextEnd = () => {
-      const next = new Date(endAt);
-      if (next.getTime() <= at) next.setDate(next.getDate() + 1);
-      return next;
-    };
-
-    if (!on || allDay) {
-      return {
-        on, start, end, startText, endText, allDay: true, open: true,
-        nextAt: 0, closesAt: 0, nextText: startText, closesText: endText,
-        msUntilOpen: 0, msUntilClose: 0,
-      };
-    }
-
-    let open = false;
-    let nextAt = 0;
-    let closesAt = 0;
-
-    if (start < end) {
-      open = date >= startAt && date < endAt;
-      if (open) closesAt = endAt.getTime();
-      else nextAt = date < startAt ? startAt.getTime() : nextStart().getTime();
-    } else {
-      // Cruza medianoche: abierta desde start hasta las 24:00 y desde las
-      // 00:00 hasta end. Cerrada en el hueco entre end y start.
-      open = date >= startAt || date < endAt;
-      if (open) closesAt = date < endAt ? endAt.getTime() : nextEnd().getTime();
-      else nextAt = startAt.getTime();
-    }
-
-    return {
-      on, start, end, startText, endText, allDay, open,
-      nextAt, closesAt, nextText: startText, closesText: endText,
-      msUntilOpen: nextAt ? Math.max(0, nextAt - at) : 0,
-      msUntilClose: closesAt ? Math.max(0, closesAt - at) : 0,
-    };
-  }
-
+  // La matematica de la ventana (medianoche incluida) vive en
+  // 36-queue-policy.js y se prueba en Node; aqui solo se pasan los ajustes de
+  // la sesion actual.
   function activeWindow(at = Date.now()) {
     return activeWindowAt({
       on: session.activeOn,
@@ -5319,11 +5429,14 @@ function dayCurveAt(at = Date.now()) {
     if (session.activeOn) scheduleActiveResume();
   }
 
-  const limitReached = () => (session.raceLimit > 0 && session.races >= session.raceLimit)
-    || (session.timeLimit > 0 && session.tandaStartedAt > 0
-      && Date.now() >= session.tandaStartedAt + session.timeLimit * 60000)
-    || (session.xpLimit > 0 && session.xp >= session.xpLimit)
-    || dailyLimitReached();
+  const limitReached = () => sessionLimitReached({
+    races: session.races,
+    raceLimit: session.raceLimit,
+    xp: session.xp,
+    xpLimit: session.xpLimit,
+    timeLimit: session.timeLimit,
+    tandaStartedAt: session.tandaStartedAt,
+  }, dailyCaps());
 
   // Texto corto para el tope por tiempo: "45m", "2h", "1h 30m".
   function limitMinutesText(minutes) {
@@ -8948,7 +9061,13 @@ function dayCurveAt(at = Date.now()) {
   // inyecta igual
   // cual. Si algun dia necesita un valor del JS, tiene que entrar por un
   // custom property (los temas ya funcionan asi), no por plantilla.
-  const PANEL_CSS = `
+  // Diferido: la hoja solo se arma cuando existe un panel. En garaje (donde
+  // panelCssFrom no se llama nunca) el arranque no paga estos 767 renglones de
+  // plantilla; en carrera se arma una vez y se memoiza.
+  let panelCssCache = '';
+  function panelCss() {
+    if (panelCssCache) return panelCssCache;
+    panelCssCache = `
         /* ====================================================================
            Panel: una sola pieza de shadow DOM. Paleta de overlay de juego
            (carbon casi negro + verde neon), tipografia pequena y animaciones
@@ -9930,6 +10049,9 @@ function dayCurveAt(at = Date.now()) {
           .panel[data-theme="rgb"], .panel[data-theme="rgb"]::after { animation: none !important; }
         }
       `;
+    perfCounters.panelCssBuilds += 1;
+    return panelCssCache;
+  }
 
   /* ==========================================================================
    * 12. FLOATING PANEL
@@ -9943,6 +10065,15 @@ function dayCurveAt(at = Date.now()) {
 
   function setText(el, value) {
     if (el && el.textContent !== value) el.textContent = value;
+  }
+
+  // Los title largos de las cifras vivas se reescribian cuatro veces por
+  // segundo aunque el texto fuese el mismo. El expando vive en el nodo, asi que
+  // un panel nuevo empieza sin cache y no hereda valores del anterior.
+  function setTitle(el, text) {
+    if (!el || el.__ntaTitle === text) return;
+    el.__ntaTitle = text;
+    el.title = text;
   }
 
   // Las filas que aparecen y desaparecen se tocan en cada latido. Escribir el
@@ -11256,6 +11387,16 @@ function dayCurveAt(at = Date.now()) {
     return true;
   };
   window.__ntaDebug.perf = () => ({ ...perfCounters });
+  // Arranque medido: cuanto tarda el IIFE desde su primera instruccion hasta
+  // el final de boot(), y cuantas veces se armaron el CSS y el HTML del panel.
+  // En garaje los dos contadores tienen que quedarse en cero.
+  window.__ntaDebug.boot = () => ({
+    startedAt: BOOT_STARTED_AT,
+    readyAt: BOOT_READY_AT,
+    ms: BOOT_READY_AT ? Math.round(BOOT_READY_AT - BOOT_STARTED_AT) : null,
+    cssBuilds: perfCounters.panelCssBuilds,
+    htmlBuilds: perfCounters.panelHtmlBuilds,
+  });
   window.__ntaDebug.paintEveryMs = () => panelPaintEveryMs();
   window.__ntaDebug.typing = () => Boolean(session.typing);
   // Muestra de cadencia pura: cuanto tarda el motor por tecla a un objetivo
@@ -12328,6 +12469,8 @@ function dayCurveAt(at = Date.now()) {
   }
 
   let panelReclampTimer = 0;
+  let panelResizeBound = false;
+  let updateTickerBound = false;
 
   // Escala, densidad o un cambio de ventana pueden dejar el panel fuera del
   // viewport. Se vuelve a la ultima posicion guardada (placeHost la recorta al
@@ -12427,7 +12570,7 @@ function dayCurveAt(at = Date.now()) {
     host.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:2147483000;';
 
     const shadow = host.attachShadow({ mode: 'open' });
-    shadow.innerHTML = PANEL_HTML;
+    shadow.innerHTML = panelHtml();
 
     // Las vistas inactivas viven en <template>: sus nodos se parsean, pero no
     // entran en el arbol del documento ni en el layout. `pick` las encuentra
@@ -13031,7 +13174,12 @@ function dayCurveAt(at = Date.now()) {
     applyFootMode();
     restorePosition();
     makeDraggable(shadow);
-    window.addEventListener('resize', schedulePanelReclamp);
+    // Una sola escucha por ventana aunque el panel se reconstruya: cada
+    // montaje traia la suya y el latido puede remontar el panel tras navegar.
+    if (!panelResizeBound) {
+      panelResizeBound = true;
+      window.addEventListener('resize', schedulePanelReclamp);
+    }
 
     panel.refs.toggle.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -14129,20 +14277,16 @@ function dayCurveAt(at = Date.now()) {
     setGood(panel.refs.liveNow, stale ? false : null);
     setGood(panel.refs.liveNowAcc,
       stale ? false : recentAcc === null ? null : recentAcc >= profile.accuracyGoal);
-    if (panel.refs.liveNow) {
-      panel.refs.liveNow.title = stale
-        ? frozenWarning
-        : recentPace === null
-          ? `Recent pace: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
-          : `Recent pace: ${recentPace.toFixed(1)} WPM over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys. The session row is the cumulative average.`;
-    }
-    if (panel.refs.liveNowAcc) {
-      panel.refs.liveNowAcc.title = stale
-        ? frozenWarning
-        : recentAcc === null
-          ? `Recent accuracy: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
-          : `Recent accuracy: ${recentAcc.toFixed(1)}% over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys (errors / typed, the game formula). The accuracy above is cumulative.`;
-    }
+    setTitle(panel.refs.liveNow, stale
+      ? frozenWarning
+      : recentPace === null
+        ? `Recent pace: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
+        : `Recent pace: ${recentPace.toFixed(1)} WPM over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys. The session row is the cumulative average.`);
+    setTitle(panel.refs.liveNowAcc, stale
+      ? frozenWarning
+      : recentAcc === null
+        ? `Recent accuracy: needs at least ${LIVE_PACE_MIN_MS / 1000} seconds and a few accepted keys inside the last ${LIVE_PACE_WINDOW_MS / 1000} seconds.`
+        : `Recent accuracy: ${recentAcc.toFixed(1)}% over the last ${LIVE_PACE_WINDOW_MS / 1000} seconds of accepted keys (errors / typed, the game formula). The accuracy above is cumulative.`);
 
     let ageText = '—';
     if (session.endedAt) ageText = 'final';
@@ -14151,11 +14295,9 @@ function dayCurveAt(at = Date.now()) {
     }
     setText(panel.refs.liveAge, ageText);
     setGood(panel.refs.liveAge, stale ? false : null);
-    if (panel.refs.liveAge) {
-      panel.refs.liveAge.title = stale
-        ? frozenWarning
-        : 'Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.';
-    }
+    setTitle(panel.refs.liveAge, stale
+      ? frozenWarning
+      : 'Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.');
     return { pace: recentPace, accuracy: recentAcc, stale };
   }
 
@@ -14202,6 +14344,8 @@ function dayCurveAt(at = Date.now()) {
   let rhythmSamples = [];
   let rhythmLastSampleAt = 0;
   let rhythmRaceKey = '';
+  let rhythmPaintEl = null;
+  let rhythmPaintSig = '';
 
   function rhythmReset() {
     rhythmSamples = [];
@@ -14237,6 +14381,13 @@ function dayCurveAt(at = Date.now()) {
   function paintRhythm() {
     if (!panel.refs || !panel.refs.rhythmWrap) return;
     const wrap = panel.refs.rhythmWrap;
+    // El repintado completo corre a 1-2 Hz con las mismas muestras casi
+    // siempre. La firma incluye el nodo para que un panel remontado pinte una
+    // vez aunque las muestras no hayan cambiado.
+    const sig = `${rhythmSamples.length}:${rhythmSamples.join(',')}:${raceWpm()}`;
+    if (wrap === rhythmPaintEl && sig === rhythmPaintSig) return;
+    rhythmPaintEl = wrap;
+    rhythmPaintSig = sig;
     const ready = rhythmSamples.length >= RHYTHM_MIN;
     const readyFlag = ready ? '1' : '0';
     if (wrap.dataset.ready !== readyFlag) wrap.dataset.ready = readyFlag;
@@ -14367,10 +14518,15 @@ function dayCurveAt(at = Date.now()) {
           event.stopPropagation();
           openUpdateDownload();
         });
+        // La consulta y su tick son por ventana, no por nodo: remontar el panel
+        // no debe dejar un intervalo huerfano por cada montaje.
         checkForUpdate();
-        // Tick corto: checkForUpdate no repite una comprobacion buena hasta
-        // los 5 min; al volver a la pestana tambien se pregunta sin esperar.
-        setInterval(checkForUpdate, UPDATE_RECHECK_MS);
+        if (!updateTickerBound) {
+          updateTickerBound = true;
+          // Tick corto: checkForUpdate no repite una comprobacion buena hasta
+          // los 5 min; al volver a la pestana tambien se pregunta sin esperar.
+          setInterval(checkForUpdate, UPDATE_RECHECK_MS);
+        }
       }
     }
 
@@ -15558,12 +15714,15 @@ function dayCurveAt(at = Date.now()) {
    * ========================================================================== */
   // Las 485 lineas de HTML del shadow root, fuera de createPanel para que esa
   // funcion se lea como lo que hace (cablear eventos) y no como una plantilla.
-  // Solo interpola cuatro constantes de modulo (PANEL_CSS, CHANNEL y las dos
-  // URLs de actualizacion), ninguna variable local, asi que el texto viaja tal
-  // cual. El modulo se evalua despues de 79-panel-css.js porque PANEL_CSS tiene
-  // que existir cuando se arma esta cadena.
-  const PANEL_HTML = `
-      <style>${PANEL_CSS}</style>
+  // Diferido y memoizado igual que la hoja: un garaje que nunca monta panel no
+  // paga el parseo de este texto. Interpola tres constantes de modulo
+  // (panelCss(), CHANNEL y las dos URLs de actualizacion), ninguna variable
+  // local, asi que el texto viaja tal cual.
+  let panelHtmlCache = '';
+  function panelHtml() {
+    if (panelHtmlCache) return panelHtmlCache;
+    panelHtmlCache = `
+      <style>${panelCss()}</style>
       <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-context="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
         <div class="head" tabindex="0" aria-label="Panel header. Drag with the mouse or move with arrow keys; Shift moves 24 pixels and Home returns to the corner." aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight Home">
           <span class="mark" aria-hidden="true">
@@ -16125,6 +16284,9 @@ function dayCurveAt(at = Date.now()) {
         </div>
       </div>
     `;
+    perfCounters.panelHtmlBuilds += 1;
+    return panelHtmlCache;
+  }
   /* ==========================================================================
    * 13b. QUEUE HELPERS
    * ==========================================================================
@@ -19200,49 +19362,9 @@ function dayCurveAt(at = Date.now()) {
       return 'waiting · starts by itself';
     }
 
-    function deriveGarageContext(input = {}) {
-      if (input.social) {
-        return { key: 'read', title: 'Read-only social', detail: 'Friends and team counters without actions.', pill: 'READ' };
-      }
-      if (input.banned) {
-        return { key: 'banned', title: 'Account blocked', detail: 'Review the account before clearing the ban.', pill: 'BAN' };
-      }
-      if (!input.signed) {
-        return { key: 'signin', title: 'Sign in required', detail: 'The queue waits for a valid session.', pill: 'LOGIN' };
-      }
-      if (input.offline) {
-        return { key: 'offline', title: 'Waiting for network', detail: 'Races resume when the connection returns.', pill: 'OFFLINE' };
-      }
-      if (input.activeStop) {
-        return { key: 'stopped', title: 'Queue stopped', detail: input.reason || 'Resume when you are ready.', pill: 'STOPPED' };
-      }
-      if (input.banCleared) {
-        return { key: 'cleared', title: 'Ban stop cleared', detail: 'Resume to arm the queue again.', pill: 'CLEARED' };
-      }
-      if (input.hasRetry) {
-        return { key: 'retry', title: 'Sign-in retry pending', detail: `Retry in ${input.retryText || 'a moment'}.`, pill: 'LOGIN' };
-      }
-      if (Array.isArray(input.gates) && input.gates.length) {
-        const gate = input.gates[0];
-        return { key: 'gate', title: gate.label || 'Queue waiting', detail: `Clears in ${gate.leftText || 'a moment'}.`, pill: 'WAIT' };
-      }
-      if (input.boxReady) {
-        return { key: 'reward', title: 'Mystery Box ready', detail: 'Claim the daily reward before the next race.', pill: 'REWARD' };
-      }
-      if (!input.armed) {
-        return { key: 'stopped', title: 'Queue disarmed', detail: 'Resume to arm the next race.', pill: 'STOPPED' };
-      }
-      return { key: 'ready', title: 'Queue ready', detail: 'The next race will start automatically.', pill: 'AUTO' };
-    }
-
-    function garagePrimaryFor(context, available = {}) {
-      if (context.key === 'reward' && available.box) return 'box';
-      if ((context.key === 'stopped' || context.key === 'banned' || context.key === 'cleared') && available.resume) return 'resume';
-      if (context.key === 'retry' && available.retry) return 'retry';
-      if (context.key === 'ready' && available.race) return 'race';
-      return '';
-    }
-
+    // El contexto y el boton primario del garaje son puros y viven en
+    // 36-queue-policy.js, donde `tests/unit` los cubre sin navegador. El banco
+    // conserva este atajo porque recibe el parche entero y ya conoce el estado.
     window.__ntaDebug.garageActionFor = (patch = {}) => {
       const context = deriveGarageContext(patch);
       return {
@@ -22494,4 +22616,5 @@ function dayCurveAt(at = Date.now()) {
   }
 
   boot();
+  BOOT_READY_AT = performance.now();
 })();

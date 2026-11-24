@@ -35,16 +35,15 @@ const SRC_DIR = path.join(ROOT_DIR, 'src');
 const SCRIPT_PATH = path.join(ROOT_DIR, 'nitro-wraith.user.js');
 const SPAWN_TIMEOUT_MS = 25000;
 
-// El CSS del panel vive en su propio modulo y el artefacto lo inyecta con una
-// plantilla, asi que buscarlo entre las etiquetas devuelve vacio. Se resuelve la
-// interpolacion igual que lo hara el navegador, y si algun dia el CSS vuelve a
-// ir en linea se acepta esa forma tambien: lo que no se acepta es un CSS que no
-// se puede leer, porque entonces las comprobaciones de paleta y contraste
-// pasarian a mirar una cadena vacia y dirian que todo esta bien.
+// El CSS del panel vive en su propio modulo, diferido tras panelCss(). Se
+// resuelve la plantilla igual que lo hara el navegador, y si algun dia el CSS
+// vuelve a ir en linea se acepta esa forma tambien: lo que no se acepta es un
+// CSS que no se puede leer, porque entonces las comprobaciones de paleta y
+// contraste pasarian a mirar una cadena vacia y dirian que todo esta bien.
 function panelCssFrom(script) {
-  const marker = 'const PANEL_CSS = `';
+  const marker = 'panelCssCache = `';
   const at = script.indexOf(marker);
-  if (at >= 0 && script.includes('<style>${PANEL_CSS}</style>')) {
+  if (at >= 0) {
     const end = script.indexOf('`;\n', at + marker.length);
     return end < 0 ? '' : script.slice(at + marker.length, end);
   }
@@ -871,6 +870,22 @@ async function runCase(item) {
     !/rgba\(53, 234, 134/.test(themeCss) && !/rgba\(130, 255, 190/.test(themeCss)
       && /color-mix\(in srgb, var\(--acc\)/.test(themeCss),
     (themeCss.match(/rgba\(53, 234, 134[^)]*\)/g) || []).slice(0, 3).join(' '));
+
+  // La hoja y la plantilla se arman al montar el panel, no al evaluar el
+  // script: un garaje no paga el texto del panel de carrera.
+  unit('the panel assets are lazy and built once',
+    /function panelCss\(\)/.test(themeScript)
+      && /function panelHtml\(\)/.test(themeScript)
+      && themeScript.includes('if (panelCssCache) return panelCssCache;')
+      && themeScript.includes('if (panelHtmlCache) return panelHtmlCache;')
+      && themeScript.includes('shadow.innerHTML = panelHtml();')
+      && !themeScript.includes('const PANEL_CSS = `')
+      && !themeScript.includes('const PANEL_HTML = `'),
+    'the panel template is evaluated when the script loads');
+
+  unit('panel listeners and update ticks are bound once per window',
+    themeScript.includes('panelResizeBound') && themeScript.includes('updateTickerBound'),
+    'the resize listener or the update interval is added on every mount');
 
   // Contraste de las seis pieles: los textos pequenos (--dim y --dim-2) tienen
   // que llegar a 4.5:1 sobre el fondo mas claro del panel. Se leen las paletas

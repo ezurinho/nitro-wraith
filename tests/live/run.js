@@ -1295,6 +1295,22 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && livePanel.dayXp === '777 XP',
     livePanel);
 
+  // Arranque medido: el CSS y el HTML del panel son perezosos y memoizados. En
+  // una ventana de carrera se arman una vez; el arranque entero (evaluacion del
+  // IIFE hasta el final de boot) tiene que caber de sobra en el presupuesto.
+  const bootCost = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const b = w.__ntaDebug.boot ? w.__ntaDebug.boot() : null;
+    return b
+      ? { ...b, hasPanel: Boolean(w.document.getElementById('nt-autotyper-panel')) }
+      : { has: false };
+  })()`, true);
+  check('a race boot builds the panel assets once and stays inside the budget',
+    bootCost.has !== false && bootCost.hasPanel
+      && bootCost.cssBuilds === 1 && bootCost.htmlBuilds === 1
+      && bootCost.ms > 0 && bootCost.ms < 250,
+    bootCost);
+
   // Rendimiento del latido: 20 ticks seguidos no pueden repetir el escaneo de
   // localStorage ni la lectura del HUD, y el tick medio debe caber de sobra en
   // un frame. Los contadores miden trabajo real (DOM/almacenamiento), no
@@ -1334,6 +1350,33 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('20 HUD reads share one DOM read inside the tick', perf.hudReads === 1, perf);
   check('panel ticks still repaint a connected panel', perf.paints === 20, perf);
   check('a steady panel tick stays well inside a frame', perf.medianMs < 8, perf);
+
+  // Un tick con datos quietos no puede reescribir lo que ya esta bien: ni los
+  // title largos de las cifras vivas ni la polilinea del ritmo. El reloj de
+  // frescura si cambia con el tiempo (es informacion), por eso se observan
+  // solo esos nodos y ese atributo.
+  const idle = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const root = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panelEl = root && root.querySelector('.panel');
+    const titles = ['liveNow', 'liveNowAcc', 'liveAge']
+      .map((field) => root && root.querySelector('[data-field="' + field + '"]'))
+      .filter(Boolean);
+    if (!d || !panelEl || !titles.length) return { has: false };
+    const titleObserver = new w.MutationObserver(() => {});
+    titles.forEach((node) => titleObserver.observe(node, { attributes: true, attributeFilter: ['title'] }));
+    const pointsObserver = new w.MutationObserver(() => {});
+    pointsObserver.observe(panelEl, { subtree: true, attributes: true, attributeFilter: ['points'] });
+    for (let i = 0; i < 20; i++) d.paint();
+    const titleWrites = titleObserver.takeRecords().length;
+    const pointsWrites = pointsObserver.takeRecords().length;
+    titleObserver.disconnect();
+    pointsObserver.disconnect();
+    return { has: true, titleWrites, pointsWrites };
+  })()`, true);
+  check('an idle tick rewrites neither the live titles nor the rhythm line',
+    idle.has && idle.titleWrites === 0 && idle.pointsWrites === 0, idle);
 
   // En espera el panel no necesita 1 Hz: baja a 2 s. Durante el tecleo vuelve
   // a 1 Hz para no perder ningun cambio visible de la carrera.
@@ -1410,7 +1453,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && panelPerf.expanded.paints === panelPerf.count
       && panelPerf.collapsed.paints === panelPerf.count
       && panelPerf.expanded.mutations > panelPerf.collapsed.mutations
-      && panelPerf.expanded.medianMs < 8,
+      && panelPerf.expanded.medianMs < 8
+      && panelPerf.expanded.p95Ms < 16,
     panelPerf);
 
   // La pestaña en segundo plano es real: se abre otra pestaña, se lleva al
@@ -4563,6 +4607,26 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       garageUi.hasPanel && garageUi.hasContext && garageUi.context
         && garageUi.title && garageUi.primary,
       garageUi);
+
+    // El arranque de garaje es el que paga el coste completo del IIFE sin
+    // panel: sus dos plantillas grandes tienen que quedarse sin armar y el
+    // boot entero dentro del mismo presupuesto que la carrera.
+    const garageBoot = await cdp.evaluate(`(() => {
+      const b = window.__ntaDebug.boot ? window.__ntaDebug.boot() : null;
+      return b
+        ? {
+          ...b,
+          bigPanel: Boolean(document.getElementById('nt-autotyper-panel')),
+          queuePanel: Boolean(document.getElementById('nt-queue-panel')),
+        }
+        : { has: false };
+    })()`);
+    check('a garage boot never builds the race panel assets',
+      garageBoot.has !== false
+        && garageBoot.cssBuilds === 0 && garageBoot.htmlBuilds === 0
+        && garageBoot.bigPanel === false && garageBoot.queuePanel === true
+        && garageBoot.ms > 0 && garageBoot.ms < 250,
+      garageBoot);
 
     const garageContextMatrix = await cdp.evaluate(`(() => {
       const d = window.__ntaDebug;

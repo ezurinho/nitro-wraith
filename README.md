@@ -247,7 +247,8 @@ Chrome.
 
 ```bash
 npm run build       # concatenate src/ into nitro-wraith.user.js and .meta.js
-npm test            # synced build + CLI checks, no browser needed
+npm test            # synced build + queue unit tests + CLI checks, no browser needed
+npm run test:unit   # queue policy unit tests only (Node, no browser)
 npm run test:live   # browser harness (needs Chrome)
 npm run live:test   # CLI checks only, without the build sync
 npm run check       # synced build, syntax, release/README checks and both suites

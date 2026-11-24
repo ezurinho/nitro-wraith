@@ -7,7 +7,13 @@
   // inyecta igual
   // cual. Si algun dia necesita un valor del JS, tiene que entrar por un
   // custom property (los temas ya funcionan asi), no por plantilla.
-  const PANEL_CSS = `
+  // Diferido: la hoja solo se arma cuando existe un panel. En garaje (donde
+  // panelCssFrom no se llama nunca) el arranque no paga estos 767 renglones de
+  // plantilla; en carrera se arma una vez y se memoiza.
+  let panelCssCache = '';
+  function panelCss() {
+    if (panelCssCache) return panelCssCache;
+    panelCssCache = `
         /* ====================================================================
            Panel: una sola pieza de shadow DOM. Paleta de overlay de juego
            (carbon casi negro + verde neon), tipografia pequena y animaciones
@@ -989,3 +995,6 @@
           .panel[data-theme="rgb"], .panel[data-theme="rgb"]::after { animation: none !important; }
         }
       `;
+    perfCounters.panelCssBuilds += 1;
+    return panelCssCache;
+  }

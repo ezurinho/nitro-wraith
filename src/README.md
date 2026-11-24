@@ -16,16 +16,17 @@ listed in `tools/build.js`:
 | `30-profile.js` | Pace profile, calibration and preferences |
 | `32-history.js` | Race history and tanda log |
 | `35-calendar.js` | Rest days and the day curve (activity realism) |
+| `36-queue-policy.js` | Pure queue policy: active hours, daily caps, session limits, garage context |
 | `40-dom.js` | React/game DOM discovery |
 | `50-state.js` | Runtime state and session helpers |
 | `60-pacing.js` | Typing model, accuracy, nitro and logs |
 | `70-session.js` | Session control and the main race loop |
 | `72-results.js` | Race results, rewards and optional sounds |
-| `79-panel-css.js` | Panel stylesheet (one `<style>` block, no interpolation) |
+| `79-panel-css.js` | Panel stylesheet, built lazily once per page (`panelCss()`) |
 | `80-panel.js` | Panel, garage, TUNE, AFK controls |
 | `81-panel-theme.js` | Theme paint/set/cycle and the cross-window storage bridges |
 | `82-panel-rail.js` | Rail tabs, view mounting and slider fills |
-| `83-panel-html.js` | Panel shadow-root markup (`PANEL_HTML`) |
+| `83-panel-html.js` | Panel shadow-root markup, built lazily once per page (`panelHtml()`) |
 | `85-queue-helpers.js` | Queue helpers that carry no queue state (DOM, labels, routes, formatting) |
 | `90-queue.js` | Queue, navigation and recovery |
 | `95-stickers.js` | Sticker selection |

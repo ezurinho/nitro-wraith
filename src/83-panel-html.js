@@ -3,12 +3,15 @@
    * ========================================================================== */
   // Las 485 lineas de HTML del shadow root, fuera de createPanel para que esa
   // funcion se lea como lo que hace (cablear eventos) y no como una plantilla.
-  // Solo interpola cuatro constantes de modulo (PANEL_CSS, CHANNEL y las dos
-  // URLs de actualizacion), ninguna variable local, asi que el texto viaja tal
-  // cual. El modulo se evalua despues de 79-panel-css.js porque PANEL_CSS tiene
-  // que existir cuando se arma esta cadena.
-  const PANEL_HTML = `
-      <style>${PANEL_CSS}</style>
+  // Diferido y memoizado igual que la hoja: un garaje que nunca monta panel no
+  // paga el parseo de este texto. Interpola tres constantes de modulo
+  // (panelCss(), CHANNEL y las dos URLs de actualizacion), ninguna variable
+  // local, asi que el texto viaja tal cual.
+  let panelHtmlCache = '';
+  function panelHtml() {
+    if (panelHtmlCache) return panelHtmlCache;
+    panelHtmlCache = `
+      <style>${panelCss()}</style>
       <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-context="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
         <div class="head" tabindex="0" aria-label="Panel header. Drag with the mouse or move with arrow keys; Shift moves 24 pixels and Home returns to the corner." aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight Home">
           <span class="mark" aria-hidden="true">
@@ -570,3 +573,6 @@
         </div>
       </div>
     `;
+    perfCounters.panelHtmlBuilds += 1;
+    return panelHtmlCache;
+  }

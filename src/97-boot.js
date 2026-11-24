@@ -262,4 +262,5 @@
   }
 
   boot();
+  BOOT_READY_AT = performance.now();
 })();
