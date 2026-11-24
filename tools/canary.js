@@ -88,9 +88,9 @@ function prepare(build, outDir) {
   user = replaceOnce(user, /const VERSION = '[^']+';/, `const VERSION = '${version}';`, 'VERSION constant');
   user = replaceOnce(user, /const CHANNEL = '[^']+';/, "const CHANNEL = 'canary';", 'CHANNEL constant');
   user = replaceOnce(user, /const UPDATE_META_URL = '[^']+';/, `const UPDATE_META_URL = '${CANARY_META}';`, 'UPDATE_META_URL');
-  user = replaceOnce(user, /const UPDATE_GITHUB_META_URL = '[^']+';/, `const UPDATE_GITHUB_META_URL = '${CANARY_META}';`, 'UPDATE_GITHUB_META_URL');
+  user = replaceOnce(user, /const UPDATE_GIST_META_URL = '[^']+';/, `const UPDATE_GIST_META_URL = '${CANARY_META}';`, 'UPDATE_GIST_META_URL');
   user = replaceOnce(user, /const UPDATE_DOWNLOAD_URL = '[^']+';/, `const UPDATE_DOWNLOAD_URL = '${CANARY_USER}';`, 'UPDATE_DOWNLOAD_URL');
-  user = replaceOnce(user, /const UPDATE_GITHUB_URL = '[^']+';/, `const UPDATE_GITHUB_URL = '${CANARY_USER}';`, 'UPDATE_GITHUB_URL');
+  user = replaceOnce(user, /const UPDATE_GIST_DOWNLOAD_URL = '[^']+';/, `const UPDATE_GIST_DOWNLOAD_URL = '${CANARY_USER}';`, 'UPDATE_GIST_DOWNLOAD_URL');
   user = replaceOnce(user, /const UPDATE_PAGE_URL = '[^']+';/, `const UPDATE_PAGE_URL = '${CANARY_PAGE}';`, 'UPDATE_PAGE_URL');
 
   meta = replaceOnce(meta, /^\/\/ @version\s+\S+/m, `// @version      ${version}`, 'meta @version');
@@ -117,7 +117,7 @@ function prepare(build, outDir) {
     builtAt: new Date().toISOString(),
     installURL: CANARY_USER,
     metaURL: CANARY_META,
-    stableURL: 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js',
+    stableURL: 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js',
   };
 
   fs.mkdirSync(outDir, { recursive: true });

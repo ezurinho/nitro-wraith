@@ -573,8 +573,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     { modules: sourceOrder.length, bytes: sourceText.length,
       missing: sourceOrder.filter((name) => !fs.existsSync(path.join(sourceDir, name))) });
 
-  // Auto-update barato: el @updateURL apunta al meta pequeno del Gist y el
-  // @downloadURL al script completo. Sin SHA en la URL, para que no se congele.
+  // Auto-update barato: el @updateURL apunta al meta pequeno de la ultima
+  // release y el @downloadURL al script completo. Sin SHA en la URL, para que
+  // no se congele.
   const scriptText = fs.readFileSync(SCRIPT, 'utf8');
   const socialStart = scriptText.indexOf('function socialPanelRoute()');
   const socialEnd = scriptText.indexOf('function syncGaragePanel()');
@@ -594,11 +595,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   const metaVersion = (metaText.match(/@version\s+(\S+)/) || [])[1];
   const metaUpdate = (metaText.match(/@updateURL\s+(\S+)/) || [])[1];
   const metaDownload = (metaText.match(/@downloadURL\s+(\S+)/) || [])[1];
-  const stableGist = (url) => /^https:\/\/gist\.githubusercontent\.com\/[^/]+\/[0-9a-f]+\/raw\/[^/]+$/.test(url);
+  const releaseAsset = (url) => /^https:\/\/github\.com\/ezurinho\/nitro-wraith\/releases\/latest\/download\/nitro-wraith\.(meta|user)\.js$/.test(url);
   check('auto-update uses a small stable meta next to the full script',
     Boolean(updateURL) && updateURL.endsWith('/nitro-wraith.meta.js')
       && Boolean(downloadURL) && downloadURL.endsWith('/nitro-wraith.user.js')
-      && stableGist(updateURL) && stableGist(downloadURL)
+      && releaseAsset(updateURL) && releaseAsset(downloadURL)
       && updateURL.replace(/\.meta\.js$/, '.user.js') === downloadURL
       && metaText.length > 0 && metaText.length <= 2000,
     { updateURL, downloadURL, metaBytes: metaText.length });
@@ -607,10 +608,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && metaVersion === scriptVersion && metaUpdate === updateURL && metaDownload === downloadURL,
     { metaBytes: metaText.length, metaVersion, scriptVersion });
   const updateDownload = (scriptText.match(/const UPDATE_DOWNLOAD_URL = '([^']+)'/) || [])[1] || '';
-  check('the update badge downloads the raw userscript, not the Gist page',
+  const gistMirror = (scriptText.match(/const UPDATE_GIST_DOWNLOAD_URL = '([^']+)'/) || [])[1] || '';
+  check('the update badge downloads the released userscript and keeps the Gist mirror',
     updateDownload === downloadURL
-      && updateDownload.endsWith('/raw/nitro-wraith.user.js'),
-    { updateDownload, downloadURL });
+      && updateDownload.endsWith('/releases/latest/download/nitro-wraith.user.js')
+      && /^https:\/\/gist\.githubusercontent\.com\/[^/]+\/[0-9a-f]+\/raw\/nitro-wraith\.user\.js$/.test(gistMirror),
+    { updateDownload, downloadURL, gistMirror });
 
   // Un 404 ya no se guarda como «sin novedades»: deja estado y error visibles,
   // y una respuesta buena posterior los limpia. El fetch se sustituye solo
@@ -671,7 +674,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const final = await d.checkForUpdate(true);
       const finalState = d.updateState();
 
-      w.fetch = async (url) => String(url).includes('gist.githubusercontent.com')
+      w.fetch = async (url) => String(url).includes('github.com')
         ? { ok: false, status: 404, text: async () => '' }
         : { ok: true, status: 200, text: async () => '// @version ${scriptVersion}' };
       const fallback = await d.checkForUpdate(true);
@@ -716,13 +719,13 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && updateHealth.finalState && updateHealth.finalState.error === null
       && updateHealth.finalState.latest === scriptVersion,
     updateHealth);
-  check('the update check falls back to the GitHub release asset',
+  check('the update check falls back to the Gist mirror when the release CDN fails',
     updateHealth.fallback === true
       && updateHealth.fallbackState
       && updateHealth.fallbackState.status === 200
       && updateHealth.fallbackState.error === null
       && updateHealth.fallbackState.latest === scriptVersion
-      && updateHealth.fallbackState.via === 'github',
+      && updateHealth.fallbackState.via === 'gist',
     updateHealth);
   check('results-page failure falls back to the garage before stopping',
     scriptText.includes("notifyTopNeedGarage('the results page would not open another race')")

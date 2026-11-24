@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in NITRO WRAITH does not behave as the README says.
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: reload Nitro Type once and confirm the issue with only one
+        NITRO WRAITH copy installed. Never attach a `player_token`, cookies or a
+        password. Security problems go to SECURITY.md instead of a public issue.
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      options:
+        - stable (GitHub release)
+        - canary (test build)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Panel footer, TUNE → About, or `@version` in Tampermonkey.
+      placeholder: "8.14.66"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and userscript manager
+      placeholder: "Chrome 142 · Tampermonkey 5.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      options:
+        - Garage queue (before a race starts)
+        - During a race
+        - Results page
+        - Panel, TUNE or Log
+        - Update check or install
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Smallest sequence that shows the problem.
+      placeholder: |
+        1. Open the garage with the queue running.
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Panel report
+      description: |
+        TUNE → Health center → copy report (or Log → report). It redacts the
+        token; check it before pasting.
+      render: text
+  - type: textarea
+    id: console
+    attributes:
+      label: Console lines
+      description: Only `[NITRO WRAITH]` lines from the page console, if any.
+      render: text

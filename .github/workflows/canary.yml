@@ -147,7 +147,7 @@ jobs:
             echo
             echo "## Back to stable"
             echo
-            echo "https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js"
+            echo "https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js"
             echo
             echo "## Roll back the canary"
             echo
