@@ -18506,8 +18506,12 @@ function dayCurveAt(at = Date.now()) {
             --warn: #ffb340;
             --bad: #ff6f6f;
             --info: #63c8ff;
+            --ink-warn: color-mix(in srgb, var(--warn) 30%, var(--ink));
+            --ink-bad: color-mix(in srgb, var(--bad) 25%, var(--ink));
             --bg-hi: rgba(12, 17, 14, .985);
             --bg-lo: rgba(5, 8, 6, .995);
+            --font-ui: ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             position: relative;
             width: 292px;
             max-width: calc(100vw - 32px);
@@ -18525,7 +18529,7 @@ function dayCurveAt(at = Date.now()) {
               0 0 0 1px rgba(0, 0, 0, .6),
               0 0 34px -14px color-mix(in srgb, var(--acc) 50%, transparent),
               inset 0 1px 0 rgba(255, 255, 255, .05);
-            font: 12px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+            font: 12px/1.4 var(--font-ui);
             font-variant-numeric: tabular-nums;
             color-scheme: dark;
             animation: nt-qp-boot .4s cubic-bezier(.2, .9, .25, 1) both;
@@ -18590,14 +18594,14 @@ function dayCurveAt(at = Date.now()) {
 
           .mode { margin-left: auto; flex: none; padding: 5px 10px; border-radius: 999px;
                   cursor: default;
-                  font: 800 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+                  font: 800 9px/1 var(--font-ui);
                   letter-spacing: .1em; text-transform: uppercase;
                   color: var(--acc-2); background: var(--acc-dim);
                   border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
                   transition: color .2s ease, background .2s ease, border-color .2s ease; }
           .fold { all: unset; flex: none; display: grid; place-items: center;
                   width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
-                  font: 800 13px/1 ui-monospace, monospace; color: var(--dim);
+                  font: 800 13px/1 var(--font-mono); color: var(--dim);
                   background: rgba(255, 255, 255, .04); border: 1px solid var(--line);
                   transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
           .fold:hover { color: var(--acc-2); background: var(--acc-dim); border-color: var(--line-strong); }
@@ -18646,10 +18650,10 @@ function dayCurveAt(at = Date.now()) {
           .gc-icon svg { width: 14px; height: 14px; }
           .gc-copy { min-width: 0; }
           .gc-copy b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                       font: 750 10px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink); }
+                       font: 750 10px/1.25 var(--font-ui); color: var(--ink); }
           .gc-copy > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                           margin-top: 2px; font: 500 8.5px/1.3 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
-          .garage-context > i { padding: 3px 6px; border-radius: 999px; font: 800 7.5px/1 ui-sans-serif, system-ui, sans-serif;
+                           margin-top: 2px; font: 500 8.5px/1.3 var(--font-ui); color: var(--dim); }
+          .garage-context > i { padding: 3px 6px; border-radius: 999px; font: 800 7.5px/1 var(--font-ui);
                                letter-spacing: .1em; text-transform: uppercase; color: var(--ctx);
                                background: color-mix(in srgb, var(--ctx) 10%, transparent);
                                border: 1px solid color-mix(in srgb, var(--ctx) 24%, transparent); }
@@ -18664,7 +18668,7 @@ function dayCurveAt(at = Date.now()) {
           .r > span { flex: 0 0 auto; letter-spacing: .05em; }
           /* El valor puede ser largo ("next check in 21 h"): se le deja encoger y
              partir en dos lineas en vez de salirse por el borde del panel. */
-          .r b { flex: 1 1 auto; min-width: 0; font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          .r b { flex: 1 1 auto; min-width: 0; font: 600 11px/1.45 var(--font-mono);
                  font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: right;
                  overflow-wrap: break-word; }
           .r b.race { cursor: pointer; }
@@ -18676,11 +18680,13 @@ function dayCurveAt(at = Date.now()) {
             content: '';
             position: absolute;
             left: 0; bottom: -1px; height: 1px;
-            width: calc(var(--race-progress, 0) * 1%);
+            width: 100%;
+            transform: scaleX(calc(var(--race-progress, 0) / 100));
+            transform-origin: left center;
             background: linear-gradient(90deg, transparent, var(--acc));
             box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 60%, transparent);
             pointer-events: none;
-            transition: width .2s linear;
+            transition: transform .2s linear;
           }
           .r[hidden] { display: none; }
           .r b[data-warn="1"] { color: var(--warn); }
@@ -18697,7 +18703,7 @@ function dayCurveAt(at = Date.now()) {
           /* La fila de tema es un control, no una metrica: se ve clicable y
              lleva un punto del acento para reconocer la piel activa. */
           .r .theme { all: unset; flex: 1 1 auto; min-width: 0; cursor: pointer;
-               font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+               font: 600 11px/1.45 var(--font-mono);
                font-variant-numeric: tabular-nums; color: var(--acc); text-align: right;
                border-radius: 5px; }
           .r .theme::before { content: ''; display: inline-block; width: 7px; height: 7px;
@@ -18773,20 +18779,20 @@ function dayCurveAt(at = Date.now()) {
              Va en ambar y se separa de la lista, no compite con ella. */
           .r[data-f="waitRow"] { margin: 4px 0; padding: 5px 8px; border-radius: 8px;
                border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent);
-               background: color-mix(in srgb, var(--warn) 8%, transparent); color: #cfa96b; font-size: 10px; }
+               background: color-mix(in srgb, var(--warn) 8%, transparent); color: var(--ink-warn); font-size: 10px; }
           .r[data-f="waitRow"] b { font-size: 10px; color: var(--warn); }
 
           /* Pie: el motivo, con la misma linea de separacion que el panel grande
              usa para su barra de estado. */
           .why { margin-top: 2px; padding: 8px 12px 0; border-top: 1px solid var(--line);
                  font-weight: 500; font-size: 9.5px; line-height: 1.35; color: var(--dim); }
-          .why b { font-weight: 500; color: #cfe3d6; }
+          .why b { font-weight: 500; color: color-mix(in srgb, var(--ink) 88%, var(--dim)); }
           .why[hidden] { display: none; }
 
           .acts { display: flex; flex-wrap: wrap; gap: 7px; padding: 9px 12px 12px; }
           .act { flex: 1 1 auto; min-width: 0; padding: 9px 0; text-align: center;
                  border-radius: 9px; cursor: pointer;
-                 font: 800 9.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+                 font: 800 9.5px/1 var(--font-ui);
                  letter-spacing: .14em; text-transform: uppercase; color: var(--ink);
                  background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 22%, transparent), color-mix(in srgb, var(--acc) 10%, transparent));
                  border: 1px solid color-mix(in srgb, var(--acc) 34%, transparent);
@@ -18799,18 +18805,19 @@ function dayCurveAt(at = Date.now()) {
                          box-shadow: 0 0 20px -10px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .14); }
           .act.primary:hover:not(:disabled) { box-shadow: 0 0 24px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .16); }
           .act:active:not(:disabled) { transform: translateY(1px); }
-          .act:disabled { opacity: .38; cursor: default; }
-          .act.ghost { color: #cfe9db; background: rgba(255, 255, 255, .045);
+          .act:disabled { opacity: .38; cursor: not-allowed; color: var(--dim);
+                 background: rgba(255, 255, 255, .03); border-color: var(--line); box-shadow: none; }
+          .act.ghost { color: var(--ink-2); background: rgba(255, 255, 255, .045);
                  border-color: var(--line); box-shadow: none; }
           .act.ghost:hover:not(:disabled) { color: var(--acc); background: var(--acc-dim);
                  border-color: var(--line-strong); }
           /* Stop comparte sitio con las acciones normales, pero su color no
              invita a pulsarlo: parar es una salida, no el siguiente paso. */
-          .act.danger { color: #ffd0d0;
+          .act.danger { color: var(--ink-bad);
                  background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 18%, transparent), color-mix(in srgb, var(--bad) 8%, transparent));
                  border-color: color-mix(in srgb, var(--bad) 32%, transparent);
                  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
-          .act.danger:hover:not(:disabled) { color: #fff;
+          .act.danger:hover:not(:disabled) { color: var(--ink);
                  background: color-mix(in srgb, var(--bad) 22%, transparent);
                  border-color: color-mix(in srgb, var(--bad) 55%, transparent);
                  box-shadow: 0 0 20px -9px var(--bad), inset 0 1px 0 rgba(255, 255, 255, .12); }

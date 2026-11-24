@@ -52,6 +52,15 @@ function panelCssFrom(script) {
   return close < 0 ? '' : script.slice(open, close);
 }
 
+function garageCssFrom(script) {
+  const marker = 'root.innerHTML = `';
+  const at = script.indexOf(marker);
+  if (at < 0) return '';
+  const style = script.indexOf('<style>', at);
+  const end = style < 0 ? -1 : script.indexOf('</style>', style);
+  return end < 0 ? '' : script.slice(style + 7, end);
+}
+
 // Los artefactos se comparan sin finales de linea: el contrato es que el build
 // de prueba no cambie su CONTENIDO, y en un checkout CRLF (core.autocrlf sin
 // .gitattributes aplicado) una igualdad byte a byte daba un falso negativo.
@@ -899,6 +908,21 @@ async function runCase(item) {
       && /prefers-reduced-motion: reduce/.test(themeCss)
       && /:focus-visible/.test(themeCss),
     `ui=${fontStacks} mono=${monoStacks}`);
+
+  // El garaje es la otra superficie visual y vive en su propio shadow root, asi
+  // que repite los tokens. Se le exige el mismo piso, incluida la cuenta atras
+  // de Race Now, que antes animaba `width` y ahora usa scaleX.
+  const garageCss = garageCssFrom(themeScript);
+  const garageUi = (garageCss.match(/ui-sans-serif/g) || []).length;
+  const garageMono = (garageCss.match(/ui-monospace/g) || []).length;
+  unit('the garage sheet keeps the design floor: token fonts, no layout animation',
+    garageCss.length > 0
+      && garageUi === 1 && garageMono === 1
+      && !/transition:\s*(all|width|height|top|left)\b/.test(garageCss)
+      && /\.r\[data-f="raceRow"\]::after \{[^}]*transform: scaleX\(calc\(var\(--race-progress[^}]*transition: transform/.test(garageCss)
+      && /prefers-reduced-motion: reduce/.test(garageCss)
+      && /:focus-visible/.test(garageCss),
+    `bytes=${garageCss.length} ui=${garageUi} mono=${garageMono}`);
 
   // Los ganchos de depuracion existen para el banco (localhost) y para quien los
   // abre a mano; en el sitio real se retiran al terminar boot.
