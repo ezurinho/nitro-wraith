@@ -1704,6 +1704,47 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('an idle tick rewrites neither the live titles nor the rhythm line',
     idle.has && idle.titleWrites === 0 && idle.pointsWrites === 0, idle);
 
+  // El diseno promete cero escrituras DOM con el panel quieto (DESIGN.md,
+  // Motion): si el dato no cambio, ninguna tarjeta, texto ni title se toca.
+  // Se observa el arbol entero durante 20 ticks forzados con la sesion parada.
+  const quiet = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const root = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panelEl = root && root.querySelector('.panel');
+    if (!d || !panelEl) return { has: false };
+    const original = d.session();
+    d.patchSession({
+      stopped: true, typing: false, paused: false, breakUntil: 0,
+      chars: 0, errors: 0, startedAt: 0, endedAt: 0,
+    });
+    d.paint();
+    const observer = new w.MutationObserver(() => {});
+    observer.observe(panelEl, {
+      subtree: true, childList: true, attributes: true, attributeOldValue: true, characterData: true,
+    });
+    for (let i = 0; i < 20; i++) d.paint();
+    const records = observer.takeRecords();
+    observer.disconnect();
+    // La fila del vigilante lleva un reloj vivo (los segundos que le quedan al
+    // lease), asi que cambia sola aunque nadie toque nada: se deja fuera igual
+    // que el reloj de frescura del readout en el chequeo anterior.
+    const seen = records
+      .filter((m) => !(m.target && m.target.closest && m.target.closest('.watch-row')))
+      .map((m) => {
+        const t = m.target;
+        const field = (t && t.dataset && t.dataset.field) || (t && t.className) || (t && t.nodeName);
+        const was = m.type === 'attributes' ? ' (was "' + m.oldValue + '")' : '';
+        return m.type + ':' + (m.attributeName || '') + ':' + field + was;
+      });
+    d.patchSession({
+      stopped: original.stopped, chars: original.chars, errors: original.errors,
+      startedAt: original.startedAt, endedAt: original.endedAt,
+    });
+    return { has: true, count: seen.length, sample: Array.from(new Set(seen)).slice(0, 30) };
+  })()`, true);
+  check('an idle panel performs no DOM writes', quiet.has && quiet.count === 0, quiet);
+
   // En espera el panel no necesita 1 Hz: baja a 2 s. Durante el tecleo vuelve
   // a 1 Hz para no perder ningun cambio visible de la carrera.
   const cadence = await cdp.evaluate(`(() => {

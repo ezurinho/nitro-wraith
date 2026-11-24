@@ -799,7 +799,10 @@
     if (refs.updateAuto) {
       const value = state.enabled ? '1' : '0';
       if (refs.updateAuto.dataset.on !== value) refs.updateAuto.dataset.on = value;
-      refs.updateAuto.setAttribute('aria-checked', state.enabled ? 'true' : 'false');
+      const checked = state.enabled ? 'true' : 'false';
+      if (refs.updateAuto.getAttribute('aria-checked') !== checked) {
+        refs.updateAuto.setAttribute('aria-checked', checked);
+      }
     }
     if (refs.upAuto) {
       const seconds = Math.max(0, Math.ceil(state.leftMs / 1000));

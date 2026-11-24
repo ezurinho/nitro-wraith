@@ -1701,7 +1701,7 @@
     setText(panel.refs.pace, `LEGIT · ${paceProfile}`);
     const paceTitle = `Pace profile: ${paceProfile} (target ${tier.min}-${tier.max} WPM, hard ceiling ${CONFIG.wpm.hardCap}). Click to change; all three keep the human cadence.`;
     if (panel.refs.pace.title !== paceTitle) panel.refs.pace.title = paceTitle;
-    if (panel.root) panel.root.dataset.paceProfile = paceProfile;
+    if (panel.root && panel.root.dataset.paceProfile !== paceProfile) panel.root.dataset.paceProfile = paceProfile;
 
     paintCalibration();
     paintChallenges();

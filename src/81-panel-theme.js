@@ -45,8 +45,9 @@
         for (const button of panel.refs.themes.querySelectorAll('[data-theme-btn]')) {
           const name = button.dataset.themeBtn;
           const active = name === panelTheme;
-          button.setAttribute('aria-pressed', active ? 'true' : 'false');
-          button.title = `${THEME_LABELS[name] || name}${active ? ': active' : ': switch theme'}`;
+          const pressed = active ? 'true' : 'false';
+          if (button.getAttribute('aria-pressed') !== pressed) button.setAttribute('aria-pressed', pressed);
+          setTitle(button, `${THEME_LABELS[name] || name}${active ? ': active' : ': switch theme'}`);
         }
       }
     }
