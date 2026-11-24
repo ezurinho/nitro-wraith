@@ -370,23 +370,24 @@
 
   const VERSION = '8.14.66';
 
-  // Canal de publicacion: el build estable apunta al Gist; el canary se genera
-  // aparte con tools/canary.js. Solo ese artefacto cambia CHANNEL, su version y
-  // sus URLs: el Gist, `releases/latest` y los tags estables no se tocan.
+  // Canal de publicacion: el build estable se instala y actualiza desde la
+  // ultima release del repositorio (assets adjuntos por el workflow); el Gist
+  // se mantiene como espejo. El canary se genera aparte con tools/canary.js y
+  // solo ese artefacto cambia CHANNEL, su version y sus URLs.
   const CHANNEL = 'stable';
   const UPDATE_CANARY_URL = 'https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.user.js';
-  const UPDATE_STABLE_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+  const UPDATE_STABLE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
 
-  // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
-  // asi que se puede leer sin token. Se consulta cada 5 min y al volver a la
-  // pestana; si falla, se reintenta a los 5 min. Un fallo de red no borra un
-  // aviso anterior ni bloquea la partida.
-  const UPDATE_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
-  const UPDATE_GITHUB_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
-  const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+  // Aviso de version: el meta de la ultima release es la via normal. Si su CDN
+  // falla, el meta del Gist sigue siendo publico (aunque el Gist sea secreto)
+  // y sirve de respaldo. Se consulta cada 5 min y al volver a la pestana; un
+  // fallo de red no borra un aviso anterior ni bloquea la partida.
+  const UPDATE_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
+  const UPDATE_GIST_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
+  const UPDATE_DOWNLOAD_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
+  const UPDATE_GIST_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
   const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
   const UPDATE_RELEASES_URL = 'https://github.com/ezurinho/nitro-wraith/releases';
-  const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
   const UPDATE_KEY = 'nta:update';
   const UPDATE_RECHECK_MS = 5 * 60000;
   const UPDATE_RETRY_MS = 5 * 60000;
@@ -577,14 +578,14 @@
         return { version: match[1], status: response.status || 200, via };
       };
 
-      // El Gist es la via normal de instalacion. Si su CDN o el propio Gist
-      // fallan, la release de GitHub guarda el mismo meta como segunda fuente.
+      // La release es la via normal de instalacion. Si su CDN falla, el Gist
+      // guarda el mismo meta como segunda fuente.
       let result;
       try {
-        result = await readMeta(UPDATE_META_URL, 'gist');
+        result = await readMeta(UPDATE_META_URL, 'github');
       } catch (firstError) {
         if (firstError && firstError.name === 'AbortError') throw firstError;
-        result = await readMeta(UPDATE_GITHUB_META_URL, 'github');
+        result = await readMeta(UPDATE_GIST_META_URL, 'gist');
       }
 
       const keep = previous && previous.latest && versionNewer(previous.latest, VERSION)
@@ -604,7 +605,7 @@
       paintUpdateBadge(garageUpdateNode, true);
       paintUpdateBadge(garageCompactUpdateNode, false, true);
       if (previous && previous.error) {
-        log(`Update check recovered: latest meta v${result.version}${result.via === 'github' ? ' (GitHub fallback)' : ''}.`);
+        log(`Update check recovered: latest meta v${result.version}${result.via === 'gist' ? ' (fallback mirror)' : ''}.`);
       }
       return true;
     } catch (error) {
@@ -621,9 +622,9 @@
 
   function openUpdateDownload() {
     const info = updateInfo();
-    // Si el Gist fallo y el aviso vino del fallback, la descarga tambien usa
-    // el asset de la release: no se manda al usuario a un endpoint caido.
-    const url = info && info.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
+    // Si el CDN de la release fallo y el aviso vino del espejo, la descarga
+    // usa el Gist: no se manda al usuario a un endpoint caido.
+    const url = info && info.via === 'gist' ? UPDATE_GIST_DOWNLOAD_URL : UPDATE_DOWNLOAD_URL;
     try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
   }
 

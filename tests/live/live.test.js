@@ -887,6 +887,20 @@ async function runCase(item) {
     themeScript.includes('panelResizeBound') && themeScript.includes('updateTickerBound'),
     'the resize listener or the update interval is added on every mount');
 
+  // Los ganchos de depuracion existen para el banco (localhost) y para quien los
+  // abre a mano; en el sitio real se retiran al terminar boot.
+  unit('debug hooks stay out of the real site',
+    /const DEBUG_HOOKS = \(\(\) => \{/.test(themeScript)
+      && themeScript.includes("return localStorage.getItem('ntaDebug') === '1';")
+      && /if \(!DEBUG_HOOKS && window\.__ntaDebug\) delete window\.__ntaDebug;/.test(themeScript),
+    'window.__ntaDebug survives boot outside localhost');
+
+  unit('the panel version placeholders come from VERSION',
+    !themeScript.includes('>v7.0.0<')
+      && themeScript.includes('data-field="ver">v${VERSION}</b>')
+      && themeScript.includes('data-field="aboutVer">v${VERSION}</span>'),
+    'a hardcoded version string is still in the panel template');
+
   // Contraste de las seis pieles: los textos pequenos (--dim y --dim-2) tienen
   // que llegar a 4.5:1 sobre el fondo mas claro del panel. Se leen las paletas
   // del propio CSS, no una copia en el test, para que un cambio de color sin
@@ -973,7 +987,7 @@ async function runCase(item) {
     unit('the canary build reports its channel and keeps the way back to stable',
       canaryUser.includes("const CHANNEL = 'canary';")
         && canaryUser.includes("const UPDATE_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.meta.js';")
-        && canaryUser.includes("const UPDATE_STABLE_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';")
+        && canaryUser.includes("const UPDATE_STABLE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';")
         && canaryUser.includes('data-act="channel"')
         && manifest && manifest.channel === 'canary'
         && manifest.version === expected

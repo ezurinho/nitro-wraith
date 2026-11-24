@@ -2,8 +2,8 @@
 // @name         NITRO WRAITH
 // @namespace    nitro.wraith
 // @version      8.14.66
-// @updateURL    https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js
-// @downloadURL  https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js
+// @updateURL    https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js
+// @downloadURL  https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js
 // @description  Human-paced Nitro Type racer for one account: auto-calibrated to the account's own WPM average and top speed under a hard 120 WPM ceiling, automatic race loop with breaks and session limits, Mystery Box, stickers, CAPTCHA/session recovery, a live four-view panel and a safety guard. Always AUTO; no fast mode.
 // @homepageURL  https://github.com/ezurinho/nitro-wraith
 // @supportURL   https://github.com/ezurinho/nitro-wraith/issues
@@ -444,6 +444,19 @@ All of this only aims at believable statistics. It is your call and your risk.
   const BOOT_STARTED_AT = performance.now();
   let BOOT_READY_AT = 0;
 
+  // Los ganchos de depuracion (window.__ntaDebug) existen para el banco de
+  // pruebas, que corre en localhost. En el sitio real solo se abren a mano
+  // (localStorage.ntaDebug = '1') y, si no, se borran al terminar boot: la
+  // pagina no necesita poder parar carreras ni parchear la sesion.
+  const DEBUG_HOOKS = (() => {
+    try {
+      if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return true;
+      return localStorage.getItem('ntaDebug') === '1';
+    } catch {
+      return false;
+    }
+  })();
+
 
   /* ==========================================================================
    * 1. CONFIGURATION
@@ -816,23 +829,24 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   const VERSION = '8.14.66';
 
-  // Canal de publicacion: el build estable apunta al Gist; el canary se genera
-  // aparte con tools/canary.js. Solo ese artefacto cambia CHANNEL, su version y
-  // sus URLs: el Gist, `releases/latest` y los tags estables no se tocan.
+  // Canal de publicacion: el build estable se instala y actualiza desde la
+  // ultima release del repositorio (assets adjuntos por el workflow); el Gist
+  // se mantiene como espejo. El canary se genera aparte con tools/canary.js y
+  // solo ese artefacto cambia CHANNEL, su version y sus URLs.
   const CHANNEL = 'stable';
   const UPDATE_CANARY_URL = 'https://github.com/ezurinho/nitro-wraith/releases/download/canary/nitro-wraith.user.js';
-  const UPDATE_STABLE_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+  const UPDATE_STABLE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
 
-  // Aviso de version: el meta del Gist es publico aunque el Gist sea secreto,
-  // asi que se puede leer sin token. Se consulta cada 5 min y al volver a la
-  // pestana; si falla, se reintenta a los 5 min. Un fallo de red no borra un
-  // aviso anterior ni bloquea la partida.
-  const UPDATE_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
-  const UPDATE_GITHUB_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
-  const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+  // Aviso de version: el meta de la ultima release es la via normal. Si su CDN
+  // falla, el meta del Gist sigue siendo publico (aunque el Gist sea secreto)
+  // y sirve de respaldo. Se consulta cada 5 min y al volver a la pestana; un
+  // fallo de red no borra un aviso anterior ni bloquea la partida.
+  const UPDATE_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
+  const UPDATE_GIST_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
+  const UPDATE_DOWNLOAD_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
+  const UPDATE_GIST_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
   const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
   const UPDATE_RELEASES_URL = 'https://github.com/ezurinho/nitro-wraith/releases';
-  const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
   const UPDATE_KEY = 'nta:update';
   const UPDATE_RECHECK_MS = 5 * 60000;
   const UPDATE_RETRY_MS = 5 * 60000;
@@ -1023,14 +1037,14 @@ All of this only aims at believable statistics. It is your call and your risk.
         return { version: match[1], status: response.status || 200, via };
       };
 
-      // El Gist es la via normal de instalacion. Si su CDN o el propio Gist
-      // fallan, la release de GitHub guarda el mismo meta como segunda fuente.
+      // La release es la via normal de instalacion. Si su CDN falla, el Gist
+      // guarda el mismo meta como segunda fuente.
       let result;
       try {
-        result = await readMeta(UPDATE_META_URL, 'gist');
+        result = await readMeta(UPDATE_META_URL, 'github');
       } catch (firstError) {
         if (firstError && firstError.name === 'AbortError') throw firstError;
-        result = await readMeta(UPDATE_GITHUB_META_URL, 'github');
+        result = await readMeta(UPDATE_GIST_META_URL, 'gist');
       }
 
       const keep = previous && previous.latest && versionNewer(previous.latest, VERSION)
@@ -1050,7 +1064,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       paintUpdateBadge(garageUpdateNode, true);
       paintUpdateBadge(garageCompactUpdateNode, false, true);
       if (previous && previous.error) {
-        log(`Update check recovered: latest meta v${result.version}${result.via === 'github' ? ' (GitHub fallback)' : ''}.`);
+        log(`Update check recovered: latest meta v${result.version}${result.via === 'gist' ? ' (fallback mirror)' : ''}.`);
       }
       return true;
     } catch (error) {
@@ -1067,9 +1081,9 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   function openUpdateDownload() {
     const info = updateInfo();
-    // Si el Gist fallo y el aviso vino del fallback, la descarga tambien usa
-    // el asset de la release: no se manda al usuario a un endpoint caido.
-    const url = info && info.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
+    // Si el CDN de la release fallo y el aviso vino del espejo, la descarga
+    // usa el Gist: no se manda al usuario a un endpoint caido.
+    const url = info && info.via === 'gist' ? UPDATE_GIST_DOWNLOAD_URL : UPDATE_DOWNLOAD_URL;
     try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
   }
 
@@ -13330,8 +13344,8 @@ function dayCurveAt(at = Date.now()) {
         } else if (chip.dataset.act === 'releases') {
           try { window.open(UPDATE_RELEASES_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         } else if (chip.dataset.act === 'channel') {
-          // En canary el boton vuelve al Gist estable; en estable abre el build
-          // de prueba. Ninguno de los dos cambia la release estable por si solo.
+          // En canary el boton vuelve a la release estable; en estable abre el
+          // build de prueba. Ninguno de los dos cambia la release por si solo.
           const url = CHANNEL === 'canary' ? UPDATE_STABLE_URL : UPDATE_CANARY_URL;
           try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
@@ -15230,9 +15244,15 @@ function dayCurveAt(at = Date.now()) {
   function renderHistory() {
     const box = panel.refs && panel.refs.history;
     if (!box) return;
+    // Las filas se construyen con nodos: el historial sale de datos guardados y
+    // no necesita pasar por innerHTML ni escapar atributos a mano.
+    const ownerDoc = box.ownerDocument;
 
     if (!raceHistory.length) {
-      box.innerHTML = '<div class="hist-empty">no races yet</div>';
+      const empty = ownerDoc.createElement('div');
+      empty.className = 'hist-empty';
+      empty.textContent = 'no races yet';
+      box.replaceChildren(empty);
 
       // Al vaciar el historial el pie no puede quedarse con la media de antes.
       if (panel.refs.foot) {
@@ -15245,25 +15265,20 @@ function dayCurveAt(at = Date.now()) {
 
     // La mas reciente arriba. La hora y el puesto son lo que se mira al volver:
     // el indice de antiguedad no decia nada y el XP se perdia en el reporte.
-    box.innerHTML = raceHistory
+    const frag = ownerDoc.createDocumentFragment();
+    raceHistory
       .slice()
       .reverse()
-      .map((item) => {
+      .forEach((item) => {
         // Desvio frente al objetivo de esa carrera. Verde si cae dentro de +-2%,
         // que es donde el autocalibrado deberia mantenerlo.
         const dev = Number.isFinite(item.target) && item.target > 0
           ? ((item.wpm - item.target) / item.target) * 100
           : null;
-        const cell = dev === null
-          ? '<b class="dev"></b>'
-          : '<b class="dev" data-good="' + (Math.abs(dev) <= 2 ? '1' : '0') + '">'
-            + (dev >= 0 ? '+' : '-') + Math.abs(dev).toFixed(1) + '%</b>';
 
         const place = Number(item.place);
         const placeText = Number.isFinite(place) && place > 0 ? '#' + place : '—';
-        const placeAttr = Number.isFinite(place) && place >= 1 && place <= 3
-          ? ' data-medal="' + place + '"'
-          : '';
+        const medal = Number.isFinite(place) && place >= 1 && place <= 3 ? String(place) : '';
         const xp = Number(item.xp);
         const xpText = Number.isFinite(xp) && xp > 0 ? '+' + Math.round(xp) : '—';
         const cash = Number(item.cash);
@@ -15278,9 +15293,6 @@ function dayCurveAt(at = Date.now()) {
         const server = Number(item.serverWpm);
         const nitroChars = Number(item.nitroChars);
         const nitroWords = Number(item.nitroWords);
-        const nitroTag = nitroChars > 0
-          ? '<i class="nitro-tag" aria-label="nitro">N</i>'
-          : '';
         const title = [
           clockText(item.at) || '—',
           Number.isFinite(place) && place > 0 ? '#' + place : null,
@@ -15293,16 +15305,50 @@ function dayCurveAt(at = Date.now()) {
           Number.isFinite(item.target) ? 'target ' + item.target + ' wpm' : null,
         ].filter(Boolean).join(' · ');
 
-        return '<div class="hist-row" title="' + title.replace(/"/g, '&quot;') + '">'
-          + '<span>' + (clockText(item.at) || '—') + '</span>'
-          + '<b class="place"' + placeAttr + '>' + placeText + '</b>'
-          + '<b class="xp">' + xpText + '</b>'
-          + '<b class="wpm">' + nitroTag + item.wpm.toFixed(1)
-          + (modelText ? '<span class="model">' + modelText + '</span>' : '')
-          + '</b>'
-          + cell + '</div>';
-      })
-      .join('');
+        const row = ownerDoc.createElement('div');
+        row.className = 'hist-row';
+        row.title = title;
+
+        const timeCell = ownerDoc.createElement('span');
+        timeCell.textContent = clockText(item.at) || '—';
+
+        const placeCell = ownerDoc.createElement('b');
+        placeCell.className = 'place';
+        if (medal) placeCell.dataset.medal = medal;
+        placeCell.textContent = placeText;
+
+        const xpCell = ownerDoc.createElement('b');
+        xpCell.className = 'xp';
+        xpCell.textContent = xpText;
+
+        const wpmCell = ownerDoc.createElement('b');
+        wpmCell.className = 'wpm';
+        if (nitroChars > 0) {
+          const nitroTag = ownerDoc.createElement('i');
+          nitroTag.className = 'nitro-tag';
+          nitroTag.setAttribute('aria-label', 'nitro');
+          nitroTag.textContent = 'N';
+          wpmCell.append(nitroTag);
+        }
+        wpmCell.append(item.wpm.toFixed(1));
+        if (modelText) {
+          const modelCell = ownerDoc.createElement('span');
+          modelCell.className = 'model';
+          modelCell.textContent = modelText;
+          wpmCell.append(modelCell);
+        }
+
+        const devCell = ownerDoc.createElement('b');
+        devCell.className = 'dev';
+        if (dev !== null) {
+          devCell.dataset.good = Math.abs(dev) <= 2 ? '1' : '0';
+          devCell.textContent = (dev >= 0 ? '+' : '-') + Math.abs(dev).toFixed(1) + '%';
+        }
+
+        row.append(timeCell, placeCell, xpCell, wpmCell, devCell);
+        frag.append(row);
+      });
+    box.replaceChildren(frag);
 
     // Media y mejor de las que se estan viendo: dice de un vistazo si va en
     // tendencia o si la ultima fue un pico suelto.
@@ -15731,9 +15777,9 @@ function dayCurveAt(at = Date.now()) {
           </span>
           <span class="brand">
             <b class="title" data-field="title">NITRO WRAITH</b>
-            <span class="sub">human pace · <b data-field="ver">v7.0.0</b></span>
+            <span class="sub">human pace · <b data-field="ver">v${VERSION}</b></span>
           </span>
-          <a class="ghlink" href="${UPDATE_GITHUB_URL}" target="_blank" rel="noopener noreferrer" hidden title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
+          <a class="ghlink" href="${UPDATE_DOWNLOAD_URL}" target="_blank" rel="noopener noreferrer" hidden title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
           </a>
           <button class="iconbtn collapse" type="button" data-act="expand" aria-label="Collapse panel" aria-expanded="true" title="Collapse / expand the panel">−</button>
@@ -16220,12 +16266,12 @@ function dayCurveAt(at = Date.now()) {
                 </div>
                 <div class="season-actions">
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
-                  <button class="act" type="button" data-act="updateCheck" title="Check the public Gist for a newer version now">check now</button>
+                  <button class="act" type="button" data-act="updateCheck" title="Check the latest GitHub release for a newer version now">check now</button>
                 </div>
-                <div class="cfg-note">The Gist meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the Gist is down, the latest GitHub release asset is used. The installed copy changes only when you download a release.</div>
+                <div class="cfg-note">The latest release meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the release CDN is down, the Gist mirror is used. The installed copy changes only when you download a release.</div>
               </div>
               <div class="card">
-                <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>
+                <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v${VERSION}</span></div>
                 <p class="about">Human-paced racer for one account: calibrated typing inside the account's own envelope, human breaks, a queue that recovers the garage, reloads, CAPTCHAs and re-logins, and a guard that stops everything on an impossible reading. <b>There is no fast mode.</b></p>
               </div>
               <div class="card">
@@ -22616,5 +22662,9 @@ function dayCurveAt(at = Date.now()) {
   }
 
   boot();
+  // Fuera de localhost (y sin el interruptor manual) los ganchos se van antes
+  // de devolver el hilo: el objeto se creo durante el arranque sincrono, asi
+  // que ninguna pagina pudo usarlo mientras tanto.
+  if (!DEBUG_HOOKS && window.__ntaDebug) delete window.__ntaDebug;
   BOOT_READY_AT = performance.now();
 })();

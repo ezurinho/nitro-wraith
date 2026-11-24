@@ -16,8 +16,7 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const GIST_ID = '88f8b25546f8bb0ea588291bab8ffa58';
-const GIST_INSTALL = `https://gist.githubusercontent.com/ezurinho/${GIST_ID}/raw/nitro-wraith.user.js`;
+const RELEASE_INSTALL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
 const NOTES_FILE = path.join(ROOT, '.release-notes.md');
 
 const FILES = {
@@ -174,7 +173,7 @@ function writeNotes(version, bullets) {
     '',
     '## Install or update',
     '',
-    GIST_INSTALL,
+    RELEASE_INSTALL,
     '',
   ];
   fs.writeFileSync(NOTES_FILE, lines.join('\n'), 'utf8');

@@ -20,9 +20,9 @@
           </span>
           <span class="brand">
             <b class="title" data-field="title">NITRO WRAITH</b>
-            <span class="sub">human pace · <b data-field="ver">v7.0.0</b></span>
+            <span class="sub">human pace · <b data-field="ver">v${VERSION}</b></span>
           </span>
-          <a class="ghlink" href="${UPDATE_GITHUB_URL}" target="_blank" rel="noopener noreferrer" hidden title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
+          <a class="ghlink" href="${UPDATE_DOWNLOAD_URL}" target="_blank" rel="noopener noreferrer" hidden title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
           </a>
           <button class="iconbtn collapse" type="button" data-act="expand" aria-label="Collapse panel" aria-expanded="true" title="Collapse / expand the panel">−</button>
@@ -509,12 +509,12 @@
                 </div>
                 <div class="season-actions">
                   <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
-                  <button class="act" type="button" data-act="updateCheck" title="Check the public Gist for a newer version now">check now</button>
+                  <button class="act" type="button" data-act="updateCheck" title="Check the latest GitHub release for a newer version now">check now</button>
                 </div>
-                <div class="cfg-note">The Gist meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the Gist is down, the latest GitHub release asset is used. The installed copy changes only when you download a release.</div>
+                <div class="cfg-note">The latest release meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the release CDN is down, the Gist mirror is used. The installed copy changes only when you download a release.</div>
               </div>
               <div class="card">
-                <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>
+                <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v${VERSION}</span></div>
                 <p class="about">Human-paced racer for one account: calibrated typing inside the account's own envelope, human breaks, a queue that recovers the garage, reloads, CAPTCHAs and re-logins, and a guard that stops everything on an impossible reading. <b>There is no fast mode.</b></p>
               </div>
               <div class="card">

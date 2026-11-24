@@ -262,5 +262,9 @@
   }
 
   boot();
+  // Fuera de localhost (y sin el interruptor manual) los ganchos se van antes
+  // de devolver el hilo: el objeto se creo durante el arranque sincrono, asi
+  // que ninguna pagina pudo usarlo mientras tanto.
+  if (!DEBUG_HOOKS && window.__ntaDebug) delete window.__ntaDebug;
   BOOT_READY_AT = performance.now();
 })();

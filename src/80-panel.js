@@ -3276,8 +3276,8 @@
         } else if (chip.dataset.act === 'releases') {
           try { window.open(UPDATE_RELEASES_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         } else if (chip.dataset.act === 'channel') {
-          // En canary el boton vuelve al Gist estable; en estable abre el build
-          // de prueba. Ninguno de los dos cambia la release estable por si solo.
+          // En canary el boton vuelve a la release estable; en estable abre el
+          // build de prueba. Ninguno de los dos cambia la release por si solo.
           const url = CHANNEL === 'canary' ? UPDATE_STABLE_URL : UPDATE_CANARY_URL;
           try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
@@ -5176,9 +5176,15 @@
   function renderHistory() {
     const box = panel.refs && panel.refs.history;
     if (!box) return;
+    // Las filas se construyen con nodos: el historial sale de datos guardados y
+    // no necesita pasar por innerHTML ni escapar atributos a mano.
+    const ownerDoc = box.ownerDocument;
 
     if (!raceHistory.length) {
-      box.innerHTML = '<div class="hist-empty">no races yet</div>';
+      const empty = ownerDoc.createElement('div');
+      empty.className = 'hist-empty';
+      empty.textContent = 'no races yet';
+      box.replaceChildren(empty);
 
       // Al vaciar el historial el pie no puede quedarse con la media de antes.
       if (panel.refs.foot) {
@@ -5191,25 +5197,20 @@
 
     // La mas reciente arriba. La hora y el puesto son lo que se mira al volver:
     // el indice de antiguedad no decia nada y el XP se perdia en el reporte.
-    box.innerHTML = raceHistory
+    const frag = ownerDoc.createDocumentFragment();
+    raceHistory
       .slice()
       .reverse()
-      .map((item) => {
+      .forEach((item) => {
         // Desvio frente al objetivo de esa carrera. Verde si cae dentro de +-2%,
         // que es donde el autocalibrado deberia mantenerlo.
         const dev = Number.isFinite(item.target) && item.target > 0
           ? ((item.wpm - item.target) / item.target) * 100
           : null;
-        const cell = dev === null
-          ? '<b class="dev"></b>'
-          : '<b class="dev" data-good="' + (Math.abs(dev) <= 2 ? '1' : '0') + '">'
-            + (dev >= 0 ? '+' : '-') + Math.abs(dev).toFixed(1) + '%</b>';
 
         const place = Number(item.place);
         const placeText = Number.isFinite(place) && place > 0 ? '#' + place : '—';
-        const placeAttr = Number.isFinite(place) && place >= 1 && place <= 3
-          ? ' data-medal="' + place + '"'
-          : '';
+        const medal = Number.isFinite(place) && place >= 1 && place <= 3 ? String(place) : '';
         const xp = Number(item.xp);
         const xpText = Number.isFinite(xp) && xp > 0 ? '+' + Math.round(xp) : '—';
         const cash = Number(item.cash);
@@ -5224,9 +5225,6 @@
         const server = Number(item.serverWpm);
         const nitroChars = Number(item.nitroChars);
         const nitroWords = Number(item.nitroWords);
-        const nitroTag = nitroChars > 0
-          ? '<i class="nitro-tag" aria-label="nitro">N</i>'
-          : '';
         const title = [
           clockText(item.at) || '—',
           Number.isFinite(place) && place > 0 ? '#' + place : null,
@@ -5239,16 +5237,50 @@
           Number.isFinite(item.target) ? 'target ' + item.target + ' wpm' : null,
         ].filter(Boolean).join(' · ');
 
-        return '<div class="hist-row" title="' + title.replace(/"/g, '&quot;') + '">'
-          + '<span>' + (clockText(item.at) || '—') + '</span>'
-          + '<b class="place"' + placeAttr + '>' + placeText + '</b>'
-          + '<b class="xp">' + xpText + '</b>'
-          + '<b class="wpm">' + nitroTag + item.wpm.toFixed(1)
-          + (modelText ? '<span class="model">' + modelText + '</span>' : '')
-          + '</b>'
-          + cell + '</div>';
-      })
-      .join('');
+        const row = ownerDoc.createElement('div');
+        row.className = 'hist-row';
+        row.title = title;
+
+        const timeCell = ownerDoc.createElement('span');
+        timeCell.textContent = clockText(item.at) || '—';
+
+        const placeCell = ownerDoc.createElement('b');
+        placeCell.className = 'place';
+        if (medal) placeCell.dataset.medal = medal;
+        placeCell.textContent = placeText;
+
+        const xpCell = ownerDoc.createElement('b');
+        xpCell.className = 'xp';
+        xpCell.textContent = xpText;
+
+        const wpmCell = ownerDoc.createElement('b');
+        wpmCell.className = 'wpm';
+        if (nitroChars > 0) {
+          const nitroTag = ownerDoc.createElement('i');
+          nitroTag.className = 'nitro-tag';
+          nitroTag.setAttribute('aria-label', 'nitro');
+          nitroTag.textContent = 'N';
+          wpmCell.append(nitroTag);
+        }
+        wpmCell.append(item.wpm.toFixed(1));
+        if (modelText) {
+          const modelCell = ownerDoc.createElement('span');
+          modelCell.className = 'model';
+          modelCell.textContent = modelText;
+          wpmCell.append(modelCell);
+        }
+
+        const devCell = ownerDoc.createElement('b');
+        devCell.className = 'dev';
+        if (dev !== null) {
+          devCell.dataset.good = Math.abs(dev) <= 2 ? '1' : '0';
+          devCell.textContent = (dev >= 0 ? '+' : '-') + Math.abs(dev).toFixed(1) + '%';
+        }
+
+        row.append(timeCell, placeCell, xpCell, wpmCell, devCell);
+        frag.append(row);
+      });
+    box.replaceChildren(frag);
 
     // Media y mejor de las que se estan viendo: dice de un vistazo si va en
     // tendencia o si la ultima fue un pico suelto.

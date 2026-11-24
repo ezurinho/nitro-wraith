@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js"><img src="https://img.shields.io/badge/install-userscript-5CF2A0?style=flat-square&labelColor=0B1711" alt="Install NITRO WRAITH"></a>
+  <a href="https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js"><img src="https://img.shields.io/badge/install-userscript-5CF2A0?style=flat-square&labelColor=0B1711" alt="Install NITRO WRAITH"></a>
   <a href="https://github.com/ezurinho/nitro-wraith/releases/latest"><img src="https://img.shields.io/github/v/release/ezurinho/nitro-wraith?style=flat-square&label=release&labelColor=0B1711&color=62E2D0" alt="Latest release"></a>
   <a href="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml"><img src="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml/badge.svg?branch=main" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-FFC66D?style=flat-square&labelColor=0B1711" alt="MIT license"></a>
@@ -30,7 +30,8 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-> One account. No passwords, no CAPTCHAs, no social writes.
+> One account. No passwords, no CAPTCHAs, no friend or team writes. One chat
+> sticker per race, only while stickers are on.
 
 NITRO WRAITH opens the next race, types inside a range built from your account
 stats, and shows why it is waiting.
@@ -69,7 +70,7 @@ stats, and shows why it is waiting.
 - **Tune:** pace profile, limits, breaks, stickers, sound, desktop alerts, AFK farming (off by default), the optional AFK keep-alive, the **AFK interlock**, the **AFK safety guard**, a live **AFK health** row and a **Health center** that summarizes account, AFK, update and freeze state. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
 
-The update badge only appears when the Gist has a newer version. The script
+The update badge only appears when the latest release has a newer version. The script
 checks every 5 minutes and again whenever you return to the tab, so a new
 release shows up without waiting an hour. If you do not see it, your copy is
 current. **versions** in TUNE opens the GitHub release history and **canary**
@@ -150,7 +151,7 @@ blocks and the AFK guard.
 ## Install
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/).
-2. Open the [install link](https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js) and confirm.
+2. Open the [install link](https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js) and confirm.
 3. Sign in at [nitrotype.com](https://www.nitrotype.com/).
 4. Reload the page. The panel appears in the bottom-right corner.
 
@@ -204,13 +205,14 @@ without an accepted character.
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never
 printed, exported or sent to another host. The only off-site request is the
-public Gist version check and, if it is unavailable, the public meta asset of the latest GitHub release; a canary build checks the public canary pre-release meta instead. All are made without credentials.
+public meta asset of the latest GitHub release and, if that is unavailable, the
+Gist mirror; a canary build checks the public canary pre-release meta instead. All are made without credentials.
 
 ## Releases
 
 Releases are automatic. When `check` passes on `main` and the userscript changed,
-the workflow bumps the version, updates the changelog and README, syncs the Gist,
-tags the commit and publishes the release. README-only changes do not release.
+the workflow bumps the version, updates the changelog and README, syncs the Gist
+mirror, tags the commit and publishes the release. README-only changes do not release.
 
 ### Canary channel
 
@@ -233,12 +235,12 @@ ref and run.
 To roll the canary back, run the **canary** workflow (Actions → canary → Run
 workflow) with `ref` set to an earlier `canary-<version>` tag. It rebuilds that
 commit and republishes the alias with a fresh build number; the stable release is
-untouched. The **stable** button in TUNE, or the Gist install link, returns a
+untouched. The **stable** button in TUNE, or the release install link, returns a
 canary copy to the normal channel.
 
 - [Changelog](CHANGELOG.md)
 - [All releases](https://github.com/ezurinho/nitro-wraith/releases)
-- [Gist](https://gist.github.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58)
+- [Gist mirror](https://gist.github.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58)
 
 ## Development
 
@@ -277,14 +279,15 @@ fonts change between operating systems; `report.json` records the fingerprint,
 and the compare step warns when it does not match. Regenerate the baselines on
 the platform where you run the check.
 
-The source lives in [`src/`](src/README.md): 15 ordered fragments concatenated
+The source lives in [`src/`](src/README.md): 22 ordered fragments concatenated
 inside one IIFE. `nitro-wraith.user.js` is still the only installable file and
 **is not edited by hand**; edit `src/`, run `npm run build` and verify with
 `npm run check`. `build:check` prevents testing or publishing an artifact that
 does not match `src/`.
 
 The main configuration lives in `CONFIG` (`src/10-config.js`) and daily settings
-in `TUNE`, stored in `localStorage`. The **Updates** card checks the Gist on
+in `TUNE`, stored in `localStorage`. The **Updates** card checks the latest release
+meta (with the Gist as mirror) on
 open, every 5 minutes, when the network returns and when the tab becomes active;
 it also has **check now** and the garage badge for installing the new version.
 
@@ -295,6 +298,7 @@ README release notes are generated between the `release:start` and
 
 - [`docs/NITROTYPE.md`](docs/NITROTYPE.md): game notes and design limits.
 - [`tests/live/`](tests/live/): browser harness, live mode and fixtures.
+- [`SECURITY.md`](SECURITY.md): how to report a session-affecting issue privately.
 - [`CHANGELOG.md`](CHANGELOG.md): changes by version.
 
 ## License
