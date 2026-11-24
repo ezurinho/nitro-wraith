@@ -2037,12 +2037,12 @@
           .mark svg { width: 16px; height: 16px; display: block;
                       filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 55%, transparent)); }
           .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px;
-                       box-shadow: 0 0 0 2px var(--bg-hi), 0 0 7px color-mix(in srgb, var(--acc) 70%, transparent); }
+                       box-shadow: 0 0 0 2px var(--bg-hi), 0 0 6px color-mix(in srgb, var(--acc) 70%, transparent); }
           /* El LED dice si corre o espera; el chip ya no tiene estado OFF. */
           .p[data-armed="1"] .dot { background: var(--acc);
-                 box-shadow: 0 0 0 3px var(--acc-dim), 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent); }
+                 box-shadow: 0 0 0 3px var(--acc-dim), 0 0 9px color-mix(in srgb, var(--acc) 75%, transparent); }
           .p[data-armed="0"] .dot { background: var(--warn);
-                 box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 12px color-mix(in srgb, var(--warn) 60%, transparent); }
+                 box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 9px color-mix(in srgb, var(--warn) 55%, transparent); }
 
           .t { display: block; font-weight: 800; font-size: 12px; line-height: 1.15;
                letter-spacing: .13em; text-transform: uppercase; color: var(--ink);
@@ -2264,8 +2264,11 @@
                          box-shadow: 0 0 20px -10px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .14); }
           .act.primary:hover:not(:disabled) { box-shadow: 0 0 24px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .16); }
           .act:active:not(:disabled) { transform: translateY(1px); }
-          .act:disabled { opacity: .38; cursor: not-allowed; color: var(--dim);
-                 background: rgba(255, 255, 255, .03); border-color: var(--line); box-shadow: none; }
+          /* Deshabilitado se lee: el color propio del boton se queda, baja el
+             peso y se apaga el brillo. Texto gris a .38 hacia que "RACE NOW"
+             pareciera roto en vez de en espera. */
+          .act:disabled { opacity: .55; cursor: not-allowed;
+                 background: rgba(255, 255, 255, .02); border-color: var(--line); box-shadow: none; }
           .act.ghost { color: var(--ink-2); background: rgba(255, 255, 255, .045);
                  border-color: var(--line); box-shadow: none; }
           .act.ghost:hover:not(:disabled) { color: var(--acc); background: var(--acc-dim);
@@ -2299,7 +2302,7 @@
         <div class="p" data-mode="auto" data-theme="${panelTheme}">
           <div class="h" title="Drag to move · double-click to put it back in the corner">
             <span class="mark" aria-hidden="true">
-              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".2" stroke-width="1.5" stroke-dasharray="1.1 3.4"/><path d="M7 9.5 11.2 22.5 16 13.6 20.8 22.5 25 9.5" stroke-width="2.4"/></svg>
               <i class="dot"></i>
             </span>
             <span><b class="t">NITRO WRAITH</b><span class="s" data-f="sub">garage · queue</span></span>
