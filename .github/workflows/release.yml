@@ -81,14 +81,20 @@ jobs:
           gist_version="$(GH_TOKEN="$GIST_TOKEN" gh api "gists/$GIST_ID" \
             --jq '.files["nitro-wraith.meta.js"].content' \
             | sed -n 's|^// @version[[:space:]]*||p' | head -n1)"
-          echo "GIST_VERSION=$gist_version" >> "$GITHUB_OUTPUT"
-          echo "Gist version: ${gist_version:-missing}"
+          if [[ ! "$gist_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::The Gist metadata does not contain a valid semantic version."
+            exit 1
+          fi
+          echo "SAFE_GIST_VERSION=$gist_version" >> "$GITHUB_OUTPUT"
+          echo "Gist version: $gist_version"
+          echo "Gist version: $gist_version" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Decide publication
         id: decision
         if: steps.current.outputs.skip != '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SAFE_GIST_VERSION: ${{ steps.gist.outputs.SAFE_GIST_VERSION }}
         run: |
           mode="${{ steps.prepare.outputs.MODE }}"
           tag="${{ steps.prepare.outputs.TAG }}"
@@ -97,7 +103,7 @@ jobs:
           if [ "$mode" = "skip" ]; then
             if ! gh release view "$tag" >/dev/null 2>&1; then
               mode="repair"
-            elif [ "${{ steps.gist.outputs.GIST_VERSION }}" != "$version" ]; then
+            elif [ "$SAFE_GIST_VERSION" != "$version" ]; then
               mode="sync"
             else
               mode="none"

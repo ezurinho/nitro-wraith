@@ -41,7 +41,8 @@ does not try to beat the game's limits; it tries to stay inside them.
 - The calibration diagnostic reports the recent average, the lifetime average,
   the number of monthly rows and API pages, and whether the snapshot is cached
   or stale.
-- The script keeps its own target below the hard 120 WPM ceiling and never raises
+- The script keeps its own target below an account-derived ceiling (120 WPM
+  fallback, up to the configured 300 maximum) and never raises
   the target to chase a fast result.
 - Accuracy below 96% loses the accuracy bonus, so the floor is 96%.
 
