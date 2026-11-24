@@ -635,6 +635,64 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('panel version matches the userscript header',
     Boolean(scriptVersion) && state.ver === `v${scriptVersion}`, { panel: state.ver, header: scriptVersion });
 
+  const publicApi = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const api = window.NitroWraith;
+    const frameApi = w.NitroWraith;
+    if (!api || !frameApi) return { has: false, top: Boolean(api), frame: Boolean(frameApi) };
+    const initial = api.getState();
+    const events = [];
+    const unsubscribe = api.subscribe((snapshot) => events.push(snapshot));
+    for (let i = 0; i < 12; i++) w.__ntaDebug.paint(true);
+    const idleEvents = events.length;
+    w.__ntaDebug.patchSession({ typing: true, stopped: false });
+    const changedEvents = events.length;
+    const changed = events[events.length - 1];
+    unsubscribe();
+    w.__ntaDebug.patchSession({ typing: false, stopped: false });
+    const afterUnsubscribe = events.length;
+    const domEvents = [];
+    const onState = (event) => domEvents.push(event.detail);
+    window.addEventListener('nitro-wraith:state', onState);
+    w.__ntaDebug.patchSession({ stopped: true });
+    window.removeEventListener('nitro-wraith:state', onState);
+    w.__ntaDebug.patchSession({ stopped: false });
+    return {
+      has: true,
+      sameInstance: api === frameApi,
+      topVersion: api.version,
+      frameVersion: frameApi.version,
+      frozen: Object.isFrozen(api),
+      keys: Object.keys(api).sort(),
+      hasSetter: typeof api.setState === 'function',
+      apiVersion: api.apiVersion,
+      app: initial.app,
+      version: initial.version,
+      session: initial.session,
+      pace: initial.pace,
+      prefs: initial.prefs,
+      serialized: JSON.stringify(initial),
+      idleEvents,
+      changedEvents,
+      changedTyping: changed && changed.session.typing,
+      afterUnsubscribe,
+      domStopped: domEvents.some((snapshot) => snapshot && snapshot.session.stopped === true),
+    };
+  })()`);
+  check('the public API is read-only, quiet at idle and emits real state changes',
+    publicApi.has && !publicApi.sameInstance && publicApi.frozen
+      && publicApi.keys.join(',') === 'apiVersion,getPrefs,getState,subscribe,version'
+      && !publicApi.hasSetter && publicApi.apiVersion === 1 && publicApi.app === 'nitro-wraith'
+      && publicApi.version === scriptVersion && publicApi.topVersion === scriptVersion
+      && publicApi.frameVersion === scriptVersion && typeof publicApi.session.typing === 'boolean'
+      && Number.isFinite(publicApi.pace.min) && Number.isFinite(publicApi.pace.max)
+      && typeof publicApi.prefs.breaks === 'boolean'
+      && !/player_token|password|secret/i.test(publicApi.serialized)
+      && publicApi.idleEvents === 1 && publicApi.changedEvents === 2
+      && publicApi.changedTyping === true && publicApi.afterUnsubscribe === 2
+      && publicApi.domStopped === true,
+    publicApi);
+
   const live = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     return w.__ntaDebug && w.__ntaDebug.live ? w.__ntaDebug.live() : null;

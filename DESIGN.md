@@ -47,6 +47,17 @@ accents and background only. Rules use `var(--…)` or an inline
 and blacks (`rgba(255,255,255,…)`, `rgba(0,0,0,…)`) are depth layers over a
 themed background and are the accepted exception.
 
+## Local API
+
+`window.NitroWraith` is a frozen, read-only integration surface: `apiVersion`,
+`version`, `getState()`, `getPrefs()` and `subscribe(fn)`. Snapshots are built
+from live state and non-secret preferences; they never expose `player_token`,
+passwords or account identifiers. The top-level facade is installed once and
+delegates to the newest race-frame instance, so subscriptions survive frame
+reloads. `subscribe()` emits the current snapshot immediately and then only on
+a changed signature; the equivalent top-level event is `nitro-wraith:state`.
+No setter, remote loader or external code execution is part of this contract.
+
 ## Type
 
 One UI stack and one mono stack, both tokens. Sizes 7.5–13 px. Numerals stay in
@@ -99,7 +110,7 @@ applicable and are listed as such, not silently ignored.
 | F8 no invented metrics | Enforced by product rule: all values come from the session |
 | F12–F14 hero / word count / container | Not applicable: no landing page |
 | F15 CSS stamp | Not applicable: generated panel sheet, not an exported page |
-| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (410 Chrome checks, including idle-heartbeat DOM-write guards for both surfaces, + 24 visual baselines + an 18-check Firefox/WebKit smoke) |
+| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (411 Chrome checks, including idle-heartbeat DOM-write guards for both surfaces, + 24 visual baselines + an 18-check Firefox/WebKit smoke) |
 
 ### Floor audit
 
