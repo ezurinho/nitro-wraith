@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.66 — 2026-11-24
+
+- perf(panel): defer panel assets, test the queue policy and bound the repaint (#3)
+
 ## 8.14.65 — 2026-11-24
 
 - feat(panel): RGB Lab, Race Focus and rhythm chart (#2)
