@@ -8669,15 +8669,31 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && raceCalibration.summaryCalls >= 1,
     raceCalibration);
 
-  // Cambio de cuenta: la identidad anterior no puede conservar el rango. Se
-  // restaura el almacenamiento al terminar para no dejar basura entre pruebas.
+  // Cambio de cuenta: la identidad anterior no puede conservar el rango ni
+  // datos de carrera. Se restaura el almacenamiento al terminar.
   const accountReset = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     const d = w.__ntaDebug;
+    const runtimeKeys = [
+      'autoTyperRaceHistory', 'autoTyperSessionCounters', 'autoTyperTandaLog',
+      'dynamicWpmValues', 'dynamicAccuracies', 'typingWpmSessionCount',
+      'typingAccuracySessionCount', 'typingAccuracyBufferCount',
+      'autoTyperTrim', 'autoTyperSeason', 'ntQueue:today',
+      'ntQueue:todayPart:test', 'ntQueue:dayHist:2026-11-24:test',
+      'ntQueue:boxNextAt', 'ntQueue:boxLastAt', 'ntQueue:boxReadyAt',
+      'ntQueue:boxLog', 'ntQueue:boxDiag', 'ntQueue:boxVisitAt', 'ntQueue:boxForceAt',
+      'ntQueue:boxTriedAt', 'ntQueue:boxFailAt', 'ntQueue:lastFail',
+      'ntQueue:stuckAt', 'ntQueue:stoppedAt', 'ntQueue:lastStop', 'ntQueue:stopHistory',
+      'ntQueue:banClearHold', 'ntQueue:notice', 'ntQueue:dqBlockStage',
+      'ntQueue:dqBlockUntil', 'ntQueue:dqBlockCheckedAt', 'ntQueue:typerReloadedAt',
+      'ntQueue:lastLogin', 'ntQueue:reloginPending',
+    ];
+    const preserveKeys = ['autoTyperPrefs', 'autoTyperPanelTheme', 'autoTyperPaceProfile'];
     const keys = [
       'persist:nt', 'autoTyperCalibrationAccount', 'autoTyperCalibratedRange',
       'autoTyperCalibratedAccuracy', 'autoTyperCalibrationAt',
       'autoTyperCalibrationVersion', 'autoTyperLifetimeWpm',
+      ...runtimeKeys, ...preserveKeys,
     ];
     const before = {};
     for (const key of keys) before[key] = w.localStorage.getItem(key);
@@ -8691,6 +8707,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       w.localStorage.setItem('autoTyperCalibratedAccuracy', JSON.stringify({ min: 96, max: 98, center: 97 }));
       w.localStorage.setItem('autoTyperCalibrationAt', String(Date.now()));
       w.localStorage.setItem('autoTyperLifetimeWpm', JSON.stringify({ wpm: 120, at: Date.now(), races: 1000 }));
+      for (const key of runtimeKeys) w.localStorage.setItem(key, '{}');
+      w.localStorage.setItem('autoTyperPrefs', JSON.stringify({ breaks: false, stickers: false }));
+      w.localStorage.setItem('autoTyperPanelTheme', 'violet');
+      w.localStorage.setItem('autoTyperPaceProfile', 'soft');
       const changed = d.ensureCalibrationAccount();
       const state = d.autoPace();
       return {
@@ -8700,6 +8720,8 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         accuracy: state.accuracy,
         identity: d.accountIdentity(),
         needsRead: d.needsAccountRead(),
+        remaining: Object.fromEntries(runtimeKeys.map((key) => [key, w.localStorage.getItem(key)])),
+        preserved: Object.fromEntries(preserveKeys.map((key) => [key, w.localStorage.getItem(key)])),
       };
     } finally {
       for (const key of keys) {
@@ -8708,11 +8730,15 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       }
     }
   })()`);
-  check('switching accounts clears the previous calibration before applying a target',
+  check('switching accounts clears race state but preserves personal preferences',
     accountReset.changed === true
       && accountReset.storedAccount === '555111'
       && accountReset.calibrated === null && accountReset.accuracy === null
-      && accountReset.identity === '555111' && accountReset.needsRead === true,
+      && accountReset.identity === '555111' && accountReset.needsRead === true
+      && Object.values(accountReset.remaining).every((value) => value === null)
+      && accountReset.preserved.autoTyperPrefs === '{"breaks":false,"stickers":false}'
+      && accountReset.preserved.autoTyperPanelTheme === 'violet'
+      && accountReset.preserved.autoTyperPaceProfile === 'soft',
     accountReset);
 
   // Bloque de seguridad: ajustes nuevos, grabador de vuelo e interlock AFK.

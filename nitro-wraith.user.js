@@ -2555,6 +2555,34 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibrationReadValue = 0;
   }
 
+  function clearAccountRuntimeStorage() {
+    const keys = [
+      KEYS.history, KEYS.session, KEYS.tandaLog, KEYS.wpmSeries, KEYS.accSeries,
+      KEYS.wpmCount, KEYS.accCount, KEYS.bufferCount, KEYS.trim, KEYS.season,
+      DAY_STATE, STUCK_STATE, DQ_BLOCK_STAGE, DQ_BLOCK_UNTIL, DQ_BLOCK_CHECKED_AT,
+      BOX_STATE_NEXT, BOX_STATE_LAST, BOX_STATE_READY, BOX_STATE_LOG, BOX_STATE_DIAG,
+      BOX_VISIT, BOX_FORCE, 'ntQueue:boxTriedAt', 'ntQueue:boxFailAt', 'ntQueue:lastFail',
+      'ntQueue:stoppedAt', 'ntQueue:lastStop', 'ntQueue:stopHistory', 'ntQueue:banClearHold',
+      'ntQueue:notice', 'ntQueue:typerReloadedAt', 'ntQueue:lastLogin', 'ntQueue:reloginPending',
+    ];
+    for (const key of keys) disk.remove(key);
+    const prefixes = [DAY_PART_PREFIX, DAY_HIST_PREFIX];
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && prefixes.some((prefix) => key.startsWith(prefix))) localStorage.removeItem(key);
+      }
+    } catch {
+      /* almacenamiento bloqueado: el resto del estado ya no se puede leer */
+    }
+    countReadCache.clear();
+    clearPersistRaw();
+    todayCache = null;
+    dayHistCache = null;
+    dayHistCacheRaw = '';
+    dayHistCacheAt = 0;
+  }
+
   // Devuelve true cuando la cuenta guardada no es la actual. En ese caso el
   // arranque no puede aplicar el rango viejo; applyPrefs lee despues
   // `persist:nt` de la cuenta nueva y crea el objetivo correcto.
@@ -2571,6 +2599,7 @@ All of this only aims at believable statistics. It is your call and your risk.
       return false;
     }
     clearAccountCalibration();
+    clearAccountRuntimeStorage();
     calibrationNeedsAccountRead = true;
     disk.set(KEYS.calibrationAccount, id);
     return true;

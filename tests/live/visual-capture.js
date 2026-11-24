@@ -217,6 +217,7 @@ async function captureGarageStates(cdp, appUrl) {
     }
     sessionStorage.removeItem('ntQueue:armedAt');
     localStorage.setItem('autoTyperPanelTheme', 'carbon');
+    localStorage.setItem('autoTyperCalibrationAccount', '7');
     localStorage.setItem('autoTyperCalibratedRange', JSON.stringify({ min: 103, max: 117 }));
     localStorage.setItem('autoTyperCalibrationAt', String(now - 600000));
     localStorage.setItem('autoTyperCalibrationVersion', version);
