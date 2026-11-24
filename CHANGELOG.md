@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.79 — 2026-11-24
+
+- fix(release): validate Gist metadata outside shell (#23)
+
 ## 8.14.78 — 2026-11-24
 
 - feat(api): expose a read-only integration surface (#22)
