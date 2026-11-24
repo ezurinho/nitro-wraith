@@ -10547,6 +10547,17 @@ function dayCurveAt(at = Date.now()) {
     if (el.dataset.good !== value) el.dataset.good = value;
   }
 
+  // `hidden` y `data-warn` los repintan el panel y el garaje en cada latido con
+  // el valor que salga del estado. Comparar antes de escribir mantiene el
+  // latido en reposo sin tocar el DOM y deja una sola forma de hacerlo.
+  function setHidden(el, hide) {
+    if (el && el.hidden !== hide) el.hidden = hide;
+  }
+
+  function setWarn(el, value) {
+    if (el && el.dataset.warn !== value) el.dataset.warn = value;
+  }
+
   /* --------------------------------------------------------------------------
    * Ajustes del panel (boton ⚙)
    * ------------------------------------------------------------------------ */
@@ -20062,60 +20073,65 @@ function dayCurveAt(at = Date.now()) {
       if (qpanel.panel.dataset.social !== (social ? '1' : '0')) {
         qpanel.panel.dataset.social = social ? '1' : '0';
       }
-      if (qpanel.sub) qpanel.sub.textContent = social ? `${socialPageLabel()} · read-only` : 'garage · queue';
+      setText(qpanel.sub, social ? `${socialPageLabel()} · read-only` : 'garage · queue');
       // Nada de OFF: el chip dice AUTO siempre y el LED dice si esta corriendo
       // o esperando. En Amigos/Equipo el chip dice READ: ahi no hay acciones
       // sociales ni cola que armar.
       if (qpanel.panel.dataset.mode !== 'auto') qpanel.panel.dataset.mode = 'auto';
       const armedFlag = armed ? '1' : '0';
       if (qpanel.panel.dataset.armed !== armedFlag) qpanel.panel.dataset.armed = armedFlag;
-      qpanel.mode.textContent = social ? 'READ' : 'AUTO';
-      if (social) qpanel.mode.setAttribute('aria-label', 'Read-only social panel');
-      else qpanel.mode.removeAttribute('aria-label');
-      qpanel.mode.title = social
+      setText(qpanel.mode, social ? 'READ' : 'AUTO');
+      if (social) {
+        if (qpanel.mode.getAttribute('aria-label') !== 'Read-only social panel') {
+          qpanel.mode.setAttribute('aria-label', 'Read-only social panel');
+        }
+      } else if (qpanel.mode.hasAttribute('aria-label')) {
+        qpanel.mode.removeAttribute('aria-label');
+      }
+      setTitle(qpanel.mode, social
         ? 'Read-only: friends and team data. Accept, deny, invite and send are not available.'
         : (armed
           ? 'Automation runs by itself (always AUTO). To stop it, use Stop / Esc in the race.'
-          : 'Waiting; it starts again by itself. There is no off switch: the mode is always AUTO.');
-      qpanel.state.textContent = social ? 'read-only' : garageStateText();
+          : 'Waiting; it starts again by itself. There is no off switch: the mode is always AUTO.'));
+      setText(qpanel.state, social ? 'read-only' : garageStateText());
       paintSocialRows(social);
 
       // Indicador AFK y cuenta atras real del reintento de login. La fecha vive
       // en sessionStorage, asi que no se pierde al recargar ni al navegar.
       const afk = afkStatus();
-      qpanel.afk.textContent = afk.text;
-      qpanel.afk.dataset.warn = String(afk.warn);
+      setText(qpanel.afk, afk.text);
+      setWarn(qpanel.afk, String(afk.warn));
       const freeze = refreshAfkFreezeStats();
       const freezeNote = freeze.count
         ? ` This browser froze the tab ${freeze.count} time${freeze.count === 1 ? '' : 's'} in the recorded history.`
         : ' No Page Lifecycle freeze has been recorded in this browser.';
-      qpanel.afkRow.title = `${afk.title}${freezeNote}`;
+      setTitle(qpanel.afkRow, `${afk.title}${freezeNote}`);
       const keepAlive = keepAliveInfo();
       const keepAliveLabel = keepAlive.enabled ? keepAlive.label : 'off';
-      qpanel.keepAlive.textContent = keepAliveLabel;
-      qpanel.keepAlive.dataset.warn = keepAliveLabel === 'blocked'
+      setText(qpanel.keepAlive, keepAliveLabel);
+      setWarn(qpanel.keepAlive, keepAliveLabel === 'blocked'
         ? '2'
-        : (keepAliveLabel === 'ready' || keepAliveLabel === 'waiting' ? '1' : '0');
-      qpanel.keepAliveRow.title = keepAlive.title;
+        : (keepAliveLabel === 'ready' || keepAliveLabel === 'waiting' ? '1' : '0'));
+      setTitle(qpanel.keepAliveRow, keepAlive.title);
       if (qpanel.afkBtn) {
-        qpanel.afkBtn.textContent = backgroundFarm() ? 'AFK on' : 'AFK off';
-        qpanel.afkBtn.title = (backgroundFarm()
+        setText(qpanel.afkBtn, backgroundFarm() ? 'AFK on' : 'AFK off');
+        setTitle(qpanel.afkBtn, (backgroundFarm()
           ? 'AFK farming is on: hiding this tab keeps the queue running. Turn it off to stop starting races in the background.'
           : 'AFK farming is off: races only start while this tab is visible. Turn it on to keep the queue running hidden; a frozen tab can still end a race in a DQ.')
-          + ` Keep-alive: ${keepAliveLabel}.`;
+          + ` Keep-alive: ${keepAliveLabel}.`);
       }
       const retryLeft = Math.max(0, loginRetryAt - Date.now());
       const hasRetry = Boolean(loginRetryAt);
-      qpanel.retryRow.hidden = !hasRetry;
-      qpanel.retryBtn.hidden = !hasRetry;
+      setHidden(qpanel.retryRow, !hasRetry);
+      setHidden(qpanel.retryBtn, !hasRetry);
       if (hasRetry) {
-        qpanel.loginRetry.textContent = retryLeft > 0 ? sessionClockText(retryLeft) : 'now';
-        qpanel.loginRetry.dataset.warn = retryLeft > 0 ? '1' : '2';
-        qpanel.retryRow.title = retryLeft > 0
+        setText(qpanel.loginRetry, retryLeft > 0 ? sessionClockText(retryLeft) : 'now');
+        setWarn(qpanel.loginRetry, retryLeft > 0 ? '1' : '2');
+        setTitle(qpanel.retryRow, retryLeft > 0
           ? `Next ${SSO_LABEL[ssoProvider()]} sign-in retry in ${sessionClockText(retryLeft)}.`
-          : `Retrying ${SSO_LABEL[ssoProvider()]} now.`;
-        qpanel.retryBtn.title = `Use ${SSO_LABEL[ssoProvider()]} now; skips the remaining wait.`
-          + ' The same remembered provider is used.';
+          : `Retrying ${SSO_LABEL[ssoProvider()]} now.`);
+        setTitle(qpanel.retryBtn, `Use ${SSO_LABEL[ssoProvider()]} now; skips the remaining wait.`
+          + ' The same remembered provider is used.');
       }
 
       // Que login usara el bot si la sesion cae, leido del mismo recuerdo que
@@ -20123,22 +20139,22 @@ function dayCurveAt(at = Date.now()) {
       const saved = savedLogin();
       const remembered = lastLoginMethod();
       if (remembered === 'manual') {
-        qpanel.login.textContent = 'manual · no SSO';
-        qpanel.login.title = 'The last sign-in used the username and password form; the bot will not press an SSO by itself.';
+        setText(qpanel.login, 'manual · no SSO');
+        setTitle(qpanel.login, 'The last sign-in used the username and password form; the bot will not press an SSO by itself.');
       } else if (remembered) {
         const left = Math.max(0, LAST_LOGIN_MAX_AGE - (Date.now() - Number(saved.at)));
         const days = Math.max(1, Math.ceil(left / 86400000));
         const label = SSO_LABEL[remembered];
-        qpanel.login.textContent = `${label} · ${days}d`;
-        qpanel.login.title = `The bot will press ${label} if the session drops; this memory expires in ${days} day${days === 1 ? '' : 's'}.`;
+        setText(qpanel.login, `${label} · ${days}d`);
+        setTitle(qpanel.login, `The bot will press ${label} if the session drops; this memory expires in ${days} day${days === 1 ? '' : 's'}.`);
       } else {
         const label = SSO_LABEL[configuredSsoProvider()];
-        qpanel.login.textContent = `${label} · config`;
-        qpanel.login.title = 'No recent sign-in saved; if the session drops, the bot uses the provider in CONFIG.';
+        setText(qpanel.login, `${label} · config`);
+        setTitle(qpanel.login, 'No recent sign-in saved; if the session drops, the bot uses the provider in CONFIG.');
       }
 
       const boxText = boxStateText();
-      qpanel.box.textContent = boxText;
+      setText(qpanel.box, boxText);
       // Puente al panel de carrera: mientras el garaje vea el Claim Now!, la
       // otra ventana no debe pintar una espera vieja. Se retira al cobrar o
       // cuando el garaje deja de verlo; el TTL cubre el cambio de pagina.
@@ -20158,20 +20174,20 @@ function dayCurveAt(at = Date.now()) {
       // garaje y reclama alli (antes quedaba muerto fuera del garaje, que es lo
       // que hacia que la caja "no se reclamara nunca" a mano).
       qpanel.boxBtn.disabled = false;
-      qpanel.boxBtn.title = !signed
+      setTitle(qpanel.boxBtn, !signed
         ? 'Sign in first: the Mystery Box belongs to the account'
         : (boxButton()
           ? 'Press the site\'s claim button now'
-          : 'Go to the garage and claim the daily Mystery Box');
+          : 'Go to the garage and claim the daily Mystery Box'));
       const terminalBan = terminalBanActive();
-      qpanel.resumeBtn.textContent = terminalBan ? 'Clear ban' : 'Resume';
-      qpanel.resumeBtn.title = terminalBan
+      setText(qpanel.resumeBtn, terminalBan ? 'Clear ban' : 'Resume');
+      setTitle(qpanel.resumeBtn, terminalBan
         ? 'Account permanently banned: clear the stop only after reviewing the account; the bot stays paused until you arm it again'
         : (banClearHeld()
           ? 'Terminal ban stop cleared; press Resume to arm the queue again'
           : (stoppedRecently()
             ? 'Clear the stop and start now; with a live race this sends the same Alt+A'
-            : 'Send Alt+A to a live race, or re-arm the queue from the garage'));
+            : 'Send Alt+A to a live race, or re-arm the queue from the garage')));
 
       // El Stop no es un interruptor: una vez parado, Resume es la salida. Se
       // desactiva para que dos clics seguidos no confundan la parada con un
@@ -20180,10 +20196,10 @@ function dayCurveAt(at = Date.now()) {
       // pararla otra vez.
       const liveTyper = typerState();
       const alreadyStopped = liveTyper ? Boolean(liveTyper.stopped) : stoppedRecently();
-      qpanel.stopBtn.disabled = alreadyStopped;
-      qpanel.stopBtn.title = alreadyStopped
+      if (qpanel.stopBtn.disabled !== alreadyStopped) qpanel.stopBtn.disabled = alreadyStopped;
+      setTitle(qpanel.stopBtn, alreadyStopped
         ? 'Already stopped; use Resume or Alt+A to start again'
-        : 'Stop the bot; mid-race it waits for the current race to end (same as Alt+S)';
+        : 'Stop the bot; mid-race it waits for the current race to end (same as Alt+S)');
 
       // Resumen de la noche: lo que el dia lleva sumado (carreras, media, cajas
       // y DQ). Vive en localStorage y lo escriben las dos mitades, asi que
@@ -20196,14 +20212,14 @@ function dayCurveAt(at = Date.now()) {
       // panel grande. Se leen de persist:nt/NTGLOBALS; no se reclama nada.
       const challengeList = readChallengeProgress();
       const challengesDone = challengeList.filter((item) => item.goal > 0 && item.progress >= item.goal).length;
-      qpanel.challengeRow.hidden = challengeList.length === 0;
+      setHidden(qpanel.challengeRow, challengeList.length === 0);
       if (challengeList.length) {
         const resetLeft = chResetAt > Date.now() ? chResetAt - Date.now() : 0;
-        qpanel.challenges.textContent = `${challengesDone}/${challengeList.length}`
-          + (resetLeft > 0 ? ` · ${shortWait(resetLeft)} left` : '');
-        qpanel.challengeRow.title = `${challengesDone} of ${challengeList.length} Daily Challenges complete.`
+        setText(qpanel.challenges, `${challengesDone}/${challengeList.length}`
+          + (resetLeft > 0 ? ` · ${shortWait(resetLeft)} left` : ''));
+        setTitle(qpanel.challengeRow, `${challengesDone} of ${challengeList.length} Daily Challenges complete.`
           + challengeList.map((item) => ` ${item.title}: ${item.goal ? `${Math.min(item.progress, item.goal)}/${item.goal}` : item.progress}.`).join('')
-          + (resetLeft > 0 ? ` Resets in ${shortWait(resetLeft)} (00:00 ET).` : '');
+          + (resetLeft > 0 ? ` Resets in ${shortWait(resetLeft)} (00:00 ET).` : ''));
       }
 
       // El reto incompleto con mayor porcentaje de avance: es el que decide si
@@ -20212,12 +20228,12 @@ function dayCurveAt(at = Date.now()) {
         .filter((item) => item.goal > 0 && item.progress < item.goal)
         .sort((a, b) => (b.progress / b.goal) - (a.progress / a.goal));
       const nextChallenge = pendingChallenges[0] || null;
-      qpanel.nextRow.hidden = !nextChallenge;
+      setHidden(qpanel.nextRow, !nextChallenge);
       if (nextChallenge) {
         const shownProgress = Math.min(nextChallenge.progress, nextChallenge.goal);
-        qpanel.next.textContent = `${nextChallenge.short || 'challenge'} ${shownProgress}/${nextChallenge.goal}`;
-        qpanel.nextRow.title = `Closest Daily Challenge: ${nextChallenge.title} · ${shownProgress}/${nextChallenge.goal}.`
-          + (chResetAt > Date.now() ? ` Resets in ${shortWait(chResetAt - Date.now())} (00:00 ET).` : '');
+        setText(qpanel.next, `${nextChallenge.short || 'challenge'} ${shownProgress}/${nextChallenge.goal}`);
+        setTitle(qpanel.nextRow, `Closest Daily Challenge: ${nextChallenge.title} · ${shownProgress}/${nextChallenge.goal}.`
+          + (chResetAt > Date.now() ? ` Resets in ${shortWait(chResetAt - Date.now())} (00:00 ET).` : ''));
       }
 
       // Atasco con las recargas gastadas: si sigue fresco, es el aviso mas
@@ -20226,29 +20242,29 @@ function dayCurveAt(at = Date.now()) {
       try { stuck = JSON.parse(localStorage.getItem(STUCK_STATE) || 'null'); } catch { stuck = null; }
       const stuckFresh = Boolean(stuck && Number.isFinite(stuck.at) && Date.now() - stuck.at < 600000);
 
-      qpanel.dayRow.hidden = !hasDay;
-      qpanel.boxesRow.hidden = !hasDay;
-      qpanel.alertsRow.hidden = !(hasDay || stuckFresh);
+      setHidden(qpanel.dayRow, !hasDay);
+      setHidden(qpanel.boxesRow, !hasDay);
+      setHidden(qpanel.alertsRow, !(hasDay || stuckFresh));
 
       if (hasDay) {
         const avg = day.races > 0 ? day.sumWpm / day.races : 0;
         const target = day.races > 0 ? day.sumTarget / day.races : 0;
 
-        qpanel.dayRaces.textContent = day.races > 0
+        setText(qpanel.dayRaces, day.races > 0
           ? `${day.races} · ${avg.toFixed(1)} wpm`
-          : 'no races yet';
-        qpanel.dayRow.title = [
+          : 'no races yet');
+        setTitle(qpanel.dayRow, [
           `Since midnight: ${day.races} race${day.races === 1 ? '' : 's'}`,
           day.races > 0 ? `${avg.toFixed(1)} wpm avg (target ${Math.round(target)})` : null,
           day.best > 0 ? `best ${day.best.toFixed(1)}` : null,
           day.cash > 0 ? `$${Math.round(day.cash).toLocaleString('en-US')} in race prizes` : null,
           day.firstAt ? `${clockText(day.firstAt)}–${clockText(day.lastAt)}` : null,
-        ].filter(Boolean).join(' · ') + '.';
+        ].filter(Boolean).join(' · ') + '.');
 
-        qpanel.dayBoxes.textContent = String(day.boxes);
-        qpanel.boxesRow.title = day.boxes > 0
+        setText(qpanel.dayBoxes, String(day.boxes));
+        setTitle(qpanel.boxesRow, day.boxes > 0
           ? `${day.boxes} Mystery Box${day.boxes === 1 ? '' : 'es'} claimed since midnight.`
-          : 'No Mystery Box claimed since midnight.';
+          : 'No Mystery Box claimed since midnight.');
       }
 
       // Presupuesto diario restante, tambien en el garaje: desde aqui se abre
@@ -20256,7 +20272,7 @@ function dayCurveAt(at = Date.now()) {
       // quedaba del dia. Se pinta solo si hay algun tope diario encendido.
       const daily = dailyCaps();
       const hasBudget = daily.raceCap > 0 || daily.xpCap > 0;
-      qpanel.budgetRow.hidden = !hasBudget;
+      setHidden(qpanel.budgetRow, !hasBudget);
       if (hasBudget) {
         const parts = [];
         if (daily.raceCap) parts.push(`${Math.max(0, daily.raceCap - daily.races)} races`);
@@ -20264,25 +20280,25 @@ function dayCurveAt(at = Date.now()) {
           const left = Math.max(0, daily.xpCap - daily.xp);
           parts.push(`${left > 0 ? limitXpText(left) : '0'} XP`);
         }
-        qpanel.dayBudget.textContent = parts.join(' · ');
-        qpanel.budgetRow.dataset.warn = daily.raceHit ? '2' : (daily.warn ? '1' : '0');
-        qpanel.budgetRow.title = `Daily budget left: ${parts.join(' · ')}`
+        setText(qpanel.dayBudget, parts.join(' · '));
+        setWarn(qpanel.budgetRow, daily.raceHit ? '2' : (daily.warn ? '1' : '0'));
+        setTitle(qpanel.budgetRow, `Daily budget left: ${parts.join(' · ')}`
           + `${daily.raceCap ? ` · ${daily.races} of ${daily.raceCap} races used` : ''}`
           + `${daily.xpCap ? ` · ${daily.xp.toLocaleString()} of ${daily.xpCap.toLocaleString()} XP used` : ''}`
-          + '. Resets at midnight.';
+          + '. Resets at midnight.');
       }
 
       if (hasDay || stuckFresh) {
         if (stuckFresh) {
-          qpanel.dayAlerts.textContent = 'stuck';
-          qpanel.dayAlerts.dataset.warn = '2';
-          qpanel.alertsRow.title = `The bot has been stuck since ${clockText(stuck.at)} with the reload budget spent. Press F5, then MODE to start it again.`;
+          setText(qpanel.dayAlerts, 'stuck');
+          setWarn(qpanel.dayAlerts, '2');
+          setTitle(qpanel.alertsRow, `The bot has been stuck since ${clockText(stuck.at)} with the reload budget spent. Press F5, then MODE to start it again.`);
         } else {
-          qpanel.dayAlerts.textContent = day.dq > 0 ? `${day.dq} DQ` : 'none';
-          qpanel.dayAlerts.dataset.warn = day.dq > 0 ? '1' : '0';
-          qpanel.alertsRow.title = day.dq > 0
+          setText(qpanel.dayAlerts, day.dq > 0 ? `${day.dq} DQ` : 'none');
+          setWarn(qpanel.dayAlerts, day.dq > 0 ? '1' : '0');
+          setTitle(qpanel.alertsRow, day.dq > 0
             ? `${day.dq} disqualification${day.dq === 1 ? '' : 's'} since midnight${day.dqAt ? ` · last at ${clockText(day.dqAt)}` : ''}. ${day.clean} clean race${day.clean === 1 ? '' : 's'} in a row.`
-            : 'No disqualifications since midnight.';
+            : 'No disqualifications since midnight.');
         }
       }
 
@@ -20291,22 +20307,22 @@ function dayCurveAt(at = Date.now()) {
       // dentro de una carrera. Sale de la misma funcion que la tarjeta Season.
       const season = seasonRead();
       const seasonAlerts = seasonAlertText(season);
-      qpanel.seasonRow.hidden = seasonAlerts.length === 0;
+      setHidden(qpanel.seasonRow, seasonAlerts.length === 0);
       if (seasonAlerts.length) {
-        qpanel.seasonAlert.textContent = seasonAlerts.join(' · ');
-        qpanel.seasonRow.title = `Season ${season.seasonName || ''} · T${season.tier} · ${Number(season.xp || 0).toLocaleString()} XP. ${seasonAlerts.join('. ')}.`;
+        setText(qpanel.seasonAlert, seasonAlerts.join(' · '));
+        setTitle(qpanel.seasonRow, `Season ${season.seasonName || ''} · T${season.tier} · ${Number(season.xp || 0).toLocaleString()} XP. ${seasonAlerts.join('. ')}.`);
       }
 
       // Que puerta te tiene quieto y cuanto le queda. Es la respuesta corta a
       // "por que no corre": la larga (el motivo) ya esta en la fila de abajo.
       const gates = activeGates();
-      qpanel.waitRow.hidden = gates.length === 0;
+      setHidden(qpanel.waitRow, gates.length === 0);
       if (gates.length) {
         const first = gates[0];
-        qpanel.wait.textContent = `${first.label} · ${shortWait(first.left)}`;
-        qpanel.waitRow.title = `Waiting on: ${gates
+        setText(qpanel.wait, `${first.label} · ${shortWait(first.left)}`);
+        setTitle(qpanel.waitRow, `Waiting on: ${gates
           .map((gate) => `${gate.label} (${shortWait(gate.left)} left)`)
-          .join(' · ')}. Each one clears by itself.`;
+          .join(' · ')}. Each one clears by itself.`);
       }
 
       // Parada actual: el reloj que de verdad frena la cola. La marca activa
@@ -20317,30 +20333,30 @@ function dayCurveAt(at = Date.now()) {
       const terminalStop = Boolean(lastStop && !lastStop.clearedAt && lastStop.terminal);
       const activeStop = Boolean(lastStop && !lastStop.clearedAt && (terminalStop || stopLeft > 0));
       const recentStop = Boolean(lastStop && Date.now() - lastStop.at < 24 * 3600000);
-      qpanel.stopRow.hidden = !(activeStop || recentStop);
+      setHidden(qpanel.stopRow, !(activeStop || recentStop));
       if (activeStop) {
         const kind = stopReasonKind(lastStop.reason);
-        qpanel.stopLabel.textContent = 'stopped';
-        qpanel.lastStop.textContent = terminalStop
+        setText(qpanel.stopLabel, 'stopped');
+        setText(qpanel.lastStop, terminalStop
           ? 'ban · until cleared'
-          : `${kind.label} · ${shortWait(stopLeft)} left`;
-        qpanel.lastStop.dataset.warn = kind.warn;
-        qpanel.stopRow.title = terminalStop
+          : `${kind.label} · ${shortWait(stopLeft)} left`);
+        setWarn(qpanel.lastStop, kind.warn);
+        setTitle(qpanel.stopRow, terminalStop
           ? `Stopped ${new Date(lastStop.at).toLocaleTimeString()} · ${lastStop.reason || 'permanent ban'} · the account is blocked; automation stays stopped until you clear it with «Clear ban».`
           : `Stopped ${new Date(lastStop.at).toLocaleTimeString()} · ${lastStop.reason || 'manual stop'}`
             + ` · ${shortWait(stopLeft)} left of ${shortWait(lastStop.holdMs)}.`
-            + (kind.label === 'ban' ? ' The account is blocked; the bot will not retry.' : ' Resume or Alt+A starts again.');
+            + (kind.label === 'ban' ? ' The account is blocked; the bot will not retry.' : ' Resume or Alt+A starts again.'));
       } else if (recentStop) {
         const kind = stopReasonKind(lastStop.reason);
         const state = lastStop.clearedAt
           ? `cleared manually ${shortWait(Date.now() - lastStop.clearedAt)} ago`
           : 'expired';
-        qpanel.stopLabel.textContent = 'last stop';
-        qpanel.lastStop.textContent = `${kind.label} · ${state}`;
-        qpanel.lastStop.dataset.warn = '';
-        qpanel.stopRow.title = `Last stop: ${new Date(lastStop.at).toLocaleString()} · ${lastStop.reason || 'manual stop'} · hold ${shortWait(lastStop.holdMs)}`
+        setText(qpanel.stopLabel, 'last stop');
+        setText(qpanel.lastStop, `${kind.label} · ${state}`);
+        setWarn(qpanel.lastStop, '');
+        setTitle(qpanel.stopRow, `Last stop: ${new Date(lastStop.at).toLocaleString()} · ${lastStop.reason || 'manual stop'} · hold ${shortWait(lastStop.holdMs)}`
           + (lastStop.clearedAt ? ` · cleared manually at ${new Date(lastStop.clearedAt).toLocaleTimeString()}` : ' · hold elapsed')
-          + (kind.label === 'ban' ? ' · the account is blocked; it will not retry.' : '');
+          + (kind.label === 'ban' ? ' · the account is blocked; it will not retry.' : ''));
       }
 
       // Reparto de las ultimas paradas, no solo la ultima: DQ, limite y manual
@@ -20350,12 +20366,12 @@ function dayCurveAt(at = Date.now()) {
       const stopMixParts = ['DQ', 'limit', 'manual', 'ban', 'results']
         .filter((kind) => stopMix.counts[kind] > 0)
         .map((kind) => `${kind} ${stopMix.counts[kind]}`);
-      qpanel.stopHistoryRow.hidden = stopMix.total === 0;
+      setHidden(qpanel.stopHistoryRow, stopMix.total === 0);
       if (stopMix.total) {
-        qpanel.stopHistory.textContent = stopMixParts.join(' · ');
-        qpanel.stopHistoryRow.title = `Last ${stopMix.total} stop${stopMix.total === 1 ? '' : 's'} in ${STOP_HISTORY_DAYS} days: `
+        setText(qpanel.stopHistory, stopMixParts.join(' · '));
+        setTitle(qpanel.stopHistoryRow, `Last ${stopMix.total} stop${stopMix.total === 1 ? '' : 's'} in ${STOP_HISTORY_DAYS} days: `
           + stopMixParts.join(', ')
-          + '. Local history, kept only in this browser.';
+          + '. Local history, kept only in this browser.');
       }
 
       // Ultima decision de la cola: el salto al garaje solo se explicaba en la
@@ -20363,24 +20379,24 @@ function dayCurveAt(at = Date.now()) {
       // en volver a la pestana y preguntarse que paso.
       const why = store.get(WHY, null);
       const whyFresh = Boolean(why && why.text && Number.isFinite(why.at) && Date.now() - why.at < 900000);
-      qpanel.whyRow.hidden = !whyFresh;
+      setHidden(qpanel.whyRow, !whyFresh);
       if (whyFresh) {
-        qpanel.why.textContent = why.text;
-        qpanel.whyRow.title = `${why.text} (${clockText(why.at)})`;
+        setText(qpanel.why, why.text);
+        setTitle(qpanel.whyRow, `${why.text} (${clockText(why.at)})`);
       }
 
       // `info`, no `session`: este ultimo es el objeto de la tanda del modulo.
       const info = sessionInfo();
-      qpanel.session.textContent = info.text;
-      qpanel.session.title = info.title;
-      qpanel.session.dataset.warn = String(info.warn);
+      setText(qpanel.session, info.text);
+      setTitle(qpanel.session, info.title);
+      setWarn(qpanel.session, String(info.warn));
 
       const renewedAt = Number(store.get('refreshAt', 0)) || 0;
-      qpanel.renewedRow.hidden = !renewedAt;
+      setHidden(qpanel.renewedRow, !renewedAt);
       if (renewedAt) {
         const age = Math.max(0, Date.now() - renewedAt);
-        qpanel.renewed.textContent = age < 45000 ? 'just now' : `${sessionClockText(age)} ago`;
-        qpanel.renewed.title = `Last automatic renewal: ${new Date(renewedAt).toLocaleTimeString()} (kept for this tab only).`;
+        setText(qpanel.renewed, age < 45000 ? 'just now' : `${sessionClockText(age)} ago`);
+        setTitle(qpanel.renewed, `Last automatic renewal: ${new Date(renewedAt).toLocaleTimeString()} (kept for this tab only).`);
       }
 
       const raceButton = findButton((label) => label.includes('race now'));
@@ -20405,27 +20421,37 @@ function dayCurveAt(at = Date.now()) {
         race: Boolean(armed && raceButton),
       });
       if (qpanel.panel.dataset.context !== context.key) qpanel.panel.dataset.context = context.key;
-      if (qpanel.context) qpanel.context.dataset.context = context.key;
-      qpanel.contextTitle.textContent = context.title;
-      qpanel.contextDetail.textContent = context.detail;
-      qpanel.contextPill.textContent = context.pill;
+      if (qpanel.context && qpanel.context.dataset.context !== context.key) {
+        qpanel.context.dataset.context = context.key;
+      }
+      setText(qpanel.contextTitle, context.title);
+      setText(qpanel.contextDetail, context.detail);
+      setText(qpanel.contextPill, context.pill);
       for (const button of [qpanel.afkBtn, qpanel.boxBtn, qpanel.raceBtn, qpanel.stopBtn, qpanel.resumeBtn, qpanel.retryBtn]) {
-        if (button) button.classList.remove('primary');
+        if (button && button.classList.contains('primary')) button.classList.remove('primary');
       }
       const primaryButton = primary === 'box' ? qpanel.boxBtn
         : primary === 'resume' ? qpanel.resumeBtn
           : primary === 'retry' ? qpanel.retryBtn
             : primary === 'race' ? qpanel.raceBtn
               : null;
-      if (primaryButton) primaryButton.classList.add('primary');
+      if (primaryButton && !primaryButton.classList.contains('primary')) {
+        primaryButton.classList.add('primary');
+      }
 
-      qpanel.race.textContent = raceNowText();
-      qpanel.race.dataset.cancel = raceNowTimer ? '1' : '0';
+      setText(qpanel.race, raceNowText());
+      if (qpanel.race.dataset.cancel !== (raceNowTimer ? '1' : '0')) {
+        qpanel.race.dataset.cancel = raceNowTimer ? '1' : '0';
+      }
       const total = raceNowDelay || 1;
       const leftMs = Math.max(0, raceNowAt - Date.now());
       const progress = raceNowTimer ? Math.max(0, Math.min(100, (1 - leftMs / total) * 100)) : 0;
-      qpanel.raceRow.style.setProperty('--race-progress', progress.toFixed(1));
-      qpanel.raceBtn.disabled = !(armed && raceButton);
+      const progressText = progress.toFixed(1);
+      if (qpanel.raceRow.style.getPropertyValue('--race-progress') !== progressText) {
+        qpanel.raceRow.style.setProperty('--race-progress', progressText);
+      }
+      const raceDisabled = !(armed && raceButton);
+      if (qpanel.raceBtn.disabled !== raceDisabled) qpanel.raceBtn.disabled = raceDisabled;
     }
 
     // La ventana superior no siempre expone la API de depuracion del marco,
@@ -20583,7 +20609,7 @@ function dayCurveAt(at = Date.now()) {
         [qpanel.socialUpdatedRow, qpanel.socialUpdated],
       ];
       for (const [row] of rows) {
-        if (row) row.hidden = !social;
+        setHidden(row, !social);
       }
       if (!social) return;
 

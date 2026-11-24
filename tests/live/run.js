@@ -5846,6 +5846,35 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageUpdate.compactClick && /nitro-wraith\.user\.js/.test(garageUpdate.compactClick.url),
       garageUpdate);
 
+    // El mismo contrato que el panel de carrera: un latido del garaje sin
+    // cambios no toca el DOM. Se fuerza el repintado varias veces seguidas, sin
+    // dejar correr timers, y se observa todo el arbol del panel pequeno.
+    const garageIdle = await cdp.evaluate(`(() => {
+      const d = window.__ntaDebug;
+      if (!d || !d.garagePaint) return { has: false };
+      const host = document.getElementById('nt-queue-panel');
+      const panel = host && host.shadowRoot ? host.shadowRoot.querySelector('.p') : null;
+      if (!panel) return { has: false };
+      d.garagePaint();
+      d.garagePaint();
+      const observer = new MutationObserver(() => {});
+      observer.observe(panel, {
+        subtree: true, childList: true, attributes: true, attributeOldValue: true, characterData: true,
+      });
+      for (let i = 0; i < 12; i++) d.garagePaint();
+      const records = observer.takeRecords();
+      observer.disconnect();
+      const seen = records.map((m) => {
+        const t = m.target;
+        const field = (t && t.dataset && t.dataset.field) || (t && t.className) || (t && t.nodeName);
+        const was = m.type === 'attributes' ? ' (was "' + m.oldValue + '")' : '';
+        return m.type + ':' + (m.attributeName || '') + ':' + field + was;
+      });
+      return { has: true, count: seen.length, sample: Array.from(new Set(seen)).slice(0, 30) };
+    })()`, true);
+    check('an idle garage panel performs no DOM writes',
+      garageIdle.has && garageIdle.count === 0, garageIdle);
+
     // Los tres Daily Challenges en el garaje, con su reinicio. Se siembra el
     // mismo estado que deja el juego y se fuerza la cache de 5 s.
     const garageChallenges = await cdp.evaluate(`(() => {
