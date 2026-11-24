@@ -12157,6 +12157,9 @@ function dayCurveAt(at = Date.now()) {
     supported: typingLocksAvailable(),
     held: typingLockHeld,
   });
+  window.__ntaDebug.acquireTypingLock = (options = {}) => acquireTypingLock(options);
+  window.__ntaDebug.claimTabLease = (reason = '', force = false) =>
+    claimTabLease(String(reason || ''), Boolean(force));
   window.__ntaDebug.dropTabLease = () => releaseTabLease(true);
   // La eleccion de copia, sobre un registro de mentira: el harness comprueba
   // que con seis copias el turno no cambia solo cuando el registro se recorta.
@@ -22524,13 +22527,13 @@ function dayCurveAt(at = Date.now()) {
   // mantiene mientras esta promesa siga pendiente y se libera solo si la
   // pestaña se cierra. Las pestañas que no lo consiguen no mandan teclas.
   function typingLocksAvailable() {
-    return typeof navigator !== 'undefined' && navigator.locks
-      && typeof navigator.locks.request === 'function';
+    return Boolean(typeof navigator !== 'undefined' && navigator.locks
+      && typeof navigator.locks.request === 'function');
   }
 
   function acquireTypingLock(options = {}) {
     const steal = options && options.steal === true;
-    if (!typingLocksAvailable()) return Promise.resolve(true);
+    if (!typingLocksAvailable()) return Promise.resolve(false);
     if (typingLockHeld) return Promise.resolve(true);
     if (typingLockPending) {
       if (!steal) return typingLockPending;
@@ -22593,7 +22596,9 @@ function dayCurveAt(at = Date.now()) {
   // El lease vive en localStorage porque es lo unico que ven todas las
   // pestañas del perfil. No sustituye a la eleccion del window: la complementa.
   // Un tipador de la pestaña A no puede mandar teclas si la pestaña B lo tiene.
+  let tabLeaseStorageError = false;
   function readTabLease() {
+    tabLeaseStorageError = false;
     try {
       const raw = localStorage.getItem(TAB_LEASE);
       if (!raw) return null;
@@ -22603,12 +22608,14 @@ function dayCurveAt(at = Date.now()) {
       if (Date.now() - at > CONFIG.guard.tabLeaseStaleMs) return null;
       return lease;
     } catch {
+      tabLeaseStorageError = true;
       return null;
     }
   }
 
   function tabLeaseHeldByOther() {
     const lease = readTabLease();
+    if (tabLeaseStorageError) return true;
     return Boolean(lease && String(lease.tab) !== tabIdentity());
   }
 
@@ -22619,6 +22626,7 @@ function dayCurveAt(at = Date.now()) {
       const now = Date.now();
       const tab = tabIdentity();
       const lease = readTabLease();
+      if (tabLeaseStorageError) return false;
       // Una carrera viva puede recuperar el turno de una pestaña de garaje que
       // lo tenia sin estar escribiendo. Sin esto, pulsar Resume/Race Now en el
       // garaje dejaba a la pestaña de la carrera en standby y la carrera se
@@ -22634,9 +22642,8 @@ function dayCurveAt(at = Date.now()) {
       }));
       return true;
     } catch {
-      // Sin localStorage no se puede coordinar: se mantiene el comportamiento
-      // anterior (la eleccion por window) en vez de bloquear el bot.
-      return true;
+      // Sin localStorage no se puede coordinar: no se actua ni se escribe.
+      return false;
     }
   }
 
@@ -22873,6 +22880,7 @@ function dayCurveAt(at = Date.now()) {
   function takeTypingTurn(reason) {
     const now = Date.now();
     if (now - typingRescueAt < 1000) return false;
+    if (!claimTabLease('typing', true)) return false;
     typingRescueAt = now;
     typingRescueUntil = now + 6000;
     try {
@@ -22880,7 +22888,6 @@ function dayCurveAt(at = Date.now()) {
       window[GUARD_STANDBY] = flag;
       if (window.top !== window) window.top[GUARD_STANDBY] = flag;
     } catch { /* sin acceso */ }
-    claimTabLease('typing', true);
     tabPrimary = true;
     log('The live race had no keys for a few seconds; taking the typing turn back.');
     return true;
