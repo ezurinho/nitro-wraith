@@ -236,7 +236,10 @@ audio, but it is disabled by default and cannot guarantee that a browser,
 Energy Saver or a muted tab will keep running. The race loop also recovers a Web
 Lock left by a frozen tab and sends a watchdog key if a live race goes too long
 without an accepted character. If Web Locks or the cross-tab lease storage are
-unavailable, automation waits instead of typing without coordination.
+unavailable, automation waits instead of typing without coordination. Queue
+clicks, navigations and Mystery Box requests also hold a short `nta:tab-action`
+Web Lock through revalidation and action initiation; the localStorage lease is
+advisory state, not the authority that permits the action.
 
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never

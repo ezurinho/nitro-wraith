@@ -5772,7 +5772,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && /Clear ban/.test(garageStop.ban.title),
       garageStop.ban);
 
-    const banRecovery = await cdp.evaluate(`(() => {
+    const banRecovery = await cdp.evaluate(`(async () => {
       const root = document.getElementById('nt-queue-panel').shadowRoot;
       const panel = root.querySelector('.p');
       const resume = root.querySelector('[data-act="resume"]');
@@ -5794,9 +5794,13 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       paint();
       const banned = { context: panel.dataset.context, label: resume.textContent.trim() };
       resume.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
       paint();
       const cleared = { context: panel.dataset.context, label: resume.textContent.trim(), armed: panel.dataset.armed };
       resume.click();
+      for (let i = 0; i < 25 && panel.dataset.armed !== '1'; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
       paint();
       const resumed = { context: panel.dataset.context, armed: panel.dataset.armed };
       if (previous === null) localStorage.removeItem('ntQueue:lastStop');
@@ -5807,7 +5811,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       });
       paint();
       return { banned, cleared, resumed };
-    })()`);
+    })()`, true);
     check('the garage can clear a ban and then really re-arm the queue',
       banRecovery.banned.context === 'banned' && banRecovery.banned.label === 'Clear ban'
         && banRecovery.cleared.context === 'cleared' && banRecovery.cleared.armed === '0'
@@ -6507,7 +6511,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     // parada sigue en pie hasta que el marco acepte); sin tipador borra la
     // marca y arma la cola. Se hace en un solo bloque sincrono para que el
     // latido del iframe no republique entre las dos lecturas.
-    const garageResume = await cdp.evaluate(`(() => {
+    const garageResume = await cdp.evaluate(`(async () => {
       const host = document.getElementById('nt-queue-panel');
       const root = host.shadowRoot;
       const btn = root.querySelector('[data-act="resume"]');
@@ -6538,6 +6542,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       w.__ntaFrame = { at: 0 };
       localStorage.setItem('ntQueue:stoppedAt', JSON.stringify(saved));
       btn.click();
+      for (let i = 0; i < 25 && localStorage.getItem('ntQueue:stoppedAt') !== null; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
       const idle = {
         marker: localStorage.getItem('ntQueue:stoppedAt'),
         lastStop: JSON.parse(localStorage.getItem('ntQueue:lastStop') || 'null'),
@@ -7364,35 +7371,75 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   const coordinationFailClosed = await cdp.evaluate(`(async () => {
     const w = document.querySelector('iframe').contentWindow;
     const d = w.__ntaDebug;
-    if (!d || !d.acquireTypingLock || !d.claimTabLease) return { has: false };
+    if (!d || !d.acquireTypingLock || !d.claimTabLease || !d.tabAction) return { has: false };
     const locksDescriptor = Object.getOwnPropertyDescriptor(w.navigator, 'locks');
     let lockResult = null;
     let supportedAfter = null;
+    let actionResult = null;
+    let actionCalls = 0;
     try {
       Object.defineProperty(w.navigator, 'locks', { value: undefined, configurable: true });
       supportedAfter = d.typingLock().supported;
       lockResult = await d.acquireTypingLock();
+      actionResult = await d.tabAction('fail-closed test', () => {
+        actionCalls += 1;
+        return true;
+      });
     } finally {
       if (locksDescriptor) Object.defineProperty(w.navigator, 'locks', locksDescriptor);
       else delete w.navigator.locks;
     }
     const originalGetItem = w.Storage.prototype.getItem;
     let leaseResult = null;
+    let storageActionResult = null;
     try {
       w.Storage.prototype.getItem = function (key) {
         if (String(key) === 'nta:tabLease') throw new w.DOMException('blocked', 'SecurityError');
         return originalGetItem.call(this, key);
       };
       leaseResult = d.claimTabLease('fail-closed test');
+      storageActionResult = await d.tabAction('fail-closed test', () => {
+        actionCalls += 1;
+        return true;
+      });
     } finally {
       w.Storage.prototype.getItem = originalGetItem;
     }
-    return { has: true, supportedAfter, lockResult, leaseResult };
+    return { has: true, supportedAfter, lockResult, leaseResult, actionResult, storageActionResult, actionCalls };
   })()`, true);
   check('coordination fails closed when Web Locks or lease storage are unavailable',
     coordinationFailClosed.has && coordinationFailClosed.supportedAfter === false
-      && coordinationFailClosed.lockResult === false && coordinationFailClosed.leaseResult === false,
+      && coordinationFailClosed.lockResult === false && coordinationFailClosed.leaseResult === false
+      && coordinationFailClosed.actionResult === false && coordinationFailClosed.storageActionResult === false
+      && coordinationFailClosed.actionCalls === 0,
     coordinationFailClosed);
+
+  const tabActionAtomic = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.tabAction || !w.navigator.locks) return { has: false };
+    let releaseLock = null;
+    const acquired = new Promise((resolve) => {
+      w.navigator.locks.request('nta:tab-action', { ifAvailable: true }, async (lock) => {
+        if (!lock) { resolve(false); return; }
+        resolve(true);
+        await new Promise((release) => { releaseLock = release; });
+      });
+    });
+    if (!(await acquired)) return { has: true, acquired: false };
+    let calls = 0;
+    const blocked = await d.tabAction('contended', () => { calls += 1; return true; });
+    releaseLock();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    d.dropTabLease();
+    const free = await d.tabAction('free', () => { calls += 1; return true; });
+    return { has: true, acquired: true, blocked, free, calls };
+  })()`, true);
+  check('a queue action lock excludes contenders and releases after the callback',
+    tabActionAtomic.has && tabActionAtomic.acquired === true
+      && tabActionAtomic.blocked === false && tabActionAtomic.free === true
+      && tabActionAtomic.calls === 1,
+    tabActionAtomic);
 
   // Dos pestañas REALES del mismo perfil. El guardia local elige una copia por
   // ventana; el lease de localStorage elige una pestaña. Solo la que lo tiene
@@ -7436,6 +7483,31 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const two = await tabB.evaluate(roleRead);
       return one.panel && one.hook && two.panel && two.hook;
     }, 15000, 'two race tabs');
+
+    await tabA.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      w.localStorage.removeItem('nta:testTabAction');
+      w.__ntaDebug.dropTabLease();
+      return true;
+    })()`);
+    await tabB.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      w.localStorage.removeItem('nta:testTabAction');
+      w.__ntaDebug.dropTabLease();
+      return true;
+    })()`);
+    const actionResults = await Promise.all([tabA, tabB].map((tab) => tab.evaluate(`(async () => {
+      const w = document.querySelector('iframe').contentWindow;
+      return w.__ntaDebug.tabAction('two-tab test', () => {
+        const next = Number(w.localStorage.getItem('nta:testTabAction') || 0) + 1;
+        w.localStorage.setItem('nta:testTabAction', String(next));
+        return true;
+      });
+    })()`, true)));
+    const actionCount = await tabA.evaluate(`Number(document.querySelector('iframe').contentWindow.localStorage.getItem('nta:testTabAction') || 0)`);
+    check('two tabs: only one queue action callback can run',
+      actionResults.filter(Boolean).length === 1 && actionCount === 1,
+      { actionResults, actionCount });
 
     // El primer latido puede pillar a las dos antes de que la segunda lea el
     // lease; se espera a que la eleccion se asiente en vez de leer el mismo tick.
