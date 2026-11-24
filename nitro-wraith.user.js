@@ -12210,6 +12210,7 @@ function dayCurveAt(at = Date.now()) {
   window.__ntaDebug.acquireTypingLock = (options = {}) => acquireTypingLock(options);
   window.__ntaDebug.claimTabLease = (reason = '', force = false) =>
     claimTabLease(String(reason || ''), Boolean(force));
+  window.__ntaDebug.tabAction = (reason, action) => runTabAction(reason, action);
   window.__ntaDebug.dropTabLease = () => releaseTabLease(true);
   // La eleccion de copia, sobre un registro de mentira: el harness comprueba
   // que con seis copias el turno no cambia solo cuando el registro se recorta.
@@ -18010,8 +18011,6 @@ function dayCurveAt(at = Date.now()) {
       if (savedBreakUntil()) return;
       const now = Date.now();
       if (now - (lastPress.continue || 0) < CONFIG.queue.actionCooldownMs) return;
-      if (!claimTabLease('continue')) return;
-      lastPress.continue = now;
 
       const delay = humanDelay(
         CONFIG.queue.continueDelayMs,
@@ -18020,38 +18019,41 @@ function dayCurveAt(at = Date.now()) {
       );
       queueLog(`Button «${normalize(button.textContent)}»: pressing in ${(delay / 1000).toFixed(1)}s.`);
 
-      continueTimer = later(() => {
+      continueTimer = later(async () => {
+        const pressed = await runTabAction('continue', () => {
+          if (!button.isConnected) {
+            queueLog('The button is gone from the DOM; cancelling.');
+            return false;
+          }
+          if (hiddenBlocked()) {
+            queueLog('The tab went to the background; the next race waits.');
+            return false;
+          }
+          if (typerOwnsRaces()) {
+            queueLog('The typer has taken over; pressing nothing.');
+            return false;
+          }
+          if (savedBreakUntil()) {
+            queueLog('A break is in progress; the next race waits for it.');
+            return false;
+          }
+          if (blockUntil() > Date.now()) {
+            queueLog('Site block: the next race waits for it.');
+            return false;
+          }
+          const hours = activeGate();
+          if (hours) {
+            queueWhy(`Active hours: the next race waits until ${hours.nextText}.`);
+            scheduleActiveResume();
+            return false;
+          }
+          clearIdleTimer();
+          lastPress.continue = Date.now();
+          dispatchClick(button);
+          return true;
+        });
         continueTimer = null;
-        if (!button.isConnected) {
-          queueLog('The button is gone from the DOM; cancelling.');
-          return;
-        }
-        if (hiddenBlocked()) {
-          queueLog('The tab went to the background; the next race waits.');
-          return;
-        }
-        // Si mientras esperabamos arranco el tipador, manda el.
-        if (typerOwnsRaces()) {
-          queueLog('The typer has taken over; pressing nothing.');
-          return;
-        }
-        if (savedBreakUntil()) {
-          queueLog('A break is in progress; the next race waits for it.');
-          return;
-        }
-        if (blockUntil() > Date.now()) {
-          queueLog('Site block: the next race waits for it.');
-          return;
-        }
-        const hours = activeGate();
-        if (hours) {
-          queueWhy(`Active hours: the next race waits until ${hours.nextText}.`);
-          scheduleActiveResume();
-          return;
-        }
-        if (!claimTabLease('continue')) return;
-        clearIdleTimer();
-        dispatchClick(button);
+        if (!pressed) queueLog('Another tab has the turn; the next race waits.');
       }, delay);
     }
 
@@ -18471,29 +18473,28 @@ function dayCurveAt(at = Date.now()) {
         || findButton((label) => label.includes('race now'));
       if (!button) return;
 
-      // Otra pestaña puede haber tomado el lease entre el tick y este punto:
-      // no se programa una carrera desde una copia en espera.
-      if (!claimTabLease('race now')) return;
-
+      // Otra pestaña puede reclamar el turno durante el retardo: el clic final
+      // vuelve a validarlo dentro del lock corto de acciones.
       const delay = humanDelay(CONFIG.queue.raceNowDelayMs);
       raceNowDelay = delay;
       raceNowAt = Date.now() + delay;
-      raceNowTimer = later(() => {
+      raceNowTimer = later(async () => {
+        const pressed = await runTabAction('race now', () => {
+          if (!isArmed() || !button.isConnected) return false;
+          if (hiddenBlocked()) return false;
+          if (blockUntil() > Date.now()) return false;
+          if (queuePress('raceNow', button)) {
+            // Se suma sobre el contador ya caducado: si el ultimo rebote es viejo,
+            // este empieza de uno en vez de arrastrar una racha que ya no aplica.
+            store.set('raceNowBounces', raceNowBounces() + 1);
+            store.set('raceNowBounceAt', Date.now());
+          }
+          return true;
+        });
         raceNowTimer = null;
         raceNowAt = 0;
         raceNowDelay = 0;
-        if (!isArmed() || !button.isConnected) return;
-        if (hiddenBlocked()) return;
-        if (blockUntil() > Date.now()) return;
-        if (!claimTabLease('race now')) return;
-        // Un clic que no llega a carrera cuenta: es la senal de que la sesion o
-        // el servidor no dejan jugar y el garaje va a volver a la misma pagina.
-        if (queuePress('raceNow', button)) {
-          // Se suma sobre el contador ya caducado: si el ultimo rebote es viejo,
-          // este empieza de uno en vez de arrastrar una racha que ya no aplica.
-          store.set('raceNowBounces', raceNowBounces() + 1);
-          store.set('raceNowBounceAt', Date.now());
-        }
+        if (!pressed) queueLog('Another tab has the turn; the race waits.');
       }, delay);
 
       queueLog(`Garage: «Race Now» in ${(delay / 1000).toFixed(1)}s.`);
@@ -18750,23 +18751,27 @@ function dayCurveAt(at = Date.now()) {
 
       const delay = humanDelay(CONFIG.mysteryBox.delayMs);
 
-      boxTimer = later(() => {
+      boxTimer = later(async () => {
+        const pressed = await runTabAction('mystery box', () => {
+          if (!boxDue()) return false;
+          if (!button.isConnected) {
+            const wait = CONFIG.mysteryBox.retryAfterErrorMs;
+            boxSchedule(wait);
+            boxStore.set(BOX_FAIL, Date.now());
+            setBoxForce(false);
+            boxAttempt({
+              via: 'click', status: null, reward: null, next: null,
+              scheduledAt: Date.now() + wait,
+              reason: 'markup: claim button disappeared before pressing',
+            });
+            return false;
+          }
+          boxStore.set(BOX_TRY, Date.now());
+          dispatchClick(button);
+          return true;
+        });
         boxTimer = null;
-        if (!button.isConnected) {
-          const wait = CONFIG.mysteryBox.retryAfterErrorMs;
-          boxSchedule(wait);
-          boxStore.set(BOX_FAIL, Date.now());
-          setBoxForce(false);
-          boxAttempt({
-            via: 'click', status: null, reward: null, next: null,
-            scheduledAt: Date.now() + wait,
-            reason: 'markup: claim button disappeared before pressing',
-          });
-          return;
-        }
-
-        boxStore.set(BOX_TRY, Date.now());
-        dispatchClick(button);
+        if (!pressed) return;
 
         // The site answers with a reward modal: it is read and closed the way a
         // player would, a moment later, so the queue can go back to racing.
@@ -18857,8 +18862,14 @@ function dayCurveAt(at = Date.now()) {
         if (claims && claims.sub) headers['x-uid'] = String(claims.sub);
       }
 
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 10000) : null;
+
       try {
-        const response = await fetch('/api/v2/rewards/daily', { method: 'GET', credentials: 'include', headers });
+        const response = await fetch('/api/v2/rewards/daily', {
+          method: 'GET', credentials: 'include', headers,
+          signal: controller ? controller.signal : undefined,
+        });
         const status = response.status;
         if (response.ok) {
           let body = null;
@@ -18945,12 +18956,14 @@ function dayCurveAt(at = Date.now()) {
         });
         setBoxVisit(false);
         return false;
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     }
 
     // @returns {boolean} true while the box is being handled, so the queue does
     // not press "Race Now" in the same breath.
-    function handleMysteryBox() {
+    async function handleMysteryBox() {
       if (!CONFIG.mysteryBox.enabled) return false;
       // Sin red el intento solo gasta el boton y deja una espera artificial.
       if (!onlineNow()) return false;
@@ -18982,12 +18995,14 @@ function dayCurveAt(at = Date.now()) {
         const lastFail = Number(boxStore.get(BOX_FAIL, 0)) || 0;
         if (lastFail > 0 && lastFail >= PAGE_AT && !boxForcePending()) return false;
 
-        if (!claimTabLease('mystery box')) return false;
-        boxStore.set(BOX_TRY, now);
-        setBoxVisit(false);
-        setBoxForce(false);
-        claimBoxByClick(button);
-        return true;
+        return runTabAction('mystery box', () => {
+          if (!boxDue()) return false;
+          boxStore.set(BOX_TRY, now);
+          setBoxVisit(false);
+          setBoxForce(false);
+          claimBoxByClick(button);
+          return true;
+        });
       }
 
       const state = typerState();
@@ -19004,23 +19019,27 @@ function dayCurveAt(at = Date.now()) {
       // ademas la marca de vuelta, porque el boton de verdad esta en el garaje.
       if (racing) {
         if (!boxDue()) return false;
-        if (!claimTabLease('mystery box')) return false;
-        setBoxVisit(true);
-        boxStore.set(BOX_TRY, Date.now());
-        if (CONFIG.mysteryBox.apiFallback) claimBoxByApi();
-        return true;
+        return runTabAction('mystery box', () => {
+          if (!boxDue()) return false;
+          setBoxVisit(true);
+          boxStore.set(BOX_TRY, Date.now());
+          if (CONFIG.mysteryBox.apiFallback) claimBoxByApi();
+          return true;
+        });
       }
 
       // Fuera de la carrera la caja se reclama donde el sitio la pone: el
       // garaje. Si el bot esta en la home (o en los resultados, que van a abrir
       // otra carrera), se va alli, en vez de esperar a que la API quiera.
       if (wantGarage && !onGarage && (results || !state)) {
-        if (!claimTabLease('mystery box')) return false;
-        setBoxForce(true);
-        setBoxVisit(true);
-        queueWhy('Mystery Box is ready: going to the garage to claim it.');
-        navigate('/garage');
-        return true;
+        return runTabAction('mystery box', () => {
+          if (!boxDue()) return false;
+          setBoxForce(true);
+          setBoxVisit(true);
+          queueWhy('Mystery Box is ready: going to the garage to claim it.');
+          navigate('/garage');
+          return true;
+        });
       }
 
       // Una carrera viva sin resultados (el bot esta parado a mitad) no se
@@ -19029,26 +19048,6 @@ function dayCurveAt(at = Date.now()) {
 
       if (!boxDue()) {
         setBoxForce(false);
-        return false;
-      }
-
-      if (!claimTabLease('mystery box')) return false;
-      boxStore.set(BOX_TRY, Date.now());
-
-      // Caja marcada como lista pero sin un boton reconocible (markup nuevo):
-      // la API del sitio sigue siendo una via valida para no perder el premio.
-      if (document.querySelector('.mysteryBox.is-here')) {
-        if (CONFIG.mysteryBox.apiFallback) {
-          claimBoxByApi('markup: claim button not recognized');
-        } else {
-          const wait = CONFIG.mysteryBox.readyCheckMs;
-          boxSchedule(wait);
-          boxAttempt({
-            via: 'click', status: null, reward: null, next: null,
-            scheduledAt: Date.now() + wait,
-            reason: 'markup: claim button not recognized',
-          });
-        }
         return false;
       }
 
@@ -19064,14 +19063,36 @@ function dayCurveAt(at = Date.now()) {
         return false;
       }
 
-      // Peticion lanzada: se toma como tarea hecha para que este mismo latido
-      // no abra ademas una carrera con el premio en el aire (el siguiente, ya
-      // con el intento apuntado, deja paso al garaje).
-      if (CONFIG.mysteryBox.apiFallback) {
-        claimBoxByApi();
-        return true;
-      }
-      return false;
+      return runTabAction('mystery box', () => {
+        if (!boxDue()) return false;
+        boxStore.set(BOX_TRY, Date.now());
+
+        // Caja marcada como lista pero sin un boton reconocible (markup nuevo):
+        // la API del sitio sigue siendo una via valida para no perder el premio.
+        if (document.querySelector('.mysteryBox.is-here')) {
+          if (CONFIG.mysteryBox.apiFallback) {
+            claimBoxByApi('markup: claim button not recognized');
+          } else {
+            const wait = CONFIG.mysteryBox.readyCheckMs;
+            boxSchedule(wait);
+            boxAttempt({
+              via: 'click', status: null, reward: null, next: null,
+              scheduledAt: Date.now() + wait,
+              reason: 'markup: claim button not recognized',
+            });
+          }
+          return true;
+        }
+
+        // Peticion lanzada: se toma como tarea hecha para que este mismo latido
+        // no abra ademas una carrera con el premio en el aire (el siguiente, ya
+        // con el intento apuntado, deja paso al garaje).
+        if (CONFIG.mysteryBox.apiFallback) {
+          claimBoxByApi();
+          return true;
+        }
+        return false;
+      });
     }
 
     /* ---- panel del garaje ---- */
@@ -19795,7 +19816,7 @@ function dayCurveAt(at = Date.now()) {
       // sola: mismo boton del sitio, mismo modal y mismo registro. Si el boton
       // del sitio no esta en esta pagina, se marca el reclamo y la cola va al
       // garaje sola: un boton que no hace nada es peor que no tenerlo.
-      refs.boxBtn.addEventListener('click', (event) => {
+      refs.boxBtn.addEventListener('click', async (event) => {
         event.stopPropagation();
         if (!onlineNow()) {
           queueLog('Mystery Box: no network; the claim waits.');
@@ -19809,36 +19830,33 @@ function dayCurveAt(at = Date.now()) {
           paintGaragePanel();
           return;
         }
-        if (!claimTabLease('manual mystery box')) {
-          queueLog('Another tab has the turn; the box stays with it.');
-          paintGaragePanel();
-          return;
-        }
-        const button = boxButton();
-        if (button) {
-          boxStore.set(BOX_TRY, Date.now());
-          setBoxForce(false);
-          claimBoxByClick(button);
-          paintGaragePanel();
-          return;
-        }
+        const acted = await runTabAction('manual mystery box', () => {
+          const button = boxButton();
+          if (button) {
+            boxStore.set(BOX_TRY, Date.now());
+            setBoxForce(false);
+            claimBoxByClick(button);
+            return true;
+          }
 
-        // El sitio ya dijo que falta (o el respiro minimo no ha pasado): no se
-        // navega para nada, se dice por que en el log.
-        if (!boxDue()) {
-          setBoxForce(false);
-          queueLog('Mystery Box: the site has not handed it out yet; nothing to claim.');
-          paintGaragePanel();
-          return;
-        }
+          // El sitio ya dijo que falta (o el respiro minimo no ha pasado): no se
+          // navega para nada, se dice por que en el log.
+          if (!boxDue()) {
+            setBoxForce(false);
+            queueLog('Mystery Box: the site has not handed it out yet; nothing to claim.');
+            return true;
+          }
 
-        setBoxForce(true);
-        if (location.pathname === '/garage' || location.pathname.startsWith('/garage/')) {
-          queueLog('Mystery Box: the garage has not painted the box yet; claiming as soon as it does.');
-        } else {
-          queueWhy('Mystery Box: going to the garage to claim it.');
-          navigate('/garage');
-        }
+          setBoxForce(true);
+          if (location.pathname === '/garage' || location.pathname.startsWith('/garage/')) {
+            queueLog('Mystery Box: the garage has not painted the box yet; claiming as soon as it does.');
+          } else {
+            queueWhy('Mystery Box: going to the garage to claim it.');
+            navigate('/garage');
+          }
+          return true;
+        });
+        if (!acted) queueLog('Another tab has the turn; the box stays with it.');
         paintGaragePanel();
       });
 
@@ -19861,7 +19879,7 @@ function dayCurveAt(at = Date.now()) {
       // El boton abre carrera ya: si habia una cuenta atras en marcha se borra
       // antes de pulsar, para que no quede un segundo clic programado sobre un
       // boton que ya no existe (o sobre la carrera siguiente).
-      refs.raceBtn.addEventListener('click', (event) => {
+      refs.raceBtn.addEventListener('click', async (event) => {
         event.stopPropagation();
         if (!onlineNow()) {
           queueLog('Offline: the race waits for the network to return.');
@@ -19881,15 +19899,13 @@ function dayCurveAt(at = Date.now()) {
         }
         const button = findButton((label) => label.includes('race now'));
         if (!button) return;
-        if (!claimTabLease('manual race')) {
-          queueLog('Another tab has the turn; the race stays with it.');
-          paintGaragePanel();
-          return;
-        }
-
-        clearRaceNow();
-        raceNowHoldUntil = 0;
-        queuePress('raceNow', button);
+        const acted = await runTabAction('manual race', () => {
+          clearRaceNow();
+          raceNowHoldUntil = 0;
+          queuePress('raceNow', button);
+          return true;
+        });
+        if (!acted) queueLog('Another tab has the turn; the race stays with it.');
         paintGaragePanel();
       });
 
@@ -19923,7 +19939,7 @@ function dayCurveAt(at = Date.now()) {
       // marca de parada no se toca aqui, para que un rechazo no la borre. Sin
       // tipador no hay marco que escuche, asi que se borra la marca y se arma
       // la cola; «Race Now» conserva su retardo humano.
-      refs.resumeBtn.addEventListener('click', (event) => {
+      refs.resumeBtn.addEventListener('click', async (event) => {
         event.stopPropagation();
         if (!signedIn()) {
           queueLog('Resume: log in first; the queue cannot race a guest.');
@@ -19955,16 +19971,15 @@ function dayCurveAt(at = Date.now()) {
           return;
         }
 
-        if (!claimTabLease('manual resume')) {
-          queueLog('Another tab has the turn; the resume stays with it.');
-          paintGaragePanel();
-          return;
-        }
-        clearStopped();
-        setBanClearHeld(false);
-        setArmed(true);
-        garageAutoDone = true;
-        queueWhy('Resume: stop cleared from the garage panel; the queue is armed.');
+        const acted = await runTabAction('manual resume', () => {
+          clearStopped();
+          setBanClearHeld(false);
+          setArmed(true);
+          garageAutoDone = true;
+          queueWhy('Resume: stop cleared from the garage panel; the queue is armed.');
+          return true;
+        });
+        if (!acted) queueLog('Another tab has the turn; the resume stays with it.');
         paintGaragePanel();
       });
 
@@ -20365,7 +20380,7 @@ function dayCurveAt(at = Date.now()) {
       // una cola parada o atascada no deje la caja sin cobrar. handleMysteryBox
       // ya tiene sus guardas (boxTimer, minGap, lease) contra duplicados.
       if (signed && CONFIG.mysteryBox.enabled && !boxTimer && boxButton()) {
-        try { handleMysteryBox(); } catch { /* el siguiente latido reintenta */ }
+        handleMysteryBox().catch(() => { /* el siguiente latido reintenta */ });
       }
       // Nunca se desactiva: sin boton del sitio en pantalla, el clic lleva al
       // garaje y reclama alli (antes quedaba muerto fuera del garaje, que es lo
@@ -22021,7 +22036,7 @@ function dayCurveAt(at = Date.now()) {
       return true;
     }
 
-    function tick() {
+    async function tick() {
       // Eleccion de copia en esta ventana: la que no manda no pulsa nada.
       if (!refreshQueueRole()) return;
 
@@ -22176,7 +22191,7 @@ function dayCurveAt(at = Date.now()) {
 
       // Daily Mystery Box: handled before anything else so a claim and a "Race
       // Now" never land in the same tick.
-      if (handleMysteryBox()) return;
+      if (await handleMysteryBox()) return;
 
       if (path === '/' || path === '/garage' || path.startsWith('/garage/')) {
         handleGaragePage();
@@ -22187,19 +22202,25 @@ function dayCurveAt(at = Date.now()) {
 
     let hiddenLoopQueued = false;
 
-    function loop() {
+    let loopRunning = false;
+
+    async function loop() {
+      if (loopRunning) return;
+      loopRunning = true;
       // Un nodo inesperado del sitio no puede tumbar el latido entero ni dejar
       // de programar el siguiente ciclo oculto. El error queda en la consola y
       // el proximo tick vuelve a intentarlo con la pagina ya repintada.
       try {
         onNavigate();
         syncGaragePanel();
-        tick();
+        await tick();
         // Si AFK y el keep-alive estan encendidos, se reintenta el audio
         // suspendido sin esperar a otro clic; el throttle interno evita spam.
         syncKeepAlive();
       } catch (error) {
         queueLog('Queue tick failed; retrying on the next beat.', error);
+      } finally {
+        loopRunning = false;
       }
 
       // En segundo plano setInterval se clampa a 1/min: el reloj Worker mantiene
@@ -22510,6 +22531,7 @@ function dayCurveAt(at = Date.now()) {
   const TAB_LEASE = 'nta:tabLease';
   const TAB_NAME_PREFIX = 'nta-tab:';
   const TYPING_LOCK = 'nta:typing';
+  const TAB_ACTION_LOCK = 'nta:tab-action';
   let tabId = null;            // identidad de ESTE documento/pestaña
   let typingLockHeld = false;  // esta pestaña tiene el Web Lock de tecleo
   let typingLockRelease = null;
@@ -22693,6 +22715,23 @@ function dayCurveAt(at = Date.now()) {
       return true;
     } catch {
       // Sin localStorage no se puede coordinar: no se actua ni se escribe.
+      return false;
+    }
+  }
+
+  async function runTabAction(reason, action) {
+    if (!typingLocksAvailable() || typeof action !== 'function') return false;
+    try {
+      return await navigator.locks.request(TAB_ACTION_LOCK, { ifAvailable: true }, (lock) => {
+        if (!lock) return false;
+        if (!claimTabLease(String(reason || ''), false)) return false;
+        try {
+          return action() === true;
+        } catch {
+          return false;
+        }
+      });
+    } catch {
       return false;
     }
   }

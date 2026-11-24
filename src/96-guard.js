@@ -27,6 +27,7 @@
   const TAB_LEASE = 'nta:tabLease';
   const TAB_NAME_PREFIX = 'nta-tab:';
   const TYPING_LOCK = 'nta:typing';
+  const TAB_ACTION_LOCK = 'nta:tab-action';
   let tabId = null;            // identidad de ESTE documento/pestaña
   let typingLockHeld = false;  // esta pestaña tiene el Web Lock de tecleo
   let typingLockRelease = null;
@@ -210,6 +211,23 @@
       return true;
     } catch {
       // Sin localStorage no se puede coordinar: no se actua ni se escribe.
+      return false;
+    }
+  }
+
+  async function runTabAction(reason, action) {
+    if (!typingLocksAvailable() || typeof action !== 'function') return false;
+    try {
+      return await navigator.locks.request(TAB_ACTION_LOCK, { ifAvailable: true }, (lock) => {
+        if (!lock) return false;
+        if (!claimTabLease(String(reason || ''), false)) return false;
+        try {
+          return action() === true;
+        } catch {
+          return false;
+        }
+      });
+    } catch {
       return false;
     }
   }
