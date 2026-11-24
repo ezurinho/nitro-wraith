@@ -887,6 +887,19 @@ async function runCase(item) {
     themeScript.includes('panelResizeBound') && themeScript.includes('updateTickerBound'),
     'the resize listener or the update interval is added on every mount');
 
+  // Piso de diseno (DESIGN.md): una sola pila de fuentes declarada como token,
+  // ninguna animacion de layout y salida para movimiento reducido. Se mira la
+  // hoja real del panel, no una copia.
+  const fontStacks = (themeCss.match(/ui-sans-serif/g) || []).length;
+  const monoStacks = (themeCss.match(/ui-monospace/g) || []).length;
+  unit('the panel sheet keeps the design floor: one font stack, no layout animation',
+    fontStacks === 1 && monoStacks === 1
+      && !/transition:\s*(all|width|height|top|left)\b/.test(themeCss)
+      && /\.prog i \{[^}]*transform: scaleX\(0\);[^}]*transition: transform/.test(themeCss)
+      && /prefers-reduced-motion: reduce/.test(themeCss)
+      && /:focus-visible/.test(themeCss),
+    `ui=${fontStacks} mono=${monoStacks}`);
+
   // Los ganchos de depuracion existen para el banco (localhost) y para quien los
   // abre a mano; en el sitio real se retiran al terminar boot.
   unit('debug hooks stay out of the real site',
