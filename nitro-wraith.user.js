@@ -9135,6 +9135,15 @@ function dayCurveAt(at = Date.now()) {
           --warn: #ffb340;
           --bad: #ff6f6f;
           --info: #63c8ff;
+          /* Tintas de estado: mezclas sobre --ink para que cada tema las entone.
+             Ninguna regla escribe un color de estado a mano. */
+          --ink-warn: color-mix(in srgb, var(--warn) 30%, var(--ink));
+          --ink-warn-hi: color-mix(in srgb, var(--warn) 58%, var(--ink));
+          --ink-bad: color-mix(in srgb, var(--bad) 25%, var(--ink));
+          --ink-on-acc: #06110b;
+          --medal-1: #ffd166;
+          --medal-2: #d7dee8;
+          --medal-3: #e0a273;
           --card: rgba(255, 255, 255, .028);
           --bg-hi: rgba(12, 17, 14, .985);
           --bg-lo: rgba(5, 8, 6, .995);
@@ -9341,12 +9350,12 @@ function dayCurveAt(at = Date.now()) {
         .pace:hover { filter: brightness(1.16); box-shadow: 0 0 14px -4px color-mix(in srgb, var(--acc) 70%, transparent); }
         .pace:active { transform: scale(.96); }
         .panel[data-pace-profile="soft"] .pace { color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); border-color: color-mix(in srgb, var(--info) 32%, transparent); }
-        .panel[data-pace-profile="fast"] .pace { color: #ffe3b8; background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+        .panel[data-pace-profile="fast"] .pace { color: var(--ink-warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
         /* El chip es un ESTADO, no un interruptor: el bot es siempre AUTO y la
            cola se arma sola. Para parar esta Stop (o Esc / Alt+N). */
         .mode { flex: none; padding: 4px 8px; border-radius: 999px; font: 700 8.5px/1 var(--font-ui); letter-spacing: .1em; color: var(--acc-2); background: var(--acc-dim); border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent); cursor: default; }
-        .cap { flex: 1 1 auto; padding: 4px 8px; border-radius: 999px; text-align: center; font: 700 8.5px/1 var(--font-ui); letter-spacing: .1em; color: #ffe0b0; background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); transition: color .2s ease, background .2s ease, border-color .2s ease; }
-        .panel[data-cap-hit="1"] .cap { color: #ffd6d6; background: color-mix(in srgb, var(--bad) 18%, transparent); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+        .cap { flex: 1 1 auto; padding: 4px 8px; border-radius: 999px; text-align: center; font: 700 8.5px/1 var(--font-ui); letter-spacing: .1em; color: var(--ink-warn); background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); transition: color .2s ease, background .2s ease, border-color .2s ease; }
+        .panel[data-cap-hit="1"] .cap { color: var(--ink-bad); background: color-mix(in srgb, var(--bad) 18%, transparent); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 
         /* ---------- contexto y accion principal ---------------------------- */
         .context-banner {
@@ -9557,7 +9566,7 @@ function dayCurveAt(at = Date.now()) {
         .season-card .season-prog { opacity: 1; margin: 0 2px 2px; }
         .season-card .season-name { margin: 1px 0 8px; font: 700 13px/1.25 var(--font-ui); color: var(--ink-2); }
         .season-card.is-empty .season-name { color: var(--dim-2); }
-        .season-card .season-alert { margin: 8px 2px 0; padding: 6px 8px; border-radius: 7px; font: 600 11px/1.35 var(--font-ui); color: var(--warn, #ffcf6e); background: rgba(255, 190, 90, .08); border: 1px solid rgba(255, 190, 90, .28); }
+        .season-card .season-alert { margin: 8px 2px 0; padding: 6px 8px; border-radius: 7px; font: 600 11px/1.35 var(--font-ui); color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent); }
         .season-card .season-actions { display: flex; gap: 6px; margin-top: 8px; }
         .season-card .season-actions .act { flex: 0 1 auto; padding: 5px 10px; }
         /* Reflejo que barre la barra mientras escribe: vida sin ruido. */
@@ -9601,7 +9610,7 @@ function dayCurveAt(at = Date.now()) {
         .row .num::-webkit-inner-spin-button, .row .num::-webkit-outer-spin-button { opacity: .35; }
         .row .cmp-select { flex: 1 1 auto; min-width: 0; max-width: 100%; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); color: var(--acc-2); font: 600 9.5px/1.4 var(--font-mono); letter-spacing: 0; text-transform: none; color-scheme: dark; cursor: pointer; }
         .row .cmp-select:focus-visible { outline: 2px solid color-mix(in srgb, var(--acc) 70%, transparent); outline-offset: 1px; }
-        .row .cmp-select option { background: #0b0f0d; color: var(--ink); }
+        .row .cmp-select option { background: var(--bg-lo); color: var(--ink); }
         .cmp-row { gap: 8px; }
         .break-row { display: flex; }
         .panel[data-state="break"] .break-row b { color: var(--info); }
@@ -9654,9 +9663,9 @@ function dayCurveAt(at = Date.now()) {
         .hist-row:first-child .wpm .model { color: var(--acc-2); }
         .hist-row .nitro-tag { margin-right: 4px; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc); font-style: normal; font-size: 9px; letter-spacing: .06em; vertical-align: 1px; }
         .hist-row .place { color: var(--dim); }
-        .hist-row .place[data-medal="1"] { color: #ffd166; }
-        .hist-row .place[data-medal="2"] { color: #d7dee8; }
-        .hist-row .place[data-medal="3"] { color: #e0a273; }
+        .hist-row .place[data-medal="1"] { color: var(--medal-1); }
+        .hist-row .place[data-medal="2"] { color: var(--medal-2); }
+        .hist-row .place[data-medal="3"] { color: var(--medal-3); }
         .hist-row .xp { color: var(--acc-2); }
         .hist-empty { padding-top: 2px; font: italic 500 10px/1.4 var(--font-ui); color: var(--dim-2); }
         .hist-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--acc) 14%, transparent); font: 700 8.5px/1.4 var(--font-ui); letter-spacing: .13em; text-transform: uppercase; color: var(--dim); }
@@ -9724,14 +9733,14 @@ function dayCurveAt(at = Date.now()) {
         .nitro-strategy { max-width: 100%; padding: 4px 6px; border-radius: 7px; cursor: pointer; color: var(--ink-2); background: rgba(0, 0, 0, .32); border: 1px solid var(--line); font: 700 8.5px/1.2 var(--font-mono); letter-spacing: .03em; text-transform: uppercase; }
         .nitro-strategy:hover { color: var(--acc-2); border-color: var(--line-strong); }
         .nitro-strategy:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-        .nitro-strategy option { color: #111; background: #fff; }
+        .nitro-strategy option { color: var(--ink); background: var(--bg-lo); }
         .row.nitro-delta-row b[data-good="1"] { color: var(--acc); }
         .row.nitro-delta-row b[data-good="0"] { color: var(--warn); }
 
         /* Interruptor tipo iOS con muelle: el muelle va en linear() y el
            cubic-bezier queda de repuesto para navegadores viejos. */
         .sw { all: unset; position: relative; flex: none; width: 34px; height: 18px; border-radius: 999px; cursor: pointer; background: rgba(255, 255, 255, .09); border: 1px solid rgba(255, 255, 255, .12); transition: background .25s ease, border-color .25s ease, box-shadow .25s ease; }
-        .sw::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(180deg, var(--ink), #b9cfc2); box-shadow: 0 1px 3px rgba(0, 0, 0, .5); transition: transform .32s cubic-bezier(.34, 1.4, .5, 1); transition: transform .32s linear(0, 0.3 14%, 0.84 30%, 1.07 46%, 1.02 60%, 0.998 74%, 1); }
+        .sw::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(180deg, var(--ink), color-mix(in srgb, var(--ink) 76%, var(--dim))); box-shadow: 0 1px 3px rgba(0, 0, 0, .5); transition: transform .32s cubic-bezier(.34, 1.4, .5, 1); transition: transform .32s linear(0, 0.3 14%, 0.84 30%, 1.07 46%, 1.02 60%, 0.998 74%, 1); }
         .sw[data-on="1"] { background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 90%, transparent), rgba(41, 196, 110, .85)); border-color: color-mix(in srgb, var(--acc) 55%, transparent); box-shadow: 0 0 14px -3px color-mix(in srgb, var(--acc) 80%, transparent), inset 0 0 8px -4px rgba(0, 0, 0, .6); }
         .sw[data-on="1"]::after { transform: translateX(16px); }
         .sw:hover { border-color: var(--line-strong); }
@@ -9747,7 +9756,7 @@ function dayCurveAt(at = Date.now()) {
 
         .sld { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 2px 0 0; background: transparent; cursor: pointer; }
         .sld::-webkit-slider-runnable-track { height: 4px; border-radius: 99px; background: linear-gradient(90deg, var(--acc) 0 var(--fill, 0%), rgba(255, 255, 255, .1) var(--fill, 0%) 100%); }
-        .sld::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; margin-top: -4.5px; border-radius: 50%; background: linear-gradient(180deg, #ffffff, var(--acc-2)); border: 1px solid color-mix(in srgb, var(--acc) 80%, transparent); box-shadow: 0 0 12px -2px color-mix(in srgb, var(--acc) 90%, transparent); transition: transform .16s cubic-bezier(.34, 1.5, .5, 1); }
+        .sld::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; margin-top: -4.5px; border-radius: 50%; background: linear-gradient(180deg, var(--ink), var(--acc-2)); border: 1px solid color-mix(in srgb, var(--acc) 80%, transparent); box-shadow: 0 0 12px -2px color-mix(in srgb, var(--acc) 90%, transparent); transition: transform .16s cubic-bezier(.34, 1.5, .5, 1); }
         .sld:active::-webkit-slider-thumb { transform: scale(1.25); }
         .sld:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 99px; }
         .sld-ends { display: flex; justify-content: space-between; font: 600 8px/1.2 var(--font-mono); letter-spacing: .08em; color: var(--dim-2); }
@@ -9755,10 +9764,10 @@ function dayCurveAt(at = Date.now()) {
         .act { all: unset; flex: 1 1 0; padding: 6px 0; text-align: center; border-radius: 8px; cursor: pointer; font: 700 9px/1 var(--font-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); background: rgba(255, 255, 255, .045); border: 1px solid var(--line); transition: color .18s ease, background .18s ease, border-color .18s ease, transform .12s ease; }
         .act:hover { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); }
         .act:active { transform: translateY(1px); }
-        .act:disabled { opacity: .38; cursor: default; }
-        .act[data-act="report"] { color: #ffe3b8; border-color: color-mix(in srgb, var(--warn) 26%, transparent); }
-        .act[data-act="report"]:hover { color: #ffcf88; background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-        .cfg-text { display: block; width: 100%; height: 46px; margin-top: 7px; padding: 6px 7px; resize: vertical; color: var(--ink); background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 8px; font: 500 9.5px/1.35 var(--font-mono); transition: border-color .2s ease, box-shadow .2s ease; }
+        .act:disabled { opacity: .38; cursor: not-allowed; color: var(--dim-2); background: transparent; border-color: var(--line); }
+        .act[data-act="report"] { color: var(--ink-warn); border-color: color-mix(in srgb, var(--warn) 26%, transparent); }
+        .act[data-act="report"]:hover { color: var(--ink-warn-hi); background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+        .cfg-text { display: block; width: 100%; height: 46px; margin-top: 7px; padding: 6px 7px; resize: vertical; color: var(--ink); background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 8px; font: 500 9.5px/1.35 var(--font-mono); }
         .cfg-text:focus-visible { outline: none; border-color: var(--line-strong); box-shadow: 0 0 16px -8px var(--acc); }
         .cfg-note { margin-top: 6px; font: 500 9px/1.35 var(--font-ui); color: var(--dim); }
 
@@ -9776,7 +9785,7 @@ function dayCurveAt(at = Date.now()) {
         .panel[data-state="running"] .led { background: var(--acc); box-shadow: 0 0 10px var(--acc); animation: nt-pulse 1.9s ease-in-out infinite; }
         .panel[data-state="paused"] .led { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
         .panel[data-state="break"] .led { background: var(--info); box-shadow: 0 0 10px var(--info); }
-        .foot-bar b { color: #cfe6d8; font-weight: 700; }
+        .foot-bar b { color: color-mix(in srgb, var(--ink) 88%, var(--dim)); font-weight: 700; }
         .foot-bar [data-field="footAcc"] { color: var(--acc-2); }
         .foot-bar .fsep { opacity: .35; }
         .foot-bar .hint { margin-left: auto; color: var(--dim-2); }
@@ -9790,7 +9799,7 @@ function dayCurveAt(at = Date.now()) {
         /* Parado (sin modo NORMAL): ambar en la barra y en la etiqueta de la
            tarjeta live. Es un estado, y se tiene que ver de un vistazo. */
         .panel[data-stopped="1"][data-mode="auto"] .foot-bar .led { background: var(--warn); box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 75%, transparent); }
-        .panel[data-stopped="1"][data-mode="auto"] .foot-bar b[data-field="footState"] { color: #ffcf7a; }
+        .panel[data-stopped="1"][data-mode="auto"] .foot-bar b[data-field="footState"] { color: var(--ink-warn-hi); }
         .panel[data-stopped="1"][data-mode="auto"] .card-s[data-field="liveTag"] { color: var(--warn); }
 
         /* Mini-grafica de model Δ: la linea de puntos es el cero; el area y la
@@ -9806,13 +9815,13 @@ function dayCurveAt(at = Date.now()) {
         .toggle:hover { filter: brightness(1.16); box-shadow: 0 0 20px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .12); }
         .toggle:active { transform: translateY(1px); }
         .panel[data-state="paused"] .toggle { color: var(--ink); background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 30%, transparent), color-mix(in srgb, var(--acc) 14%, transparent)); border-color: color-mix(in srgb, var(--acc) 50%, transparent); }
-        .stop { all: unset; flex: none; display: grid; place-items: center; padding: 9px 14px; border-radius: 9px; cursor: pointer; font: 800 9.5px/1 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: #ffd0d0; background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 18%, transparent), color-mix(in srgb, var(--bad) 8%, transparent)); border: 1px solid color-mix(in srgb, var(--bad) 32%, transparent); transition: filter .15s ease, transform .1s ease, color .2s ease, background .2s ease, border-color .2s ease; }
+        .stop { all: unset; flex: none; display: grid; place-items: center; padding: 9px 14px; border-radius: 9px; cursor: pointer; font: 800 9.5px/1 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-bad); background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 18%, transparent), color-mix(in srgb, var(--bad) 8%, transparent)); border: 1px solid color-mix(in srgb, var(--bad) 32%, transparent); transition: filter .15s ease, transform .1s ease, color .2s ease, background .2s ease, border-color .2s ease; }
         .stop:hover { filter: brightness(1.16); box-shadow: 0 0 20px -9px var(--bad); }
         .stop:active { transform: translateY(1px); }
-        .stop[data-pending="true"] { color: #ffe6b8; background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 24%, transparent), color-mix(in srgb, var(--warn) 12%, transparent)); border-color: color-mix(in srgb, var(--warn) 42%, transparent); }
+        .stop[data-pending="true"] { color: var(--ink-warn); background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 24%, transparent), color-mix(in srgb, var(--warn) 12%, transparent)); border-color: color-mix(in srgb, var(--warn) 42%, transparent); }
         /* Parado no hay nada que parar: el boton se apaga en vez de cerrar una
            tanda ya cerrada. */
-        .stop:disabled { opacity: .42; cursor: default; }
+        .stop:disabled { opacity: .42; cursor: not-allowed; color: var(--dim); background: rgba(255, 255, 255, .03); border-color: var(--line); }
         .stop:disabled:hover, .stop:disabled:active { filter: none; box-shadow: none; transform: none; }
         .gear { all: unset; flex: none; display: grid; place-items: center; width: 32px; border-radius: 9px; cursor: pointer; color: var(--dim); background: rgba(255, 255, 255, .04); border: 1px solid var(--line); transition: filter .15s ease, color .18s ease, background .18s ease, border-color .18s ease, transform .12s ease; }
         .gear:hover { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); }
@@ -9957,7 +9966,7 @@ function dayCurveAt(at = Date.now()) {
         .panel[data-state="running"][data-focus="on"] .focus-strip { display: flex; }
         .panel[data-state="running"][data-focus="on"] .account-card { display: none; }
         .focus-strip b { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 9.5px/1.2 var(--font-ui); color: var(--ink-2); }
-        .focus-state { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--acc); color: #06110b; font: 800 8px/1 var(--font-ui); letter-spacing: .1em; }
+        .focus-state { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--acc); color: var(--ink-on-acc); font: 800 8px/1 var(--font-ui); letter-spacing: .1em; }
         .sr-only { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
         .rhythm { margin: 5px 2px 2px; }

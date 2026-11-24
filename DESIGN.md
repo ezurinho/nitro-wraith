@@ -31,11 +31,13 @@ Constraints that outrank taste:
 
 `src/79-panel-css.js`, the `.panel` block, is the only place a token is
 declared: `--acc`, `--acc-2`, `--ink`, `--dim`, `--dim-2`, `--warn`, `--bad`,
-`--info`, `--card`, `--bg-hi`, `--bg-lo`, `--font-ui`, `--font-mono`.
-Theme blocks override accents and background only. Rules use `var(--…)` or
-`color-mix()`; they do not write a font stack or a new colour. Scrim whites and
-blacks (`rgba(255,255,255,…)`, `rgba(0,0,0,…)`) are depth layers over a themed
-background and are the one accepted exception.
+`--info`, `--ink-warn`, `--ink-warn-hi`, `--ink-bad`, `--ink-on-acc`,
+`--medal-1`/`2`/`3`, `--card`, `--bg-hi`, `--bg-lo`, `--font-ui`,
+`--font-mono`. State inks are `color-mix()` over `--ink`, so each theme tints
+them. Theme blocks override accents and background only. Rules use `var(--…)`
+or an inline `color-mix()`; they do not write a font stack or a hex colour.
+Scrim whites and blacks (`rgba(255,255,255,…)`, `rgba(0,0,0,…)`) are depth
+layers over a themed background and are the accepted exception.
 
 ## Type
 
@@ -72,12 +74,21 @@ applicable and are listed as such, not silently ignored.
 | F1 tokens for colours and fonts | Enforced: exactly one UI stack and one mono stack in the sheet, both tokens; `live.test.js` scans the built CSS |
 | F2 no `transition: all`, no width/height/top/left animation | Enforced: bars use `scaleX`; `live.test.js` scans the CSS |
 | F3 no italic word inside a roman heading | Enforced by review |
-| F6 `:focus-visible` everywhere | Enforced by `live.test.js` interaction checks |
+| F6 `:focus-visible` everywhere | Enforced: every control styles an instant outline, `live.test.js` checks the sheet carries it, and the browser suite keeps keyboard focus after a control action |
 | F7 reduced-motion fallback | Enforced: media query at the top of the panel sheet |
 | F8 no invented metrics | Enforced by product rule: all values come from the session |
 | F12–F14 hero / word count / container | Not applicable: no landing page |
 | F15 CSS stamp | Not applicable: generated panel sheet, not an exported page |
 | F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (400 checks + visual baselines) |
+
+### Floor audit
+
+`sloplint --scope component --tier floor` runs against the built panel sheet
+(extract the `panelCssCache` string to a `.css` file after `npm run build`).
+After the token pass the report carries four kinds of findings, all covered by
+the waivers below: the RGB theme gradients (`2a`), the CSS stamp (`20`), the
+token/theme declarations and scrims (`48`), and tracked-caps labels (`67`).
+Anything else in the report is a bug, not a style.
 
 ### Waivers on the record
 
@@ -96,5 +107,20 @@ applicable and are listed as such, not silently ignored.
 4. **F4, `100vw`.** The panel uses `max-width: calc(100vw - 32px)` (and wider
    insets on phones) so the overlay fits small screens. The panel never owns the
    page scroll, so there is no page-level overflow to clip.
+5. **Hallmark 2a, purple-to-blue gradient.** The RGB theme is a live rainbow
+   (`#ff5f6d → #ffc371 → #47ffa1 → #5ad1ff → #b06bff`) on the accent ring, the
+   wordmark and the theme swatch. It is the one theme the player picks to see
+   hue cycling; the moving hue is the feature. A monochrome alternative exists
+   (Carbon, Aurora), so the tell is opt-in and never the default.
+6. **Hallmark 48, colour literals.** `sloplint` counts the `.panel` token
+   declarations, the six theme accent overrides, the RGB gradient stops, binary
+   option lists (`<option>` keeps the native widget in Chromium) and the
+   `rgba` scrims/shadows as literals. Those are exactly the declaration sites:
+   the tokens exist so every rule can use `var(--…)`. Rules outside the token
+   and theme blocks carry no hex.
+7. **Hallmark 20, CSS stamp.** The sheet lives inside the userscript and is
+   injected into a shadow root; there is no exported page to stamp.
+8. **Hallmark 67, tracked caps.** Covered by waiver 1 (F9): labels only, a
+   telemetry convention, never body copy.
 
 New waivers go here, one line of reason each. A gate is never waived silently.
