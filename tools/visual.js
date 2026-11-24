@@ -39,7 +39,7 @@ function fail(message) {
 }
 
 // `--only <texto>` limita la orden a las capturas cuyo id, archivo o etiqueta
-// contenga ese texto. Sin el, `accept` sobrescribe las quince baselines de una
+// contenga ese texto. Sin el, `accept` sobrescribe todas las baselines de una
 // vez y un cambio de layout arrastra consigo las regresiones que vinieron con
 // el: aceptar `log` no tiene por que aceptar `garage`.
 function onlyFilter() {
@@ -78,6 +78,9 @@ function config() {
       ? Math.max(0, Math.min(255, Number(value.channelTolerance)))
       : 12,
     viewport: value.viewport || null,
+    // Segundo ancho para la misma matriz: el panel recorta su ancho a
+    // `100vw - 32px`, asi que solo un viewport estrecho ejercita el ajuste.
+    narrow: value.narrow && Number(value.narrow.width) > 0 ? value.narrow : null,
     views: Array.isArray(value.views)
       ? value.views.filter((view) => typeof view === 'string' && view.trim())
       : [],
@@ -88,8 +91,8 @@ function config() {
 }
 
 // Una captura por tema de Live y una por vista/estado fuera de Live. El nombre
-// del archivo es la identidad de la baseline: `theme-carbon.png` o
-// `view-tune-idle.png`.
+// del archivo es la identidad de la baseline: `theme-carbon.png`,
+// `view-tune-idle.png` o, en el ancho estrecho, `narrow-view-tune-idle.png`.
 function shotList(cfg) {
   const shots = cfg.themes.map((theme) => ({
     id: `theme-${theme}`,
@@ -101,6 +104,21 @@ function shotList(cfg) {
     for (const state of cfg.states) {
       const id = `view-${view}-${state}`;
       shots.push({ id, file: `${id}.png`, label: `${view} · ${state}`, view, state });
+    }
+  }
+  if (cfg.narrow) {
+    for (const view of cfg.views) {
+      for (const state of cfg.states) {
+        const id = `narrow-view-${view}-${state}`;
+        shots.push({
+          id,
+          file: `${id}.png`,
+          label: `${view} · ${state} · narrow`,
+          view,
+          state,
+          variant: 'narrow',
+        });
+      }
     }
   }
   return shots;
@@ -335,6 +353,7 @@ function comparePair(baselineFile, currentFile, thresholds) {
 function capture() {
   fs.rmSync(CURRENT_DIR, { recursive: true, force: true });
   fs.mkdirSync(CURRENT_DIR, { recursive: true });
+  const cfg = config();
   console.log('visual: capturing Live themes plus Tune, Log and the garage with the harness...');
   const result = spawnSync(process.execPath, [path.join(ROOT, 'tests', 'live', 'run.js')], {
     cwd: ROOT,
@@ -343,6 +362,9 @@ function capture() {
       ...process.env,
       SHOT_DIR: CURRENT_DIR,
       VISUAL_CAPTURE: '1',
+      // El ancho estrecho viaja como JSON: el harness y el config no pueden
+      // separarse sin que se note.
+      ...(cfg.narrow ? { VISUAL_NARROW: JSON.stringify(cfg.narrow) } : {}),
     },
   });
   if (result.error) fail(result.error.message);
@@ -485,7 +507,7 @@ function accept() {
   // poda nada: lo que no se acepto sigue siendo baseline valida.
   if (!only) {
     for (const file of fs.readdirSync(BASELINE_DIR)) {
-      if (/^(theme|view)-.*\.png$/.test(file) && !expected.has(file)) {
+      if (/^(theme|view|narrow-view)-.*\.png$/.test(file) && !expected.has(file)) {
         fs.rmSync(path.join(BASELINE_DIR, file), { force: true });
       }
     }
@@ -513,6 +535,7 @@ function accept() {
     capturedAt: new Date().toISOString(),
     engine: fingerprint.engine || null,
     viewport: fingerprint.viewport || cfg.viewport,
+    narrow: cfg.narrow,
     views: cfg.views,
     states: cfg.states,
     thresholds: {

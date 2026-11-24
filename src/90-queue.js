@@ -2180,7 +2180,7 @@
           .p[data-theme="rgb"] {
             --nt-hue: 0;
             --nt-angle: 0deg;
-            --acc: hsl(var(--nt-hue) 92% 63%);
+            --acc: hsl(var(--nt-hue) 92% 72%);
             --acc-2: hsl(calc(var(--nt-hue) + 70) 94% 76%);
             --ink: #f6f7ff;
             --ink-2: #d9dcf0;

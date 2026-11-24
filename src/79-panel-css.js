@@ -149,11 +149,14 @@
         }
         /* RGB: el acento es un tono HSL registrado con @property, asi que el
            navegador puede interpolarlo. El borde conico y el titulo giran con
-           el; sin @property se queda en rojo fijo, que sigue siendo legible. */
+           el; sin @property se queda en rojo fijo, que sigue siendo legible.
+           La luminosidad es 72%, no 63%: el texto de acento mide 9-10 px y
+           al pasar por el azul caia a 3.37:1 sobre las tarjetas. A 72% el
+           peor tono mide 4.9:1 y el ciclo sigue vivo de punta a punta. */
         .panel[data-theme="rgb"] {
           --nt-hue: 0;
           --nt-angle: 0deg;
-          --acc: hsl(var(--nt-hue) 92% 63%);
+          --acc: hsl(var(--nt-hue) 92% 72%);
           --acc-2: hsl(calc(var(--nt-hue) + 70) 94% 76%);
           --ink: #f6f7ff;
           --ink-2: #d9dcf0;

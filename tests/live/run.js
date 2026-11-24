@@ -34,6 +34,18 @@ const SHOT_DIR = process.env.SHOT_DIR ? path.resolve(ROOT, process.env.SHOT_DIR)
 // La regresion visual necesita una foto reproducible: reloj congelado y sin
 // animaciones. El check normal no activa nada de esto.
 const VISUAL_CAPTURE = process.env.VISUAL_CAPTURE === '1';
+// Segundo ancho de captura (300 px utiles por defecto). Llega como JSON desde
+// `tools/visual.js` para que el config sea la unica fuente.
+const VISUAL_NARROW = (() => {
+  if (!VISUAL_CAPTURE || !process.env.VISUAL_NARROW) return null;
+  try {
+    const value = JSON.parse(process.env.VISUAL_NARROW);
+    return value && Number(value.width) > 0 ? value : null;
+  } catch {
+    bail('VISUAL_NARROW is not valid JSON');
+    return null;
+  }
+})();
 // Mediodia local del 18/11/2026: la fecha congelada sigue siendo la misma en
 // cualquier zona horaria y las etiquetas de "hoy" no dependen del dia real.
 const VISUAL_FROZEN_AT = new Date(2026, 10, 18, 12, 0, 0).getTime();
@@ -283,7 +295,7 @@ async function captureShot(cdp, file, clip) {
 // que necesita: el reloj congelado, el directorio de fotos y tres ayudas.
 const capture = createCapture({
   fs, os, path, sleep, waitFor, captureShot,
-  SCRIPT, SCRIPT_VERSION, SHOT_DIR, VISUAL_CAPTURE, VISUAL_FROZEN_AT,
+  SCRIPT, SCRIPT_VERSION, SHOT_DIR, VISUAL_CAPTURE, VISUAL_FROZEN_AT, VISUAL_NARROW,
 });
 const capturePanelThemesFor = (cdp, appUrl) => capture.capturePanelThemes(cdp, appUrl);
 
@@ -404,6 +416,100 @@ const READ = `(() => {
     seasonFill: q('[data-field="seasonFill"]') ? q('[data-field="seasonFill"]').style.transform : null,
   };
 })()`;
+
+// Auditoria de contraste sobre los colores COMPUTADOS de cada tema, con la
+// formula WCAG 2.1 (luminancia relativa). Se resuelve cada token pintandolo en
+// un elemento oculto, asi que `color-mix`, `hsl()` y las variables anidadas
+// llegan ya en rgb(); el fondo se compone como lo pinta el navegador: bg-lo
+// sobre blanco (la pagina real puede ser clara, ese es el peor caso), bg-hi
+// encima y, en el panel grande, el relleno de tarjeta (--card). El tema RGB
+// se fija en el tono azul, donde su giro mide menos contraste.
+function auditTokensScript({ windowExpr, panelExpr, themes, tokens, cardToken, inkOnAcc }) {
+  return `(() => {
+  const w = ${windowExpr};
+  const doc = w.document;
+  const panel = ${panelExpr};
+  if (!panel) return { missing: true };
+  const probe = doc.createElement('span');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:absolute;left:-9999px;top:0;width:0;height:0';
+  panel.appendChild(probe);
+
+  const read = (expr) => {
+    probe.style.color = '';
+    probe.style.color = expr;
+    return w.getComputedStyle(probe).color;
+  };
+  const parse = (value) => {
+    const match = /^rgba?\\(([^)]+)\\)$/.exec(String(value).trim());
+    if (!match) return null;
+    const parts = match[1].split(/[\\s,/]+/).filter(Boolean).map(Number);
+    if (parts.length < 3 || parts.some((part) => !Number.isFinite(part))) return null;
+    return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+  };
+  const over = (front, back) => ({
+    r: front.r * front.a + back.r * (1 - front.a),
+    g: front.g * front.a + back.g * (1 - front.a),
+    b: front.b * front.a + back.b * (1 - front.a),
+    a: 1,
+  });
+  const toLinear = (value) => {
+    const c = value / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const luminance = (colour) => 0.2126 * toLinear(colour.r)
+    + 0.7152 * toLinear(colour.g) + 0.0722 * toLinear(colour.b);
+  const ratio = (one, two) => {
+    const a = luminance(one);
+    const b = luminance(two);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  };
+  const round = (value) => Math.round(value * 100) / 100;
+
+  const white = { r: 255, g: 255, b: 255, a: 1 };
+  const sheet = over(parse(read('var(--bg-hi)')), over(parse(read('var(--bg-lo)')), white));
+  const card = ${cardToken ? `over(parse(read('var(--card)')), sheet)` : 'sheet'};
+  const themeNames = ${JSON.stringify(themes)};
+  const tokenNames = ${JSON.stringify(tokens)};
+  const previous = panel.dataset.theme;
+  const rows = [];
+
+  for (const theme of themeNames) {
+    panel.dataset.theme = theme;
+    if (theme === 'rgb') {
+      panel.style.setProperty('animation', 'none', 'important');
+      panel.style.setProperty('--nt-hue', '240', 'important');
+    }
+    for (const token of tokenNames) {
+      const colour = parse(read('var(' + token + ')'));
+      if (!colour) {
+        rows.push({ theme, token, error: read('var(' + token + ')') });
+        continue;
+      }
+      rows.push({ theme, token, surface: 'sheet', ratio: round(ratio(colour, sheet)) });
+      if (card !== sheet) {
+        rows.push({ theme, token, surface: 'card', ratio: round(ratio(colour, card)) });
+      }
+    }
+    ${inkOnAcc ? `const onAccent = parse(read('var(--ink-on-acc)'));
+    const accent = parse(read('var(--acc)'));
+    rows.push({
+      theme, token: '--ink-on-acc', surface: '--acc',
+      ratio: onAccent && accent ? round(ratio(onAccent, accent)) : null,
+    });` : ''}
+  }
+
+  panel.dataset.theme = previous || 'carbon';
+  panel.style.removeProperty('animation');
+  panel.style.removeProperty('--nt-hue');
+  probe.remove();
+  return { rows };
+})()`;
+}
+
+function contrastFailures(rows) {
+  return rows.filter((row) => !(row.ratio >= 4.5));
+}
 
 async function runChecks(cdp, devtoolsPort, appUrl) {
   const results = [];
@@ -776,6 +882,24 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('every theme resolves its own accent and background',
     new Set(themeVars.map((theme) => theme.acc)).size === 6
       && themeVars.every((theme) => theme.acc && theme.bg), themeVars);
+
+  // AA sobre el fondo propio y sobre el relleno de tarjeta, en los seis temas.
+  const panelContrast = await cdp.evaluate(auditTokensScript({
+    windowExpr: `document.querySelector('iframe').contentWindow`,
+    panelExpr: `w.document.getElementById('nt-autotyper-panel').shadowRoot.querySelector('.panel')`,
+    themes: ['carbon', 'aurora', 'sunset', 'ice', 'violet', 'rgb'],
+    tokens: ['--ink', '--ink-2', '--dim', '--dim-2', '--acc', '--acc-2'],
+    cardToken: true,
+    inkOnAcc: true,
+  }));
+  const weakPanel = contrastFailures(panelContrast.rows || []);
+  check('every theme keeps the panel text above WCAG AA contrast',
+    !panelContrast.missing && (panelContrast.rows || []).length === 78
+      && weakPanel.length === 0,
+    weakPanel.length ? weakPanel : {
+      rows: (panelContrast.rows || []).length,
+      worst: (panelContrast.rows || []).reduce((worst, row) => (row.ratio < worst.ratio ? row : worst)),
+    });
 
   await cdp.send('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
@@ -5001,6 +5125,25 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageControl.label.toLowerCase() === garageControl.expected
         && garageControl.tag === 'BUTTON' && garageControl.tab >= 0
         && new RegExp(garageControl.expected, 'i').test(garageControl.aria || ''), garageControl);
+
+    // El garaje repite la paleta a mano (otro shadow root), asi que se audita
+    // aparte: un tema puede estar bien en el panel grande y roto aqui.
+    const garageContrast = await cdp.evaluate(auditTokensScript({
+      windowExpr: 'window',
+      panelExpr: `document.getElementById('nt-queue-panel').shadowRoot.querySelector('.p')`,
+      themes: ['carbon', 'aurora', 'sunset', 'ice', 'violet', 'rgb'],
+      tokens: ['--ink', '--ink-2', '--dim', '--dim-2', '--acc', '--acc-2'],
+      cardToken: false,
+      inkOnAcc: false,
+    }));
+    const weakGarage = contrastFailures(garageContrast.rows || []);
+    check('the garage sheet keeps the same text contrast in every theme',
+      !garageContrast.missing && (garageContrast.rows || []).length === 36
+        && weakGarage.length === 0,
+      weakGarage.length ? weakGarage : {
+        rows: (garageContrast.rows || []).length,
+        worst: (garageContrast.rows || []).reduce((worst, row) => (row.ratio < worst.ratio ? row : worst)),
+      });
 
     const garageRgbPolicy = await cdp.evaluate(`(() => {
       const host = document.getElementById('nt-queue-panel');

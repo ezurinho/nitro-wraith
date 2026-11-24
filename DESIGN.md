@@ -61,7 +61,8 @@ the mono stack when they change at 4 Hz so digits do not reflow.
 ## Accessibility floor
 
 - Small text ≥ 4.5:1 against its own background in all six themes
-  (`tests/live/live.test.js` asserts it from the real palettes).
+  (`tests/live/live.test.js` probes the computed colours of the race panel and
+  the garage sheet, composes the real surfaces and pins RGB to its worst hue).
 - `:focus-visible` is instant and visible on every control; no focus traps.
 - State is never colour-only: the dot/chip carries a label and the health card
   spells state out in text.
@@ -83,7 +84,7 @@ applicable and are listed as such, not silently ignored.
 | F8 no invented metrics | Enforced by product rule: all values come from the session |
 | F12–F14 hero / word count / container | Not applicable: no landing page |
 | F15 CSS stamp | Not applicable: generated panel sheet, not an exported page |
-| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (400 checks + visual baselines) |
+| F16 `sloplint --render` | Not applicable to a shadow DOM overlay; the browser suite plays the same role (402 checks + 24 visual baselines) |
 
 ### Floor audit
 

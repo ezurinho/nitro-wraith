@@ -260,10 +260,13 @@ npm run visual      # capture Live themes + Tune/Log/garage states and compare
 ### Visual regression
 
 `npm run visual` drives the harness through the same seeded state and captures
-15 shots at 520×1200 (2×): the six Live themes plus Tune, Log and the garage
-panel in three states (waiting, racing and stopped). Tune and Log are captured
+24 shots: fifteen at 520×1200 (2×) — the six Live themes plus Tune, Log and the
+garage panel in three states (waiting, racing and stopped) — and nine narrow
+views that shrink the race frame to 300 px so the panel's `100vw - 32px`
+clamp and its wrapped column are exercised too. Tune and Log are captured
 with the whole card stack — the visual run expands the panel's internal 62vh
-scroll — so a layout change below the fold also fails. The PNGs are compared
+scroll and lifts the height cap — so a layout change below the fold also
+fails. The PNGs are compared
 against [`tests/visual/baselines/`](tests/visual/baselines/) pixel by pixel
 with the limits in [`tests/visual/config.json`](tests/visual/config.json): a
 channel tolerance of 12/255 absorbs antialiasing, and a shot fails when more
@@ -272,6 +275,13 @@ and `states` in that file. Captures freeze the clock and disable animations so
 the result is reproducible; a failing run writes `diff-<shot>.png` (for example
 `diff-view-tune-idle.png`) with the changed pixels in red next to `report.json`
 in `tests/visual/current/`.
+
+Contrast is a check, not a promise: the browser suite probes the computed
+colour of every text token in all six themes, composes the real surfaces
+(`--bg-lo`/`--bg-hi`/`--card`) and fails below WCAG AA (4.5:1) for both the
+race panel and the garage sheet. The RGB theme is pinned to its worst hue
+during the audit, because the animated accent must stay legible across the
+whole cycle.
 
 After an intentional UI change, review the new images and save them with
 `npm run visual:accept`. Baselines are tied to a browser and platform because
