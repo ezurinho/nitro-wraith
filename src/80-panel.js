@@ -3547,9 +3547,144 @@
     updatePanel();
   }
 
+  let wraithApiSignature = '';
+  const wraithApiListeners = new Set();
+
+  function wraithStateSnapshot() {
+    const tier = paceRange();
+    return {
+      app: 'nitro-wraith',
+      version: VERSION,
+      channel: CHANNEL,
+      session: {
+        running: session.running,
+        typing: session.typing,
+        paused: session.paused,
+        stopped: session.stopped,
+        races: session.races,
+        dqStreak: session.dqStreak,
+        standby: standbyActive(),
+      },
+      pace: {
+        profile: paceProfile,
+        min: tier.min,
+        max: tier.max,
+        target: profile.targetWPM,
+        accuracyGoal: Number(profile.accuracyGoal.toFixed(1)),
+      },
+      live: {
+        wpm: session.chars > 0 ? Number(wpmNow().toFixed(1)) : null,
+        accuracy: session.chars > 0 ? Number(accuracyNow().toFixed(1)) : null,
+        cleanStreak: session.cleanStreak,
+      },
+      queue: {
+        afk: CONFIG.queue.backgroundFarm === true,
+        keepAlive: keepAliveInfo().label,
+        breakUntil: session.breakUntil,
+      },
+      prefs: readPrefs(),
+    };
+  }
+
+  function getWraithState() {
+    return { ...wraithStateSnapshot(), at: Date.now() };
+  }
+
+  function subscribeWraithState(listener) {
+    if (typeof listener !== 'function') throw new TypeError('NITRO WRAITH listener must be a function');
+    wraithApiListeners.add(listener);
+    try {
+      listener(getWraithState());
+    } catch {
+      /* una integracion externa no rompe el latido del panel */
+    }
+    return () => wraithApiListeners.delete(listener);
+  }
+
+  function publishWraithState() {
+    const snapshot = wraithStateSnapshot();
+    const signature = JSON.stringify(snapshot);
+    if (signature === wraithApiSignature) return;
+    wraithApiSignature = signature;
+    const detail = { ...snapshot, at: Date.now() };
+    for (const listener of wraithApiListeners) {
+      try {
+        listener(detail);
+      } catch {
+        /* el siguiente latido sigue aunque falle un suscriptor */
+      }
+    }
+    const targets = new Set([window]);
+    try {
+      if (window.top !== window) targets.add(window.top);
+    } catch {
+      /* marco inaccesible: la API local sigue disponible en esta ventana */
+    }
+    for (const target of targets) {
+      try {
+        target.dispatchEvent(new target.CustomEvent('nitro-wraith:state', { detail }));
+      } catch {
+        /* un destino externo no puede bloquear la publicacion local */
+      }
+    }
+  }
+
+  const wraithApi = Object.freeze({
+    apiVersion: 1,
+    version: VERSION,
+    getState: getWraithState,
+    getPrefs: () => ({ ...readPrefs() }),
+    subscribe: subscribeWraithState,
+  });
+  window.NitroWraith = wraithApi;
+  try {
+    if (window.top !== window) {
+      const top = window.top;
+      Object.defineProperty(top, '__ntaWraithFrameApi', {
+        value: wraithApi,
+        configurable: true,
+        writable: true,
+      });
+      const current = () => top.__ntaWraithFrameApi || wraithApi;
+      const existing = top.NitroWraith;
+      if (!existing || existing.apiVersion !== 1 || existing.__wraithFacade !== true) {
+        // La fachada superior no se reemplaza al recargar el marco: conserva los
+        // suscriptores y delega siempre en la instancia viva mas reciente.
+        const facade = {
+          apiVersion: 1,
+          get version() { return current().version; },
+          getState() { return current().getState(); },
+          getPrefs() { return current().getPrefs(); },
+          subscribe(listener) {
+            if (typeof listener !== 'function') throw new TypeError('NITRO WRAITH listener must be a function');
+            const handler = (event) => {
+              try {
+                listener(event.detail);
+              } catch {
+                /* una integracion externa no rompe el latido del panel */
+              }
+            };
+            top.addEventListener('nitro-wraith:state', handler);
+            try {
+              listener(facade.getState());
+            } catch {
+              /* el snapshot inicial es informativo */
+            }
+            return () => top.removeEventListener('nitro-wraith:state', handler);
+          },
+        };
+        Object.defineProperty(facade, '__wraithFacade', { value: true });
+        top.NitroWraith = Object.freeze(facade);
+      }
+    }
+  } catch {
+    /* otro origen: la API local sigue disponible en el marco */
+  }
+
   // Contrato con la ventana de arriba: un resumen pequeño del estado, para que
   // la cola no pulse "Race Again" mientras el tipador esta trabajando.
   function publishState() {
+    publishWraithState();
     try {
       if (window.top === window) return;
       window.top.__ntaFrame = {

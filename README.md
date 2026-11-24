@@ -16,6 +16,7 @@
 
 <p align="center">
   <a href="https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js"><img src="https://img.shields.io/badge/install-userscript-5CF2A0?style=flat-square&labelColor=0B1711" alt="Install NITRO WRAITH"></a>
+  <a href="https://greasyfork.org/en/scripts/607114-nitro-wraith"><img src="https://img.shields.io/badge/Greasy%20Fork-install-67B7DC?style=flat-square&labelColor=0B1711" alt="Install NITRO WRAITH from Greasy Fork"></a>
   <a href="https://github.com/ezurinho/nitro-wraith/releases/latest"><img src="https://img.shields.io/github/v/release/ezurinho/nitro-wraith?style=flat-square&label=release&labelColor=0B1711&color=62E2D0" alt="Latest release"></a>
   <a href="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml"><img src="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml/badge.svg?branch=main" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-FFC66D?style=flat-square&labelColor=0B1711" alt="MIT license"></a>
@@ -159,7 +160,7 @@ blocks and the AFK guard.
 ## Install
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/).
-2. Open the [install link](https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js) and confirm.
+2. Open the [Greasy Fork listing](https://greasyfork.org/en/scripts/607114-nitro-wraith) or the [GitHub install link](https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js) and confirm.
 3. Sign in at [nitrotype.com](https://www.nitrotype.com/).
 4. Reload the page. The panel appears in the bottom-right corner.
 
@@ -189,6 +190,29 @@ Manual install: create a new Tampermonkey script and paste
 | <kbd>Alt</kbd> + <kbd>H</kbd> | Print closed sessions to the console |
 
 In the garage, **Resume** does the same as <kbd>Alt</kbd> + <kbd>A</kbd>.
+
+## Local API
+
+Other same-origin userscripts can read NITRO WRAITH without remote code or
+credentials. The top-level `window.NitroWraith` facade survives race-frame
+reloads and delegates to the newest live instance.
+
+```js
+const wraith = window.NitroWraith;
+const state = wraith.getState();
+const prefs = wraith.getPrefs();
+const unsubscribe = wraith.subscribe((next) => {
+  console.log(next.session.typing, next.pace.target, next.queue.afk);
+});
+```
+
+The frozen API exposes only `apiVersion`, `version`, `getState()`, `getPrefs()`
+and `subscribe(fn)`. Snapshots contain session flags, pace, live WPM/accuracy,
+queue state and non-secret preferences; they never include `player_token`,
+passwords or account identifiers. `subscribe()` immediately calls the listener
+with the current snapshot, then only when the snapshot changes. It returns an
+unsubscribe function. The equivalent DOM event is `nitro-wraith:state` on the
+top-level window.
 
 ## Safety
 
