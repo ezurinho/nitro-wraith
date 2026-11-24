@@ -94,8 +94,10 @@ esta hora frente al de la tanda, y el motivo del gate activo si lo hay.
 
 ## Fase 5 · infraestructura
 
-1. **CI de `npm run visual` en ubuntu** con baselines generadas ahí (hoy las 15 capturas se revisan a
-   mano; una regresión visual puede pasar un día entero sin que nadie la vea).
+1. **CI de `npm run visual`** — cerrado: corre en `windows.yml`, el unico runner
+   que resuelve las pilas del sistema igual que la maquina de capturas; Ubuntu
+   mueve las quince capturas. Un cambio de layout o de tema falla en el PR y las
+   capturas suben como artefacto.
 2. **ESLint real**: las tres regex del gate no ven `no-undef`, que es el error que más veces ha roto
    el build en este repo. Requiere aceptar un `devDependency`.
 3. **`90-queue.js`**: quedan ~115 funciones con cierres. La herramienta (`tools/panel-map.js

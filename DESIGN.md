@@ -29,15 +29,19 @@ Constraints that outrank taste:
 
 ## Tokens
 
-`src/79-panel-css.js`, the `.panel` block, is the only place a token is
-declared: `--acc`, `--acc-2`, `--ink`, `--dim`, `--dim-2`, `--warn`, `--bad`,
-`--info`, `--ink-warn`, `--ink-warn-hi`, `--ink-bad`, `--ink-on-acc`,
-`--medal-1`/`2`/`3`, `--card`, `--bg-hi`, `--bg-lo`, `--font-ui`,
-`--font-mono`. State inks are `color-mix()` over `--ink`, so each theme tints
-them. Theme blocks override accents and background only. Rules use `var(--…)`
-or an inline `color-mix()`; they do not write a font stack or a hex colour.
-Scrim whites and blacks (`rgba(255,255,255,…)`, `rgba(0,0,0,…)`) are depth
-layers over a themed background and are the accepted exception.
+Tokens are declared in exactly two places: the `.panel` block of
+`src/79-panel-css.js` (race panel) and the `.p` block of the garage sheet
+inside `src/90-queue.js`. The garage lives in its own shadow root, so it
+repeats the same names and values instead of inheriting them; the two blocks
+are kept in step by hand and both are audited. Names: `--acc`, `--acc-2`,
+`--ink`, `--dim`, `--dim-2`, `--warn`, `--bad`, `--info`, `--ink-warn`,
+`--ink-warn-hi`, `--ink-bad`, `--ink-on-acc`, `--medal-1`/`2`/`3`,
+`--card`, `--bg-hi`, `--bg-lo`, `--font-ui`, `--font-mono`. State inks are
+`color-mix()` over `--ink`, so each theme tints them. Theme blocks override
+accents and background only. Rules use `var(--…)` or an inline
+`color-mix()`; they do not write a font stack or a hex colour. Scrim whites
+and blacks (`rgba(255,255,255,…)`, `rgba(0,0,0,…)`) are depth layers over a
+themed background and are the accepted exception.
 
 ## Type
 
@@ -83,12 +87,12 @@ applicable and are listed as such, not silently ignored.
 
 ### Floor audit
 
-`sloplint --scope component --tier floor` runs against the built panel sheet
-(extract the `panelCssCache` string to a `.css` file after `npm run build`).
-After the token pass the report carries four kinds of findings, all covered by
-the waivers below: the RGB theme gradients (`2a`), the CSS stamp (`20`), the
-token/theme declarations and scrims (`48`), and tracked-caps labels (`67`).
-Anything else in the report is a bug, not a style.
+`sloplint --scope component --tier floor` runs against both built sheets
+(extract the `panelCssCache` string and the garage `<style>` to `.css` files
+after `npm run build`). After the token pass the reports carry four kinds of
+findings, all covered by the waivers below: the RGB theme gradients (`2a`),
+the CSS stamp (`20`), the token/theme declarations and scrims (`48`), and
+tracked-caps labels (`67`). Anything else in a report is a bug, not a style.
 
 ### Waivers on the record
 

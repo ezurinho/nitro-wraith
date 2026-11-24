@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "capturedAt": "2026-11-24T01:09:15.502Z",
+  "capturedAt": "2026-11-24T02:39:26.445Z",
   "engine": {
     "product": "Chrome/158.0.8127.37",
     "browser": "Chrome",
@@ -135,30 +135,30 @@
       }
     },
     "view-garage-idle.png": {
-      "sha256": "92f8b380054fb7430ce7239cd9ca579e35ba48059d165b0858b36813e9af5101",
+      "sha256": "e099abef2a94c5539e6c55fa73e4d825435ebee809fc60e9636bc4a53916fe45",
       "width": 656,
       "height": 1050,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.69",
+        "target": "191 · 98.7%"
       }
     },
     "view-garage-racing.png": {
-      "sha256": "a5973163573f3cbe87811ec5eb41eab6e5014446d9c8627b0b1ad4eed84311d8",
+      "sha256": "05a62865e5fa87013b264abe96b4978522cce9c4e9daa67088c67bea288121e6",
       "width": 656,
       "height": 1152,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.69",
+        "target": "191 · 98.7%"
       }
     },
     "view-garage-stopped.png": {
-      "sha256": "26457a20edb005f660c73bbf6aae9da7b7ed8619ea51fcd2624b540f0e999834",
+      "sha256": "cbab823f6615e6f5ef1e8d0ada53b18aeda8bfd4134714c3afa4fe2a1c4ab3d5",
       "width": 656,
       "height": 1240,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.69",
+        "target": "191 · 98.7%"
       }
     }
   }
