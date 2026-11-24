@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "capturedAt": "2026-11-24T02:39:26.445Z",
+  "capturedAt": "2026-11-24T03:11:45.018Z",
   "engine": {
     "product": "Chrome/158.0.8127.37",
     "browser": "Chrome",
@@ -27,138 +27,138 @@
   },
   "images": {
     "theme-carbon.png": {
-      "sha256": "6f8854b9ffde4bc556bad9f26ed60532f190cc4d981e5cc9d8d5b00cb375d015",
+      "sha256": "40f1286ef6f8f98b3138b7e74df1a4331a739bf9864489d056b326e9192829a6",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "theme-aurora.png": {
-      "sha256": "1f2afb3f2448f7c4e42c5b2dd5a5ff47a5145fad48803c31bb805770f811d9f3",
+      "sha256": "2c90625b2843d680d609a3aaff33e46827c6660012f5ef1e034125c0db5c6182",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "theme-sunset.png": {
-      "sha256": "4b6f76ff7d1b2a31cc2ec48194758461d4c8146f8e6f0eb03223a05d3384f1d5",
+      "sha256": "be40c83db1334caefaff09a962f0e2de371f23c36b9558cc9095a13e4cbda122",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "theme-ice.png": {
-      "sha256": "dcac1617e24e947115dc4c5a43b86c7fd97208ee956575ef64be905cd5c8de58",
+      "sha256": "88ee37c97cad189b77bbc0acf9222ec3f334c29839b3a036a916173c37893b87",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "theme-violet.png": {
-      "sha256": "fdf6773c3acc5dd1da95ba0f13f22bd79f6a2d0033acfdbe5130d11f363cb7e8",
+      "sha256": "17cab36d43566c48673e22747bd0ddeaa221353b453df4434299d77982d528b3",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "theme-rgb.png": {
-      "sha256": "b693379207c76925172723fd14e10c89de9166ca927ea40c07fe94a1e9f6ee10",
+      "sha256": "5f628cf58407f6dce01add6da39e0a44b597a2dce4d8c6ab2fa6291051a4fe5f",
       "width": 732,
       "height": 2274,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-tune-idle.png": {
-      "sha256": "26ef78ba5e0437683a4a3e1bb6ad195b5d95a0a8e1d80ece9ce034e51248c2eb",
+      "sha256": "bfb35e91fc20216af330a5ca853ba58e3873f2a230426c28eb61c2a2783f0ee8",
       "width": 732,
       "height": 2440,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-tune-racing.png": {
-      "sha256": "2cef07a873eedba0d92c4b9a2cc926539b1c1396bc5e81d583444474a1a4296a",
+      "sha256": "c3b8d1a22f8a552d1ab7a7887f57957a601bf795cfefd9c89cbb18778bd20708",
       "width": 732,
       "height": 2472,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-tune-stopped.png": {
-      "sha256": "3c950bc20f1d3fe720009026b3e7aab9be1fee05a14aaeab33e54dec47cc4f3e",
+      "sha256": "97cfa82690ad6119c7be6b70db1c08602f3aa3e63e8453649e2d53641da78c27",
       "width": 732,
       "height": 2504,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-log-idle.png": {
-      "sha256": "a571a3c1bf61fb6c5c52461cedf5431a166f65d5ecffc7cc141328b73b4c19ba",
+      "sha256": "8f2342d316097a1d767edcd592d895e9bb4b951223acfcd68dc3f760f402a4c7",
       "width": 732,
       "height": 2536,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-log-racing.png": {
-      "sha256": "722a83151597f8e32bbf6ed7edd020d9c3bed11ab7fc93811452c69fb46aa932",
+      "sha256": "2e719c91ef5d5495b7eb6d3fc767c91bdc4a66fda06082e980db29ecffb82b8a",
       "width": 732,
       "height": 2568,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-log-stopped.png": {
-      "sha256": "705fcb59f9d20613c174dc9a07bc2cc2f63e362673322866a61e6425d25bd552",
+      "sha256": "dcfb7b11ebfa71c703e916e23a3ab5d51aa4dcf60b831b0b894b3ee4d09c0ee6",
       "width": 732,
       "height": 2598,
       "state": {
-        "version": "8.14.66",
-        "target": "202 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-garage-idle.png": {
-      "sha256": "e099abef2a94c5539e6c55fa73e4d825435ebee809fc60e9636bc4a53916fe45",
+      "sha256": "76711c982e4f01ed1182852621f53be9cf3e3f2b6bcb4555c6b64c689c871ef6",
       "width": 656,
       "height": 1050,
       "state": {
-        "version": "8.14.69",
-        "target": "191 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-garage-racing.png": {
-      "sha256": "05a62865e5fa87013b264abe96b4978522cce9c4e9daa67088c67bea288121e6",
+      "sha256": "2eef9e5e217b1bde40899c9a577201fb5658d1249d3adb29a1769f7ff3e34145",
       "width": 656,
       "height": 1152,
       "state": {
-        "version": "8.14.69",
-        "target": "191 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     },
     "view-garage-stopped.png": {
-      "sha256": "cbab823f6615e6f5ef1e8d0ada53b18aeda8bfd4134714c3afa4fe2a1c4ab3d5",
+      "sha256": "f5bb250bccfbcf32865821c7e61384d326579b2ff404db3a0c03d6ab863cd457",
       "width": 656,
       "height": 1240,
       "state": {
-        "version": "8.14.69",
-        "target": "191 · 98.7%"
+        "version": "8.14.70",
+        "target": "199 · 98.7%"
       }
     }
   }

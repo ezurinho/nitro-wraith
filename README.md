@@ -60,7 +60,7 @@ stats, and shows why it is waiting.
 ## The panel
 
 <p align="center">
-  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: 107.0 WPM, 98.7% accuracy, an AUTO pace badge with 110 target and 230 top, season progress and session controls">
+  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: WPM and accuracy, the AUTO pace badge with target and top, season progress, last races and the session controls">
 </p>
 
 <p align="center"><sub>A harness capture with demo values. The real panel sits in the bottom-right corner of the game.</sub></p>

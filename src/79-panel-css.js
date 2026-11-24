@@ -231,12 +231,12 @@
            sigue dentro, asi que no se pierde el LED al cambiar el icono. */
         .mark { position: relative; flex: none; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; color: var(--acc); background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 13%, rgba(255, 255, 255, .04)), rgba(255, 255, 255, .015)); border: 1px solid var(--line-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 16px -9px var(--acc); }
         .mark svg { width: 18px; height: 18px; display: block; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 55%, transparent)); }
-        .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px; box-shadow: 0 0 0 2px var(--bg-hi), 0 0 7px color-mix(in srgb, var(--acc) 70%, transparent); }
+        .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px; box-shadow: 0 0 0 2px var(--bg-hi), 0 0 6px color-mix(in srgb, var(--acc) 70%, transparent); }
         .panel[data-state="running"] .mark .dot { animation: nt-pulse 1.7s ease-in-out infinite; }
         .panel[data-collapsed="true"] .mark { width: 23px; height: 23px; border-radius: 7px; }
-        .panel[data-state="running"] .dot { background: var(--acc); box-shadow: 0 0 0 3px var(--acc-dim), 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent); animation: nt-pulse 1.7s ease-in-out infinite; }
-        .panel[data-state="paused"] .dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 12px color-mix(in srgb, var(--warn) 60%, transparent); }
-        .panel[data-state="break"] .dot { background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 16%, transparent), 0 0 12px color-mix(in srgb, var(--info) 60%, transparent); }
+        .panel[data-state="running"] .dot { background: var(--acc); box-shadow: 0 0 0 3px var(--acc-dim), 0 0 9px color-mix(in srgb, var(--acc) 75%, transparent); animation: nt-pulse 1.7s ease-in-out infinite; }
+        .panel[data-state="paused"] .dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 9px color-mix(in srgb, var(--warn) 55%, transparent); }
+        .panel[data-state="break"] .dot { background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 16%, transparent), 0 0 9px color-mix(in srgb, var(--info) 55%, transparent); }
         @keyframes nt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 
         .brand { flex: 1 1 auto; min-width: 0; }
