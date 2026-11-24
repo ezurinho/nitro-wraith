@@ -5,8 +5,10 @@ name: windows
 # built artifact by content: a line-ending regression passes on Linux and breaks
 # on Windows. This job is the only place that path is exercised.
 #
-# It runs the offline gate only (`npm test`: build sync + tests/live/live.test.js)
-# so it needs no browser and finishes in well under a minute.
+# It runs the offline gate (`npm test`: build sync + tests/live/live.test.js)
+# and the visual suite. The baselines were captured on Windows with the same
+# system stacks, so this is the only runner where they compare like for like;
+# on ubuntu the font stack differs and every shot moves.
 
 on:
   push:
@@ -24,7 +26,7 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -45,3 +47,13 @@ jobs:
           }
       - name: Run the offline checks
         run: npm test
+      - name: Compare the panel against the visual baselines
+        run: npm run visual
+      - name: Upload the captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-current
+          path: tests/visual/current
+          if-no-files-found: warn
+          retention-days: 7
