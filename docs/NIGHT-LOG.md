@@ -11,6 +11,26 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 23:25 · review directo · ESLint real y el garaje que no se repintaba
+
+- Pedido directo del dueno: seguir mejorando, review, nota, deep research y
+  comparacion. Nota **8.5/10 (A-)**: el lint cierra un fallo real, pero los dos
+  monolitos y el techo `isTrusted=false` no cambian. Informe actualizado en
+  `docs/review-2026-11-25.html` (568 checks: 418+86+31+9+24; comparacion con
+  UltraTypeBot, Greasyfork 536103/552185/571935 y NitroTyper.org sin cambios).
+- hecho (`8857b2f`): el garaje no se repintaba al volver de freeze/resume ni al
+  cambiar AFK. `paintGaragePanel` vive dentro de `runQueue`; las cuatro llamadas
+  de `80-panel`/`97-boot` estaban fuera de scope y el `typeof` las volvia no-ops
+  silenciosas. Puente `postMessage` + gancho, y check nuevo que dispara
+  freeze/resume reales en el iframe y exige `site block 10m`.
+- hecho (`5469ec8`): ESLint 10 con `no-undef` sobre el artefacto concatenado,
+  `tools/` y `tests/`; `npm test` lo corre. Es el gate que encontro el fallo.
+- verificacion: `npm test` 86/86 · `npm run check` 418/418 · `npm run
+  test:browsers` 9/9 (Firefox+WebKit) · `npm run visual` 24/24 · `npm run lint`
+  limpio.
+- siguiente: partir `80-panel`/`90-queue`; simulacion de raton medible. Fase 2
+  sigue bloqueada (exige juego real). Horizonte de la noche cerrado.
+
 ## 23:15 · review + nota + comparacion (pedido directo del dueno)
 
 - El dueno pidio review, nota, deep research y comparacion con otros. Verificado
