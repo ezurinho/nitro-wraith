@@ -11,6 +11,26 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 22:15 · fase 3 · vigilante de acreditacion (y rebase sobre 48 commits del autor)
+
+- El autor movio el repo entero: 48 commits, releases 8.14.63-8.14.83, PRs del
+  #1 al #27 (RGB Lab, Race Focus, Hallmark, CI de visual en windows.yml, Web
+  Lock, boot en Firefox/WebKit, superficie de integracion de solo lectura). El
+  horizonte de la noche pasada se cerro; se rebaseo el trabajo en vuelo sobre
+  todo eso, con un solo conflicto (PLAN.md, cerrado por el remoto) y re-gates
+  completos despues del rebase.
+- hecho (`486c373`): watchdog de acreditacion. Si el sitio deja de apuntar las
+  carreras del perfil (ghosting), el bot tecleaba toda la noche para nada. Cada
+  lectura del perfil compara `racesPlayed` contra las carreras locales cerradas:
+  crecimiento remoto = ok; N+ locales con remoto 0 (5 por defecto) = cuenta
+  abandonada, la cola para con `account not crediting races` y aviso en el
+  panel. Veredicto puro y probado: 378 -> 417 checks ahora pinchan la matriz
+  ok/unknown/stale y la parada.
+- verificacion: `npm test` 86/86 · `npm run check` 417/417 · `npm run visual`
+  24/24 (baselines nuevas del autor). Push `3bf805f..486c373` sin `--force`.
+- siguiente: el pedido del dueno es review + nota + deep research + comparacion
+  con otros proyectos. La fase 2 sigue bloqueada (exige navegador real).
+
 ## 01:40 · petición directa · cada cuenta su ritmo, y una interfaz legible
 
 - desvío de la pista: el dueño pidió que nada dependa de **su** cuenta, que todo
