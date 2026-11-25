@@ -1192,6 +1192,11 @@
   // El banco detiene esta copia sin tocar el teclado: el guardia debe soltar el
   // registro en el siguiente latido para que la otra copia tome el relevo.
   window.__ntaDebug.stop = () => panic('debug stop');
+  window.__ntaDebug.manualStop = () => panic('manual test stop', 0, true);
+  window.__ntaDebug.runAuto = () => runAuto();
+  window.__ntaDebug.autoRunning = () => Boolean(session.running);
+  window.__ntaDebug.autoStartAllowed = () => autoStartAllowed();
+  window.__ntaDebug.manualStopActive = () => manualStopActive();
   window.__ntaDebug.resume = () => resumeAuto();
   // Las pruebas que siembran el historico necesitan un pintado real sin
   // depender de que la pestana este visible o de la cache de 1.5 s.
@@ -1263,6 +1268,8 @@
     reached: limitReached(),
     reason: capReason(),
     timeLeft: timeLimitLeft(),
+    stopped: session.stopped,
+    running: session.running,
   });
 
   // Mueve los contadores de la tanda sin esperar a que lleguen carreras. Solo

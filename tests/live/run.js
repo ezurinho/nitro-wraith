@@ -2962,6 +2962,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   const s3 = await cdp.evaluate(READ);
   check('pageshow from bfcache resumes the bot', s3.foot === 'idle', s3.foot);
 
+  const priorStopMark = await cdp.evaluate(`(() => document.querySelector('iframe').contentWindow.localStorage.getItem('ntQueue:stoppedAt'))`);
   await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
@@ -2978,6 +2979,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   await sleep(900);
   const s5 = await cdp.evaluate(READ);
   check('a deliberate stop is not resumed by pageshow', s5.foot === 'waiting', s5.foot);
+  await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const previous = ${JSON.stringify(priorStopMark)};
+    if (previous === null) w.localStorage.removeItem('ntQueue:stoppedAt');
+    else w.localStorage.setItem('ntQueue:stoppedAt', previous);
+  })()`);
 
   // Comportamiento, no solo UI: se inyecta el popup que el juego pinta al
   // completar un challenge y se comprueba que el latido lo cierra solo.
@@ -7771,6 +7778,44 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     leaseRelease.ready === true && leaseRelease.kept === false && leaseRelease.afterOther !== null,
     leaseRelease);
 
+  const durableStop = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.manualStop || !d.runAuto || !d.autoRunning || !d.manualStopActive) return { has: false };
+    const keys = ['ntQueue:stoppedAt', 'ntQueue:lastStop', 'ntQueue:stopHistory'];
+    const saved = Object.fromEntries(keys.map((key) => [key, w.localStorage.getItem(key)]));
+    try {
+      d.patchSession({ stopped: false });
+      d.stop();
+      // El bucle real puede estar esperando la pantalla de resultados: se le da
+      // hasta 6 s para soltar el flag de carrera antes de probar el arranque.
+      for (let i = 0; i < 120 && d.autoRunning(); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      d.manualStop();
+      const marker = JSON.parse(w.localStorage.getItem('ntQueue:stoppedAt') || 'null');
+      await d.runAuto();
+      const state = d.session();
+      return {
+        has: true,
+        manual: marker && marker.manual === true,
+        stopped: state.stopped,
+        running: d.autoRunning(),
+        recent: d.manualStopActive(),
+      };
+    } finally {
+      d.patchSession({ stopped: false });
+      for (const key of keys) {
+        if (saved[key] === null) w.localStorage.removeItem(key);
+        else w.localStorage.setItem(key, saved[key]);
+      }
+    }
+  })()`, true);
+  check('a manual stop survives an auto-start attempt',
+    durableStop.has && durableStop.manual === true && durableStop.stopped === true
+      && durableStop.running === false && durableStop.recent === true,
+    durableStop);
+
   // El boton Stop del panel de carrera no se queda muerto: cuando el bot esta
   // parado pasa a Resume y hace lo mismo que Alt+A. Se prueba al final para
   // que el arranque de la tanda no interfiera con otras comprobaciones.
@@ -8001,8 +8046,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     return { hasHook: true, google, clever, facebook, manual, stale, broken, fallback, classify, reason };
   })()`);
     loginAlways = await loginTab.evaluate(`(async () => {
-      const d = window.__ntaDebug;
+      const w = window;
+      const d = w.__ntaDebug;
       if (!d.loginTick || !d.loginScheduled || !d.loginCancel || !d.loginReloadPlan || !d.loginReloadPending || !d.loginRetryPending) return { hasHook: false };
+      const previousStop = w.localStorage.getItem('ntQueue:stoppedAt');
 
       // Aisla de lo que el latido de la pagina haya podido programar ya.
       d.loginCancel();
@@ -8144,6 +8191,15 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const resumeStale = d.reloginResume();
       d.armedReset();
 
+      w.localStorage.setItem('ntQueue:stoppedAt', JSON.stringify({
+        at: Date.now(), reason: 'manual test stop', holdMs: 1, manual: true,
+      }));
+      sessionStorage.setItem('ntQueue:reloginPending', JSON.stringify({ at: Date.now() }));
+      const resumeStopped = d.reloginResume();
+      if (previousStop === null) w.localStorage.removeItem('ntQueue:stoppedAt');
+      else w.localStorage.setItem('ntQueue:stoppedAt', previousStop);
+      d.armedReset();
+
       d.loginCancel();
       box.remove();
       localStorage.removeItem('ntQueue:lastLogin');
@@ -8152,7 +8208,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       sessionStorage.removeItem('ntQueue:reloginAttempts');
       return { hasHook: true, manualScheduled, ssoScheduled, ssoClicks, timeout, clicks, reloadFree, reloadCapped, reloadExpired, reloadSpent,
         retry: { afterSpent: retryAfterSpent, afterWait: retryAfterWait, afterCancel: retryAfterCancel },
-        resume: { fresh: resumeFresh, stale: resumeStale }, recovery };
+        resume: { fresh: resumeFresh, stale: resumeStale, stopped: resumeStopped }, recovery };
     })()`, true);
   } finally {
     loginTab.close();
@@ -8272,6 +8328,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && loginAlways.resume.fresh.pending === false
       && loginAlways.resume.stale.armed === false,
     loginAlways.resume);
+  check('login: recovery never re-arms a queue stopped manually',
+    loginAlways.hasHook && loginAlways.resume
+      && loginAlways.resume.stopped.armed === false
+      && loginAlways.resume.stopped.pending === false,
+    loginAlways.resume.stopped);
   check('login reloads: a confirmed session clears the reload budget and attempts',
     loginAlways.hasHook && loginAlways.recovery
       && loginAlways.recovery.used === 0 && loginAlways.recovery.attempts === 0
