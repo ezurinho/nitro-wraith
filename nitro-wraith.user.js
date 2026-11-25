@@ -500,6 +500,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       everyRaces: 25,        // ademas, una lectura nueva cada 25 carreras
       halfWidth: 6,          // ancho maximo del rango; con 43 WPM da 37-49
       minWpm: 15,            // cuentas principiantes tambien son validas
+      // Watchdog de acreditacion: con cuantas carreras locales sin mover el
+      // racesPlayed del sitio se da por hecho que la cuenta dejo de acreditar.
+      creditMinRaces: 5,
       timeoutMs: 8000,
       // Un override manual manda sobre la media. 0 = automatico.
       customWpm: 0,
@@ -1345,6 +1348,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibratedRange: 'autoTyperCalibratedRange',
     calibratedAccuracy: 'autoTyperCalibratedAccuracy',
     wpmCeiling: 'autoTyperWpmCeiling',
+    accountCredit: 'autoTyperAccountCredit',
     calibrationAt: 'autoTyperCalibrationAt',
     calibrationVersion: 'autoTyperCalibrationVersion',
     calibrationAccount: 'autoTyperCalibrationAccount',
@@ -3020,6 +3024,84 @@ All of this only aims at believable statistics. It is your call and your risk.
   // seguidas, y una velocidad demasiado plana es justo lo que el anti-cheat del
   // sitio mira (docs/RESEARCH.md, seccion 1). El desvio se sortea por carrera
   // dentro de la banda calibrada, asi que la media de la tanda no se mueve.
+  /* ------------------------------------------------------------------------
+   * Watchdog de acreditacion
+   * ------------------------------------------------------------------------
+   * Una cuenta puede seguir tecleando mientras el sitio deja de apuntar sus
+   * carreras (ghosting): el bot no se entera, pierde la noche y encima sigue
+   * sumando DQ. El unico dato que lo delata es el `racesPlayed` del perfil
+   * contra las carreras que este navegador si cerro. El veredicto es puro para
+   * poder probarlo sin red; el efecto (parar) se aplica al leer el perfil.
+   */
+  function creditVerdict(prev, next, minLocal = CONFIG.calibration.creditMinRaces) {
+    const floor = Math.max(1, Number(minLocal) || 5);
+    if (!prev || !next) return { credited: null, remote: 0, local: 0 };
+    const remote = Number(next.races) - Number(prev.races);
+    const local = Number(next.dayRaces) - Number(prev.dayRaces);
+    if (!Number.isFinite(remote) || !Number.isFinite(local)) {
+      return { credited: null, remote: 0, local: 0 };
+    }
+    // Cualquier carrera nueva acreditada limpia la duda, aunque local y remoto
+    // no cuadren: el perfil no promete ir uno a uno (los eventos no cuentan).
+    if (remote > 0) return { credited: true, remote, local };
+    // Sin acreditar solo cuenta como prueba si el navegador cerro suficientes
+    // carreras: dos carreras perdidas son ruido de cache del perfil.
+    if (local >= floor) return { credited: false, remote, local };
+    return { credited: null, remote, local };
+  }
+
+  function readCreditMark() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(KEYS.accountCredit) || 'null');
+      return raw && typeof raw === 'object' ? raw : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeCreditMark(value) {
+    try {
+      localStorage.setItem(KEYS.accountCredit, JSON.stringify(value));
+    } catch {
+      /* almacenamiento bloqueado */
+    }
+  }
+
+  // Se llama en cada lectura del perfil que traiga racesPlayed. Devuelve el
+  // veredicto y, si toca, para la cola: quedarse corriendo sobre una cuenta que
+  // no acredita es la unica forma de perder una noche entera sin saberlo.
+  function noteAccountCredit(races, dayRaces, accountId) {
+    const racesNow = Number(races);
+    if (!Number.isFinite(racesNow) || racesNow <= 0) return null;
+    const localRaces = dayRaces === undefined || dayRaces === null
+      ? Number(todayRead().races) || 0
+      : Number(dayRaces) || 0;
+    const next = {
+      races: racesNow,
+      dayRaces: localRaces,
+      at: Date.now(),
+      account: String(accountId || ''),
+    };
+    const prev = readCreditMark();
+    const sameAccount = Boolean(prev) && String(prev.account || '') === next.account;
+    const verdict = sameAccount
+      ? creditVerdict(prev, next)
+      : { credited: null, remote: 0, local: 0 };
+    writeCreditMark({
+      ...next,
+      state: verdict.credited === false ? 'stale' : verdict.credited ? 'ok' : 'unknown',
+      remote: verdict.remote,
+      local: verdict.local,
+    });
+    if (verdict.credited === false) {
+      const reason = `account not crediting races (local ${verdict.local}, remote 0)`;
+      markStopped(reason, STOP_HOLD_MAX);
+      storeNotice('Account watchdog: the site stopped crediting races. The queue is stopped; check the account before resuming.');
+      log(`WATCHDOG: ${reason}; queue stopped.`);
+    }
+    return verdict;
+  }
+
   function raceWpmAt(base, drift) {
     const value = Number(base);
     if (!Number.isFinite(value)) return 0;
@@ -3419,6 +3501,9 @@ All of this only aims at believable statistics. It is your call and your risk.
           wpm, targetWpm, recovery, currentWpm, lifetimeWpm, lifetime,
           accuracy, bestWpm, races, source: 'api',
         };
+        // Watchdog: el perfil trae racesPlayed, y es el unico dato que dice
+        // si el sitio sigue apuntando lo que este navegador escribe.
+        noteAccountCredit(races, undefined, readAccountIdentity());
         return { ...accountStats, reason: null };
       }
 
@@ -11992,6 +12077,15 @@ function dayCurveAt(at = Date.now()) {
     curve: dayCurveAt(at),
   });
   window.__ntaDebug.isRestDay = (at) => isRestDay(at);
+  // Watchdog de acreditacion: veredicto puro y marca en disco, para probarlo
+  // sin simular el perfil entero.
+  window.__ntaDebug.creditVerdict = (prev, next, minLocal) => creditVerdict(prev, next, minLocal);
+  window.__ntaDebug.creditMark = () => readCreditMark();
+  window.__ntaDebug.noteAccountCredit = (races, dayRaces, accountId) => {
+    noteAccountCredit(races, dayRaces, accountId);
+    return readCreditMark();
+  };
+  window.__ntaDebug.clearCreditMark = () => writeCreditMark(null);
   window.__ntaDebug.dayCurve = (hour) => dayCurve(hour);
   window.__ntaDebug.localDayKey = (at) => localDayKey(at);
   window.__ntaDebug.rollRaceDrift = () => rollRaceDrift();

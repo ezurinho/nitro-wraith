@@ -1436,6 +1436,15 @@
     curve: dayCurveAt(at),
   });
   window.__ntaDebug.isRestDay = (at) => isRestDay(at);
+  // Watchdog de acreditacion: veredicto puro y marca en disco, para probarlo
+  // sin simular el perfil entero.
+  window.__ntaDebug.creditVerdict = (prev, next, minLocal) => creditVerdict(prev, next, minLocal);
+  window.__ntaDebug.creditMark = () => readCreditMark();
+  window.__ntaDebug.noteAccountCredit = (races, dayRaces, accountId) => {
+    noteAccountCredit(races, dayRaces, accountId);
+    return readCreditMark();
+  };
+  window.__ntaDebug.clearCreditMark = () => writeCreditMark(null);
   window.__ntaDebug.dayCurve = (hour) => dayCurve(hour);
   window.__ntaDebug.localDayKey = (at) => localDayKey(at);
   window.__ntaDebug.rollRaceDrift = () => rollRaceDrift();

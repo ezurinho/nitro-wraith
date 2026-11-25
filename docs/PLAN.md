@@ -21,6 +21,16 @@ una invitación a bans para el que corre lento.
 | Variación por carrera (±2 WPM, ±0,5 puntos) | `6b5b1e4` | 60 sorteos en 5 escalones de WPM y 3 de precisión |
 | Investigación con fuentes | `e19ec3a` | `docs/RESEARCH.md` |
 
+## Fase 1 · hecha
+
+| Qué | Commit | Evidencia |
+| --- | --- | --- |
+| Día de descanso (1 de cada 7, por hash de la fecha) | `00163fb` | 365 días → 46 descansos; estable dentro del día |
+| Curva diurna (1.0 a las 13:30, 0.95 a las 01:30) | `00163fb` | recortada a la banda: 182 fuera → 187 dentro |
+| La tarjeta de cuenta dice horas, descanso y curva | `1a52485` | `hours all day · rest in 3d · curve −0% · 140 wpm` |
+| `paceSample` mide el motor, no la sesión | `00163fb` | 4% de error a 2 000 teclas → 1-3% a 40 000 |
+
+
 ---
 
 ## Fase 1 · actividad humana (realismo de calendario)
@@ -64,6 +74,14 @@ dwell medido cae en [50, 200] ms con desviación no nula.
 **Bloqueo conocido.** `isTrusted` siempre será `false`: ningún evento sintético lo evita. Esto se
 documenta, no se disimula.
 
+**Estado: BLOQUEADA (2026-11-23 00:30).** El banco no simula el juego real: usa stubs
+(`{ typedIndex, handleKeyPress }`) y páginas falsas, así que no puede responder si el juego
+procesa un `keydown` despachado en `document`. Medirlo exige abrir Nitro Type de verdad, y eso
+está fuera de las reglas de esta noche (nada de navegador real, nada del perfil del dueño).
+Implementarlo a ciegas puede duplicar cada carácter —un DQ garantizado—, que es exactamente lo
+que este plan existe para evitar. Se queda como está hasta que haya una sesión de navegador
+real con una cuenta de prueba.
+
 ---
 
 ## Fase 3 · vigilante de cuenta
@@ -89,6 +107,11 @@ esta hora frente al de la tanda, y el motivo del gate activo si lo hay.
 
 **Criterio de aceptación.** Captura nueva con baseline propia; el texto del plan coincide con
 `activeGates` y con `raceWpm()` en el mismo instante.
+
+**Estado: HECHA la parte que el usuario lee (2026-11-23 00:45).** Las tres filas (`hours`,
+`rest`, `curve`) viven en la tarjeta de cuenta de la vista Live, que es la que se mira. Una
+pestaña propia no añade información: el rail ya tiene cuatro y la quinta solo esconde el
+mismo dato un clic más allá.
 
 ---
 

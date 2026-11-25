@@ -29,6 +29,9 @@
       everyRaces: 25,        // ademas, una lectura nueva cada 25 carreras
       halfWidth: 6,          // ancho maximo del rango; con 43 WPM da 37-49
       minWpm: 15,            // cuentas principiantes tambien son validas
+      // Watchdog de acreditacion: con cuantas carreras locales sin mover el
+      // racesPlayed del sitio se da por hecho que la cuenta dejo de acreditar.
+      creditMinRaces: 5,
       timeoutMs: 8000,
       // Un override manual manda sobre la media. 0 = automatico.
       customWpm: 0,
@@ -874,6 +877,7 @@
     calibratedRange: 'autoTyperCalibratedRange',
     calibratedAccuracy: 'autoTyperCalibratedAccuracy',
     wpmCeiling: 'autoTyperWpmCeiling',
+    accountCredit: 'autoTyperAccountCredit',
     calibrationAt: 'autoTyperCalibrationAt',
     calibrationVersion: 'autoTyperCalibrationVersion',
     calibrationAccount: 'autoTyperCalibrationAccount',

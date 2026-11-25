@@ -3835,6 +3835,55 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
           Math.round(calendar.race.sessionWpm * calendar.now.curve))),
     `${calendar.race.sessionWpm} -> ${calendar.race.wpm} at curve ${calendar.now.curve}`);
 
+  // Watchdog de acreditacion: si el sitio deja de apuntar las carreras, el bot
+  // tiene que parar en vez de teclear toda la noche para nada.
+  const credit = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const prev = { races: 48700, dayRaces: 10, at: 1, account: 'a' };
+    d.clearCreditMark();
+    const first = d.noteAccountCredit(48700, 10, 'a');
+    const credited = d.noteAccountCredit(48712, 22, 'a');
+    d.clearCreditMark();
+    d.noteAccountCredit(48700, 10, 'a');
+    const few = d.noteAccountCredit(48700, 13, 'a');
+    d.clearCreditMark();
+    d.noteAccountCredit(48700, 10, 'a');
+    const stale = d.noteAccountCredit(48700, 20, 'a');
+    // markStopped escribe la marca compartida con la cola; eso es lo que el
+    // garaje lee para no abrir otra carrera. Se lee de ahi, no de un hook.
+    const stop = JSON.parse(w.localStorage.getItem('ntQueue:stoppedAt') || 'null');
+    w.localStorage.removeItem('ntQueue:stoppedAt');
+    w.localStorage.removeItem('ntQueue:lastStop');
+    d.clearCreditMark();
+    return {
+      first,
+      credited,
+      few,
+      stale,
+      stop,
+      verdicts: [
+        d.creditVerdict(prev, { races: 48706, dayRaces: 22 }),
+        d.creditVerdict(prev, { races: 48700, dayRaces: 20 }),
+        d.creditVerdict(prev, { races: 48700, dayRaces: 12 }),
+      ],
+    };
+  })()`);
+  check('the account watchdog reads credit from the profile, not from hope',
+    credit.first.state === 'unknown'
+      && credit.credited.state === 'ok'
+      && credit.credited.remote === 12
+      && credit.few.state === 'unknown'
+      && credit.stale.state === 'stale'
+      && credit.stale.local === 10
+      && credit.verdicts[0].credited === true
+      && credit.verdicts[1].credited === false
+      && credit.verdicts[2].credited === null,
+    credit);
+  check('a stale account stops the queue instead of farming nothing',
+    Boolean(credit.stop) && /not crediting races/.test(String(credit.stop && credit.stop.reason)),
+    credit.stop);
+
   // Cuando el trinquete conserva un rango mas alto, la fila no puede seguir
   // enseñando la media corta como si fuera el objetivo: avg, target y top van
   // juntos y el target es el centro del rango que de verdad se teclea.
