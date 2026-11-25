@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>NITRO WRAITH · review 8.14.84 + ESLint</title>
+<title>NITRO WRAITH · review 8.14.84 + lint</title>
 <style>
   body { font-family: var(--font-sans); color: var(--foreground); margin: 0; }
   h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: -.01em; }
@@ -19,44 +19,46 @@
   .neg { color: var(--destructive); font-weight: 600; }
   .note { font-size: 11.5px; color: var(--muted-foreground); margin: 8px 0 0; line-height: 1.5; }
   code { font-family: var(--font-mono); font-size: 11px; background: var(--code-background); color: var(--code-foreground); padding: 1px 5px; border-radius: 4px; }
+  a { color: var(--accent); }
   .cols { display: grid; gap: 18px; grid-template-columns: 1fr; }
   @media (min-width: 640px) { .cols { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
 <body>
-  <h1>NITRO WRAITH · review de HEAD (8.14.84 + ESLint)</h1>
-  <p class="lead">HEAD de 8.14.84 más <code>8857b2f</code> (garaje) y <code>5469ec8</code> (lint). Todos los gates corridos hoy en este árbol, no heredados: 86/86 test · 418/418 banco CDP · 31 unit (queue-policy 25, palette 2, release 2, lock 2) · 9/9 Firefox+WebKit · 24/24 visuales.</p>
+  <h1>NITRO WRAITH · review de HEAD (8.14.84 + lint)</h1>
+  <p class="lead">HEAD de 8.14.84 más <code>8857b2f</code> (garaje) y <code>5469ec8</code> (lint). Todos los gates corridos hoy en este árbol, no heredados: 86/86 test · 418/418 banco CDP · 31 unit (queue-policy 25, palette 2, release 2, lock 2) · 9/9 Firefox+WebKit · 24/24 visuales. ESLint 10 corre <code>no-undef</code> y <code>no-unused-vars</code> sobre el artefacto concatenado.</p>
 
   <div class="grade"><b>8.5<span style="font-size:20px">/10</span></b><span>A− · antes: 7,8 (B+) en mi review · 6,6 en la auditoría de 8.14.78</span></div>
-  <p class="note">La nota no sube por un gate nuevo: el lint cerró un fallo real, pero los dos monolitos y el techo físico siguen. Los tres críticos de la auditoría de 33 fuentes están cerrados con commits verificables — inyección shell en el release (#23, la versión del Gist viaja por <code>SAFE_GIST_VERSION</code> como dato), coordinación fail-open (#24, fail-closed + Web Lock probado con dos pestañas), y estado cruzado entre cuentas (#25 borra y #26 revalida respuestas en vuelo). ESLint 10 con <code>no-undef</code> ya corre sobre el artefacto concatenado: encontró cuatro llamadas a <code>paintGaragePanel</code> fuera de su scope (el garaje no se repintaba al volver de un freeze ni al cambiar AFK) y ahora están cubiertas por el puente entre marcos y 418 checks. Lo que falta para A+: <code>80-panel.js</code> 5.615 y <code>90-queue.js</code> 5.015 líneas, y el techo físico <code>isTrusted=false</code> que ningún userscript puede saltar.</p>
+  <p class="note">La nota no sube por un gate nuevo: el lint cerró un fallo real y añadió una regla más, pero los dos monolitos y el techo físico siguen. Los tres críticos de la auditoría de 33 fuentes están cerrados con commits verificables — inyección shell en el release (#23, la versión del Gist viaja por <code>SAFE_GIST_VERSION</code> como dato), coordinación fail-open (#24, fail-closed + Web Lock probado con dos pestañas), y estado cruzado entre cuentas (#25 borra y #26 revalida respuestas en vuelo). ESLint encontró cuatro llamadas a <code>paintGaragePanel</code> fuera de su scope (el garaje no se repintaba al volver de un freeze ni al cambiar AFK) y ahora están cubiertas por el puente entre marcos y 418 checks. La comparación también se corrigió: NitroTyper no está cerrado, es el rival de producto más fuerte y usa una app nativa; eso no cambia la nota absoluta, pero sí la frase “todos empatan”. Lo que falta para A+: <code>80-panel.js</code> 5.615 y <code>90-queue.js</code> 5.015 líneas, y el techo físico <code>isTrusted=false</code> que ningún userscript puede saltar.</p>
 
   <h2>1 · Rubrica</h2>
   <table>
     <thead><tr><th>Eje</th><th class="n">Peso</th><th class="n">Nota</th><th>Evidencia</th></tr></thead>
     <tbody>
-      <tr><td>Gates y CI</td><td class="n">20%</td><td class="n pos">9,6</td><td>418 + 86 + 31 + 9 + 24 en cinco workflows; ESLint <code>no-undef</code> real y smoke cross-engine en la imagen Playwright (#17)</td></tr>
+      <tr><td>Gates y CI</td><td class="n">20%</td><td class="n pos">9,6</td><td>418 + 86 + 31 + 9 + 24; ESLint <code>no-undef</code> + <code>no-unused-vars</code> real y smoke cross-engine en la imagen Playwright (#17)</td></tr>
       <tr><td>Cadena de publicación</td><td class="n">15%</td><td class="n">8,0</td><td>inyección cerrada (#23); la actualización aún acepta versión mayor sin hash fijado</td></tr>
-      <tr><td>Commits y releases</td><td class="n">15%</td><td class="n pos">9,5</td><td>234 commits, 2 autores, releases automáticas, 27 PRs numerados</td></tr>
+      <tr><td>Commits y releases</td><td class="n">15%</td><td class="n pos">9,5</td><td>240 commits, 2 autores, 94 tags de release, publicación automática</td></tr>
       <tr><td>Dependencias</td><td class="n">10%</td><td class="n pos">9,4</td><td>0 en runtime; 3 devDeps (Playwright, ESLint 10, globals 17) justificados y usados en CI</td></tr>
       <tr><td>Modularidad</td><td class="n">15%</td><td class="n">6,5</td><td><code>36-queue-policy</code> puro (25 checks), helpers, panel partido; los dos monolitos siguen</td></tr>
-      <tr><td>Documentación</td><td class="n">10%</td><td class="n pos">9,0</td><td>AGENTS, DESIGN, SECURITY, CHANGELOG, API local documentada, auditoría de 452 líneas</td></tr>
+      <tr><td>Documentación</td><td class="n">10%</td><td class="n pos">9,0</td><td>AGENTS, DESIGN, SECURITY, CHANGELOG, API local documentada, auditoría de 452 líneas y comparativa con fuentes</td></tr>
       <tr><td>Robustez de dominio</td><td class="n">15%</td><td class="n pos">9,0</td><td>modelo con literatura, watchdog de acreditación, calendario, guardia fail-closed</td></tr>
     </tbody>
   </table>
 
   <h2>2 · Frente a la competencia</h2>
   <table>
-    <thead><tr><th></th><th class="n">Pruebas</th><th class="n">Realismo</th><th class="n">UI</th><th class="n">Mantenim.</th></tr></thead>
+    <thead><tr><th></th><th class="n">Púb.</th><th>Control / realismo</th><th>UI</th><th>Mantenim.</th><th>Input</th></tr></thead>
     <tbody>
-      <tr><td><b>nitro-wraith</b> (userscript, MIT)</td><td class="n pos">568 checks</td><td class="n pos">log-logística citada, fatiga, curva, descansos, watchdog</td><td class="n pos">panel + temas + a11y + API pública</td><td class="n pos">234 commits / 12 días</td></tr>
-      <tr><td>UltraTypeBot (extensión, MIT)</td><td class="n neg">0</td><td class="n">"anti-ban" sin especificar; auto-avg (v1.9)</td><td class="n">popup + API de add-ons</td><td class="n neg">dormido (v2.0.1)</td></tr>
-      <tr><td>Greasyfork 536103 (5.141 inst.)</td><td class="n neg">0</td><td class="n">micro-pausa/ráfaga/dudación por azar</td><td class="n neg">sin UI; config editando constantes</td><td class="n">archivo único</td></tr>
-      <tr><td>Greasyfork 552185</td><td class="n neg">0</td><td class="n">día/noche fijo, 5-7 pausas, ratón simulado</td><td class="n neg">consola: start/stop</td><td class="n neg">7 KB, un archivo</td></tr>
-      <tr><td>571935 "UNDETECTABLE"</td><td class="n neg">0</td><td class="n neg">promesa sin evidencia; pisa ajustes</td><td class="n neg">—</td><td class="n neg">—</td></tr>
-      <tr><td>NitroTyper.org (cerrado)</td><td class="n neg">—</td><td class="n">"variación y precisión imperfecta"</td><td class="n">web propia</td><td class="n neg">no auditable</td></tr>
+      <tr><td><b>nitro-wraith</b> (userscript, MIT)</td><td class="n pos">568</td><td class="pos">log-logística citada, fatiga, curva, descansos, calendario, watchdog</td><td class="pos">panel + temas + a11y + API</td><td class="pos">HEAD 2026-11-25</td><td>DOM sintético</td></tr>
+      <tr><td>NitroTyper (nativa + userscript)</td><td class="n neg">0</td><td>5 modos, WPM/accuracy, nitro, escudo de DQ</td><td class="pos">app nativa</td><td class="pos">repo 2026-05; sitio 2026</td><td class="pos">nativo (inferido)</td></tr>
+      <tr><td>591238 (userscript)</td><td class="n neg">0</td><td>panel, gauss, descansos 6–9 carreras</td><td class="pos">panel</td><td>v2.9.0, 2026-08-14</td><td>DOM sintético</td></tr>
+      <tr><td>536103 (userscript)</td><td class="n neg">0</td><td>secuencias y corrección; config por constantes</td><td class="neg">sin UI</td><td class="neg">v1.0.0, 2025-05-15</td><td>DOM sintético</td></tr>
+      <tr><td>552185 (userscript)</td><td class="n neg">0</td><td>día/noche, pausas, ratón simulado</td><td class="neg">consola</td><td class="neg">v1.0, 2025-10-10</td><td>DOM sintético</td></tr>
+      <tr><td>571935 “UNDETECTABLE”</td><td class="n neg">0</td><td class="neg">GUI que pisa WPM/accuracy con sesión</td><td class="neg">GUI rota</td><td>v1.0, 2026-03-31</td><td>DOM sintético</td></tr>
+      <tr><td>UltraTypeBot (extensión)</td><td class="n neg">0</td><td>auto-avg; API de add-ons</td><td>overlay</td><td class="neg">dormido 2023-02-12</td><td>navegador</td></tr>
     </tbody>
   </table>
-  <p class="note">Única ventaja rival real: 552185 simula movimiento de ratón (nosotros no) y UltraType distribuía extensión. En la frontera física todos empatan: un userscript despacha eventos con <code>isTrusted=false</code>; ni UltraType ni nadie lo resuelve sin <code>chrome.debugger</code>.</p>
+  <p class="note">Adopción verificada: 536103 5.143 instalaciones; 552185 1.009; 571935 636; 591238 138; NitroTyper no publica instalaciones; UltraType 39 estrellas/60 forks; Wraith 1 estrella/0 forks. La tabla completa, con método y fuentes, está en <a href="COMPARISON-2026-11-25.md">docs/COMPARISON-2026-11-25.md</a>. NitroTyper es la corrección importante: su app nativa teclea en la ventana enfocada y probablemente produce entrada del sistema; el binario es cerrado y el vector exacto no se pudo verificar. Los userscripts sí comparten <code>isTrusted=false</code>. <b>0</b> en la columna de pruebas significa “ninguna suite pública localizada”, no que no exista una privada.</p>
 
   <h2>3 · Lo que la investigación añade y lo que falta</h2>
   <div class="cols">
@@ -76,9 +78,10 @@
         <thead><tr><th>Pendiente</th><th>Estado</th></tr></thead>
         <tbody>
           <tr><td>keydown/keyup con dwell medible</td><td class="n">bloqueado: exige juego real</td></tr>
-          <tr><td>simulación de ratón</td><td class="n">nueva, medible en banco</td></tr>
-          <tr><td>ESLint real (<code>no-undef</code>)</td><td class="n pos">cerrado: <code>npm run lint</code></td></tr>
+          <tr><td>input nativo (ventana enfocada)</td><td class="n">fuera de alcance: binario cerrado</td></tr>
+          <tr><td>ESLint real</td><td class="n pos">cerrado: <code>no-undef</code> + <code>no-unused-vars</code></td></tr>
           <tr><td>partir 80-panel / 90-queue</td><td class="n">en curso</td></tr>
+          <tr><td>manifiesto <code>ntcfg</code></td><td class="n">abierto: integración, no tecleo</td></tr>
         </tbody>
       </table>
     </div>

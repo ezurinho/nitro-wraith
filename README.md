@@ -374,6 +374,7 @@ README release notes are generated between the `release:start` and
 ## Docs
 
 - [`docs/NITROTYPE.md`](docs/NITROTYPE.md): game notes and design limits.
+- [`docs/COMPARISON-2026-11-25.md`](docs/COMPARISON-2026-11-25.md): verified comparison with the other Nitro Type bots.
 - [`tests/live/`](tests/live/): browser harness, live mode and fixtures.
 - [`SECURITY.md`](SECURITY.md): how to report a session-affecting issue privately.
 - [`CHANGELOG.md`](CHANGELOG.md): changes by version.

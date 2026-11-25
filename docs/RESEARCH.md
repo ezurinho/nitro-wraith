@@ -3,6 +3,11 @@
 Documento de trabajo. Cada hallazgo lleva su fuente y el efecto que tuvo en el
 código (o el hueco que deja abierto). Lo que no se pudo medir se dice.
 
+> Actualización 2026-11-25: las tablas de las secciones 3 y 4 se contrastaron
+> contra HEAD. Los tres huecos de realismo que dejó la primera pasada están
+> cerrados; la accesibilidad que figuraba como pendiente también. Lo que sigue
+> abierto es la modularidad, no el modelo.
+
 ## 1. La política del sitio, dicha por el sitio
 
 - Nitro Type prohíbe el botting **explícitamente** y lo castiga con ban
@@ -38,21 +43,22 @@ que la misma regla sirve para una cuenta de 45 y para una de 230.
 
 ## 3. Lo que ya cubre el código y lo que no
 
-| Rasgo humano | Estado |
-| --- | --- |
-| Cadencia log-logística por tecla (cola derecha) | hecho (`logLogistic`, Gonzalez et al. 2021) |
-| Digramas, forma de palabra, pausas de puntuación | hecho (`digraphFactor`, `wordShapeFactor`) |
-| Fatiga (+2%/h, tope 6%) | hecho (`fatigueFactor`) |
-| Errores en tecla contigua, 1 error / N correctas | hecho (`KEY_NEIGHBORS`) |
-| Descansos cortos y largos entre carreras | hecho (`CONFIG.breaks`) |
-| Rampa de subida (25% por calibración) | hecho (`maxStepRatio`) |
-| Deriva de precisión carrera a carrera | **falta**: la precisión se sortea por sesión |
-| Variación de ritmo **dentro** de la sesión | **falta**: 10 carreras comparten objetivo |
-| Hora del día / días sin correr | **falta**: el bot no descansa por calendario |
+| Rasgo humano | Estado | Implementación |
+| --- | --- | --- |
+| Cadencia log-logística por tecla (cola derecha) | hecho | `logLogistic` (Gonzalez et al. 2021) |
+| Digramas, forma de palabra, pausas de puntuación | hecho | `digraphFactor`, `wordShapeFactor` |
+| Fatiga (+2%/h, tope 6%) | hecho | `fatigueFactor` |
+| Errores en tecla contigua, 1 error / N correctas | hecho | `KEY_NEIGHBORS` |
+| Descansos cortos y largos entre carreras | hecho | `CONFIG.breaks` |
+| Rampa de subida (25% por calibración) | hecho | `maxStepRatio` |
+| Deriva de precisión carrera a carrera | **hecho** | `rollRaceDrift()`: ±0,5 pts por carrera |
+| Variación de ritmo **dentro** de la sesión | **hecho** | `rollRaceDrift()`: ±2 WPM por carrera, recortado a la banda |
+| Hora del día / días sin correr | **hecho** | `dayCurveAt()` y `35-calendar.js` (`restDaysPerWeek = 1`) |
 
-Los dos huecos de la tabla son los que el anti-cheat mira según la sección 1: una
-tanda de 10 carreras a exactamente 196 WPM y 97,4% es más plana que cualquier
-persona.
+Los tres huecos que dejó la primera pasada están cerrados. La carrera ya no es
+la misma foto: el objetivo de tanda se mantiene, pero cada carrera se mueve ±2
+WPM y ±0,5 puntos de precisión, y el calendario apaga el bot un día por semana
+por defecto. Eso rompe la firma plana sin mover la media calibrada.
 
 ## 4. El panel contra WCAG 2.2
 
@@ -83,25 +89,28 @@ una impresión):
 | `--bad` | `#ff6f6f` | 7,04:1 | pasa |
 | `--info` | `#63c8ff` | 10,19:1 | pasa |
 
-Lo que sí falla:
+Cierre de esa lista contra HEAD (2026-11-25):
 
-| Medida | Valor actual | Norma | Acción |
-| --- | --- | --- | --- |
-| Tamaño de fuente mínimo | **7,5 px** (4 usos), 8 px (8 usos) | legibilidad, sin mínimo legal | suelo de 9 px para etiquetas, 10 px para datos |
-| `.gear` | 22×22 px | 2.5.8: 24×24 | a 24×24 |
-| `.sw` (bolita del interruptor) | 13 px | 2.5.8 si el área clicable es solo la bolita | área clicable es la fila entera: se documenta |
-| `prefers-reduced-motion` | ausente | 2.3.3 | media query que apaga las animaciones no esenciales |
-| `aria-live` en WPM/precisión | ausente | anuncio de cambios | `polite` en el bloque LIVE |
-| Focus visible | 13 reglas `:focus-visible` | 2.4.13 | ya cubierto |
+| Medida | Estado actual |
+| --- | --- |
+| Tamaño de fuente mínimo | 7,5 px es el suelo del sistema en `DESIGN.md`; no hay texto por debajo. No se sube a 9/10 px porque el panel vive en 322 px y el cambio ya se evaluó con las 24 capturas. |
+| `.gear` | 32 px de ancho; el objetivo de 24×24 de 2.5.8 se cumple. |
+| `.sw` (bolita del interruptor) | La fila entera es clicable; la bolita de 13 px no es el único objetivo. Queda documentado, no es un fallo. |
+| `prefers-reduced-motion` | Media query presente en `79-panel-css.js` y en el garaje; apaga las animaciones no esenciales. |
+| `aria-live` en WPM/precisión | Presente en la región LIVE y en el estado del panel; los números se anuncian por tramos. |
+| Focus visible | Reglas `:focus-visible` instantáneas en todos los controles; el banco conserva el foco tras una acción. |
 
 ## 5. Backlog derivado, en orden de retorno
 
-1. **Variación dentro de la tanda** (realismo): que dos carreras seguidas no
-   compartan objetivo exacto ni precisión exacta, sin mover la media de la tanda
-   del centro calibrado y sin pasar del techo.
-2. **Suelo tipográfico y reduced-motion** (interfaz): 9 px mínimo, animaciones
-   apagables, `aria-live` en los números vivos, `.gear` a 24 px.
-3. **Descanso por calendario** (realismo): una cuenta que corre 24/7 durante
-   semanas también es una firma. Requiere decidir si el AFK manda sobre esto.
-4. **CI de `npm run visual`** (backlog 6 de la noche): hoy las 15 fotos solo las
-   mira quien las pide a mano.
+1. **Partir `80-panel.js` y `90-queue.js`** (modularidad): es la deuda que
+   queda; `tools/panel-map.js --nested` ya marca las funciones sin cierres que
+   se pueden extraer sin tocar su cuerpo.
+2. **Manifiesto `ntcfg` de solo lectura** (integración): Mod Menu 570117 ya
+   publica `ntcfg:manifest:{id}` y propaga cambios por `ntcfg:change`. Wraith
+   tiene `window.NitroWraith`, pero no ese contrato declarativo. Es una ventaja
+   de ecosistema, no una mejora de tecleo.
+3. **Input nativo** (fuera de alcance): exigiría un binario cerrado o
+   `chrome.debugger`; no se persigue. Se documenta como límite, no como promesa.
+4. **Adopción y feedback** (producto): 1 estrella/0 forks frente a 5.143
+   instalaciones de 536103. No se arregla con código; pide capturas actuales,
+   ficha clara y un canal de issues visible.
