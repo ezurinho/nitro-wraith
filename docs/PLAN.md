@@ -121,8 +121,12 @@ mismo dato un clic más allá.
    que resuelve las pilas del sistema igual que la maquina de capturas; Ubuntu
    mueve las quince capturas. Un cambio de layout o de tema falla en el PR y las
    capturas suben como artefacto.
-2. **ESLint real**: las tres regex del gate no ven `no-undef`, que es el error que más veces ha roto
-   el build en este repo. Requiere aceptar un `devDependency`.
+2. **ESLint real** — cerrado: `npm run lint` corre `no-undef` sobre el
+   artefacto concatenado (el unico sitio donde se ven los nombres de todos los
+   fragmentos) y sobre `tools/`/`tests/`. Encontro cuatro llamadas a
+   `paintGaragePanel` fuera de su scope, escondidas tras `typeof`: el garaje no
+   se repintaba al volver de un freeze ni al cambiar AFK. Cerrado con un puente
+   `postMessage` + gancho en `runQueue`, cubierto por el banco (418 checks).
 3. **`90-queue.js`**: quedan ~115 funciones con cierres. La herramienta (`tools/panel-map.js
    --nested`) ya dice cuáles no leen nada del cuerpo; esas salen sin cambios de cuerpo.
 
