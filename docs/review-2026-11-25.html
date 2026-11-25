@@ -25,7 +25,7 @@
 </head>
 <body>
   <h1>NITRO WRAITH · review de HEAD (8.14.84 + ESLint)</h1>
-  <p class="lead">HEAD de 8.14.84 más el commit de lint de esta revisión. Todos los gates corridos hoy en este árbol, no heredados: 86/86 test · 418/418 banco CDP · 31 unit (queue-policy 25, palette 2, release 2, lock 2) · 9/9 Firefox+WebKit · 24/24 visuales.</p>
+  <p class="lead">HEAD de 8.14.84 más <code>8857b2f</code> (garaje) y <code>5469ec8</code> (lint). Todos los gates corridos hoy en este árbol, no heredados: 86/86 test · 418/418 banco CDP · 31 unit (queue-policy 25, palette 2, release 2, lock 2) · 9/9 Firefox+WebKit · 24/24 visuales.</p>
 
   <div class="grade"><b>8.5<span style="font-size:20px">/10</span></b><span>A− · antes: 7,8 (B+) en mi review · 6,6 en la auditoría de 8.14.78</span></div>
   <p class="note">La nota no sube por un gate nuevo: el lint cerró un fallo real, pero los dos monolitos y el techo físico siguen. Los tres críticos de la auditoría de 33 fuentes están cerrados con commits verificables — inyección shell en el release (#23, la versión del Gist viaja por <code>SAFE_GIST_VERSION</code> como dato), coordinación fail-open (#24, fail-closed + Web Lock probado con dos pestañas), y estado cruzado entre cuentas (#25 borra y #26 revalida respuestas en vuelo). ESLint 10 con <code>no-undef</code> ya corre sobre el artefacto concatenado: encontró cuatro llamadas a <code>paintGaragePanel</code> fuera de su scope (el garaje no se repintaba al volver de un freeze ni al cambiar AFK) y ahora están cubiertas por el puente entre marcos y 418 checks. Lo que falta para A+: <code>80-panel.js</code> 5.615 y <code>90-queue.js</code> 5.015 líneas, y el techo físico <code>isTrusted=false</code> que ningún userscript puede saltar.</p>
