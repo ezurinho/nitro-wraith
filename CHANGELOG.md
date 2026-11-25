@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.84 — 2026-11-25
+
+- feat(guard): stop the queue when the site stops crediting races
+
 ## 8.14.83 — 2026-11-24
 
 - fix(queue): serialize tab actions with a short Web Lock (#27)
