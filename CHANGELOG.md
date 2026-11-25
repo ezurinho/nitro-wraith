@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.14.85 — 2026-11-25
+
+- build(lint): gate the built bundle with no-undef
+- fix(garage): repaint after freeze and AFK changes
+
 ## 8.14.84 — 2026-11-25
 
 - feat(guard): stop the queue when the site stops crediting races
