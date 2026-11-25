@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.86 — 2026-11-25
+
+- fix(stop): keep a manual stop until an explicit resume
+
 ## 8.14.85 — 2026-11-25
 
 - build(lint): gate the built bundle with no-undef
