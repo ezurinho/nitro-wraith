@@ -851,6 +851,14 @@
       }
       if (!fromFrame) return false;
 
+      // El panel del garaje vive en esta ventana, pero quien cambia el AFK o
+      // recupera el foco puede estar en el marco de la carrera. Un aviso minimo
+      // basta para repintarlo sin compartir el scope de runQueue.
+      if (data.__ntaPaintGarage === true) {
+        paintGaragePanel();
+        return true;
+      }
+
       if (data.__ntaAssetError === true) {
         if (!noteAssetFailure('reported by the race frame')) return true;
         clearRaceNow();
@@ -3338,6 +3346,10 @@
       const raceDisabled = !(armed && raceButton);
       if (qpanel.raceBtn.disabled !== raceDisabled) qpanel.raceBtn.disabled = raceDisabled;
     }
+
+    // Ya existe el panel: desde aqui el resto del script puede pedir su
+    // repintado sin volver a montarlo ni conocer los refs internos.
+    paintGarageHook = paintGaragePanel;
 
     // La ventana superior no siempre expone la API de depuracion del marco,
     // pero si recibe los storage events del panel de carrera. Este segundo

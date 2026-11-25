@@ -424,7 +424,7 @@
       // El primer gesto puede pasar el audio de `ready` a `on`: el resumen AFK
       // debe reflejarlo en el mismo clic, no en el siguiente repintado.
       if (typeof paintConfig === 'function') paintConfig();
-      if (typeof paintGaragePanel === 'function') paintGaragePanel();
+      requestGaragePaint();
     };
     try {
       addEventListener('pointerdown', unlock, true);
@@ -2936,7 +2936,7 @@
         resetAfkFreezeStats();
         log('AFK freeze history cleared for this browser.');
         paintConfig();
-        if (typeof paintGaragePanel === 'function') paintGaragePanel();
+        requestGaragePaint();
       });
     }
 

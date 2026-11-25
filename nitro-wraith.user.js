@@ -456,6 +456,12 @@ All of this only aims at believable statistics. It is your call and your risk.
   const BOOT_STARTED_AT = performance.now();
   let BOOT_READY_AT = 0;
 
+  // La cola y su panel de garaje viven dentro de runQueue; el resto del script
+  // no comparte ese scope. Este gancho permite pedir un repintado desde arriba
+  // sin exponer la cola entera; en el marco de carrera el aviso viaja por
+  // postMessage y lo atiende el mismo runQueue de la ventana superior.
+  let paintGarageHook = null;
+
   // Los ganchos de depuracion (window.__ntaDebug) existen para el banco de
   // pruebas, que corre en localhost. En el sitio real solo se abren a mano
   // (localStorage.ntaDebug = '1') y, si no, se borran al terminar boot: la
@@ -1849,6 +1855,19 @@ All of this only aims at believable statistics. It is your call and your risk.
   };
   const average = ([min, max]) => (min + max) / 2;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Pide un repintado del panel de garaje desde cualquier mitad del script. En
+  // la ventana de arriba se llama al gancho que deja runQueue; en el marco de la
+  // carrera se avisa al top por postMessage, porque alli no existe ese scope.
+  function requestGaragePaint() {
+    try {
+      if (window.top && window.top !== window) {
+        window.top.postMessage({ __ntaPaintGarage: true }, location.origin);
+        return;
+      }
+    } catch { /* marco de otro origen: se intenta el gancho local */ }
+    if (typeof paintGarageHook === 'function') paintGarageHook();
+  }
 
   // Reloj de tecleo. Con la pestana oculta el navegador clampa setTimeout a ~1 s
   // (y a 1/min tras cinco minutos), asi que la cadencia se arrastraba y el
@@ -11065,7 +11084,7 @@ function dayCurveAt(at = Date.now()) {
       // El primer gesto puede pasar el audio de `ready` a `on`: el resumen AFK
       // debe reflejarlo en el mismo clic, no en el siguiente repintado.
       if (typeof paintConfig === 'function') paintConfig();
-      if (typeof paintGaragePanel === 'function') paintGaragePanel();
+      requestGaragePaint();
     };
     try {
       addEventListener('pointerdown', unlock, true);
@@ -13577,7 +13596,7 @@ function dayCurveAt(at = Date.now()) {
         resetAfkFreezeStats();
         log('AFK freeze history cleared for this browser.');
         paintConfig();
-        if (typeof paintGaragePanel === 'function') paintGaragePanel();
+        requestGaragePaint();
       });
     }
 
@@ -18272,6 +18291,14 @@ function dayCurveAt(at = Date.now()) {
       }
       if (!fromFrame) return false;
 
+      // El panel del garaje vive en esta ventana, pero quien cambia el AFK o
+      // recupera el foco puede estar en el marco de la carrera. Un aviso minimo
+      // basta para repintarlo sin compartir el scope de runQueue.
+      if (data.__ntaPaintGarage === true) {
+        paintGaragePanel();
+        return true;
+      }
+
       if (data.__ntaAssetError === true) {
         if (!noteAssetFailure('reported by the race frame')) return true;
         clearRaceNow();
@@ -20759,6 +20786,10 @@ function dayCurveAt(at = Date.now()) {
       const raceDisabled = !(armed && raceButton);
       if (qpanel.raceBtn.disabled !== raceDisabled) qpanel.raceBtn.disabled = raceDisabled;
     }
+
+    // Ya existe el panel: desde aqui el resto del script puede pedir su
+    // repintado sin volver a montarlo ni conocer los refs internos.
+    paintGarageHook = paintGaragePanel;
 
     // La ventana superior no siempre expone la API de depuracion del marco,
     // pero si recibe los storage events del panel de carrera. Este segundo
@@ -23609,7 +23640,7 @@ function dayCurveAt(at = Date.now()) {
         log('Browser froze this tab; the typing lock was released.');
       }
       if (typeof paintConfig === 'function') paintConfig();
-      if (typeof paintGaragePanel === 'function') paintGaragePanel();
+      requestGaragePaint();
     });
 
     document.addEventListener('resume', () => {
@@ -23622,7 +23653,7 @@ function dayCurveAt(at = Date.now()) {
       syncKeepAlive();
       updatePanel();
       if (typeof paintConfig === 'function') paintConfig();
-      if (typeof paintGaragePanel === 'function') paintGaragePanel();
+      requestGaragePaint();
     });
 
     window.addEventListener('pageshow', (event) => {

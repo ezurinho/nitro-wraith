@@ -456,6 +456,12 @@ All of this only aims at believable statistics. It is your call and your risk.
   const BOOT_STARTED_AT = performance.now();
   let BOOT_READY_AT = 0;
 
+  // La cola y su panel de garaje viven dentro de runQueue; el resto del script
+  // no comparte ese scope. Este gancho permite pedir un repintado desde arriba
+  // sin exponer la cola entera; en el marco de carrera el aviso viaja por
+  // postMessage y lo atiende el mismo runQueue de la ventana superior.
+  let paintGarageHook = null;
+
   // Los ganchos de depuracion (window.__ntaDebug) existen para el banco de
   // pruebas, que corre en localhost. En el sitio real solo se abren a mano
   // (localStorage.ntaDebug = '1') y, si no, se borran al terminar boot: la

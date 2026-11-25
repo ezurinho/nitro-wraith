@@ -15,6 +15,19 @@
   const average = ([min, max]) => (min + max) / 2;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  // Pide un repintado del panel de garaje desde cualquier mitad del script. En
+  // la ventana de arriba se llama al gancho que deja runQueue; en el marco de la
+  // carrera se avisa al top por postMessage, porque alli no existe ese scope.
+  function requestGaragePaint() {
+    try {
+      if (window.top && window.top !== window) {
+        window.top.postMessage({ __ntaPaintGarage: true }, location.origin);
+        return;
+      }
+    } catch { /* marco de otro origen: se intenta el gancho local */ }
+    if (typeof paintGarageHook === 'function') paintGarageHook();
+  }
+
   // Reloj de tecleo. Con la pestana oculta el navegador clampa setTimeout a ~1 s
   // (y a 1/min tras cinco minutos), asi que la cadencia se arrastraba y el
   // servidor descalificaba la carrera por inactividad. Los temporizadores de un

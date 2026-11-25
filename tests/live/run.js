@@ -5243,6 +5243,34 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageUi.title && garageUi.primary,
       garageUi);
 
+    // El AFK y la recuperacion de foco viven en el marco de la carrera, pero el
+    // panel del garaje se pinta en la ventana de arriba. Un freeze/resume real
+    // del iframe tiene que repintar el estado sin recargar la pagina.
+    const garagePaintBridge = await cdp.evaluate(`(async () => {
+      const root = document.getElementById('nt-queue-panel').shadowRoot;
+      const state = root.querySelector('[data-f="state"]');
+      const frame = document.querySelector('iframe');
+      if (!state || !frame || !frame.contentWindow) return { has: false };
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const prevToken = localStorage.getItem('player_token');
+      const prevBlock = localStorage.getItem('ntQueue:dqBlockUntil');
+      localStorage.setItem('player_token', 'paint-bridge-token');
+      localStorage.setItem('ntQueue:dqBlockUntil', String(Date.now() + 10 * 60000));
+      frame.contentWindow.document.dispatchEvent(new frame.contentWindow.Event('freeze'));
+      frame.contentWindow.document.dispatchEvent(new frame.contentWindow.Event('resume'));
+      await wait(160);
+      const painted = (state.textContent || '').trim();
+      if (prevToken === null) localStorage.removeItem('player_token');
+      else localStorage.setItem('player_token', prevToken);
+      if (prevBlock === null) localStorage.removeItem('ntQueue:dqBlockUntil');
+      else localStorage.setItem('ntQueue:dqBlockUntil', prevBlock);
+      window.__ntaDebug.garagePaint();
+      return { has: true, painted };
+    })()`, true);
+    check('a race-frame freeze/resume repaints the garage state',
+      garagePaintBridge.has && /site block 10m/.test(garagePaintBridge.painted),
+      garagePaintBridge);
+
     // El arranque de garaje es el que paga el coste completo del IIFE sin
     // panel: sus dos plantillas grandes tienen que quedarse sin armar y el
     // boot entero dentro del mismo presupuesto que la carrera.

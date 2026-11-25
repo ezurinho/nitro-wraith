@@ -229,7 +229,7 @@
         log('Browser froze this tab; the typing lock was released.');
       }
       if (typeof paintConfig === 'function') paintConfig();
-      if (typeof paintGaragePanel === 'function') paintGaragePanel();
+      requestGaragePaint();
     });
 
     document.addEventListener('resume', () => {
@@ -242,7 +242,7 @@
       syncKeepAlive();
       updatePanel();
       if (typeof paintConfig === 'function') paintConfig();
-      if (typeof paintGaragePanel === 'function') paintGaragePanel();
+      requestGaragePaint();
     });
 
     window.addEventListener('pageshow', (event) => {
