@@ -11,6 +11,33 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 00:10 · review directo · NitroTyper sigue abierto y el lint gana una regla
+
+- Pedido directo del dueno: seguir mejorando, review, nota, deep research y
+  comparacion. Nota **8.5/10 (A-)**: el lint cierra un fallo real y la
+  comparacion corrige una afirmacion falsa, pero los dos monolitos y el techo
+  `isTrusted=false` no cambian.
+- Investigacion verificada el 2026-11-25: NitroTyper.org **no esta cerrado**;
+  publica app nativa Windows/macOS/Linux y `race.user.js` 5.5.1, con cinco
+  modos y acceso por Gumroad. 536103 sigue lider en adopcion (5.143), 552185
+  tiene 1.009, 571935 636 (y su codigo pisa WPM/accuracy con `player_token`),
+  591238 138 y UltraTypeBot lleva dormido desde 2023-02-12. El input nativo de
+  NitroTyper queda como **inferido**: el binario es cerrado.
+- Documentacion: `docs/COMPARISON-2026-11-25.md` con metodo y fuentes;
+  `docs/review-2026-11-25.html` corrige la fila de NitroTyper y la frase
+  "todos empatan"; `docs/RESEARCH.md` marca realismo y accesibilidad cerrados;
+  README enlaza la comparativa.
+- hecho (`5e8bf0a`): review y research corregidos con evidencia primaria y
+  fechas, sin reescribir el informe historico de 8.14.78.
+- hecho (`a29b9a4`): `no-unused-vars` sobre el artefacto concatenado, ademas de
+  `no-undef`; un probe `var __probeUnused = 1` falla como debe. `tools/` y
+  `tests/` siguen solo con `no-undef`.
+- verificacion: `npm test` 86/86 · `npm run check` 418/418 · `npm run
+  test:browsers` 9/9 (Firefox+WebKit) · `npm run visual` 24/24 · `npm run lint`
+  limpio.
+- siguiente: partir `80-panel`/`90-queue`; manifiesto `ntcfg` de solo lectura.
+  Input nativo fuera de alcance. Horizonte de la noche cerrado.
+
 ## 23:25 · review directo · ESLint real y el garaje que no se repintaba
 
 - Pedido directo del dueno: seguir mejorando, review, nota, deep research y
