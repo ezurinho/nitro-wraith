@@ -11,7 +11,7 @@ fragment list, one generated IIFE, no runtime dependencies. Read
 npm run build       # rebuild the userscript from src/
 npm run check       # build sync, lint, syntax, README/release checks, unit + browser suites
 npm test            # build sync + lint + queue unit tests + CLI checks (no browser)
-npm run lint        # ESLint no-undef on the built bundle, tools and tests
+npm run lint        # ESLint no-undef everywhere; no-unused-vars on the bundle
 npm run test:live   # 418-check browser harness (needs Chrome)
 npm run test:browsers # Firefox + WebKit smoke (needs `npx playwright install firefox webkit`)
 npm run visual      # 24-shot visual regression

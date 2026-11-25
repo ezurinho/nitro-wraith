@@ -14,6 +14,9 @@ export default [
     },
     rules: {
       'no-undef': 'error',
+      // El bundle es un solo IIFE: una declaracion que ya nadie lee es deuda
+      // o el residuo de una extraccion. no-undef no la ve; esta regla si.
+      'no-unused-vars': ['error', { args: 'after-used', caughtErrors: 'none' }],
     },
   },
   {

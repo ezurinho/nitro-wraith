@@ -292,7 +292,7 @@ which already ships the browsers and their system libraries.
 ```bash
 npm run build       # concatenate src/ into nitro-wraith.user.js and .meta.js
 npm test            # synced build, lint, unit tests + CLI checks, no browser needed
-npm run lint        # ESLint 10 no-undef on the built bundle, tools and tests
+npm run lint        # ESLint 10 no-undef everywhere; no-unused-vars on the bundle
 npm run test:unit   # unit tests only (Node, no browser)
 npm run test:live   # browser harness (needs Chrome)
 npm run test:browsers # Firefox + WebKit smoke: boot, theme, shortcuts, no page errors
