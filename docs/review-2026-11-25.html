@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>NITRO WRAITH · review 8.14.83 + vigilante</title>
+<style>
+  body { font-family: var(--font-sans); color: var(--foreground); margin: 0; }
+  h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: -.01em; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted-foreground); margin: 24px 0 8px; font-weight: 600; }
+  p.lead { margin: 0 0 16px; color: var(--muted-foreground); font-size: 13px; line-height: 1.5; }
+  .grade { display: flex; align-items: baseline; gap: 14px; margin: 14px 0 6px; }
+  .grade b { font-family: var(--font-mono); font-size: 44px; line-height: 1; }
+  .grade span { color: var(--muted-foreground); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-foreground); font-weight: 600; }
+  td.n, th.n { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pos { color: var(--success); font-weight: 600; }
+  .neg { color: var(--destructive); font-weight: 600; }
+  .note { font-size: 11.5px; color: var(--muted-foreground); margin: 8px 0 0; line-height: 1.5; }
+  code { font-family: var(--font-mono); font-size: 11px; background: var(--code-background); color: var(--code-foreground); padding: 1px 5px; border-radius: 4px; }
+  .cols { display: grid; gap: 18px; grid-template-columns: 1fr; }
+  @media (min-width: 640px) { .cols { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+  <h1>NITRO WRAITH · review de HEAD (8.14.83 + vigilante `486c373`)</h1>
+  <p class="lead">Commit actual <code>486c373</code>. Todos los gates corridos hoy en este árbol, no heredados: 86/86 live · 417/417 banco CDP · 31 unit (queue-policy 25, palette 2, release 2, lock 2) · 9/9 Firefox+WebKit · 24/24 visuales.</p>
+
+  <div class="grade"><b>8.5<span style="font-size:20px">/10</span></b><span>A− · antes: 7,8 (B+) en mi review · 6,6 en la auditoría de 8.14.78</span></div>
+  <p class="note">La subida no es generosidad: los tres críticos de la auditoría de 33 fuentes están cerrados con commits verificables — inyección shell en el release (#23, la versión del Gist viaja por <code>SAFE_GIST_VERSION</code> como dato), coordinación fail-open (#24, fail-closed + Web Lock probado con dos pestañas), y estado cruzado entre cuentas (#25 borra y #26 revalida respuestas en vuelo). Lo que falta para A+: <code>80-panel.js</code> 5.615 y <code>90-queue.js</code> 5.015 líneas, ESLint real, y el techo físico <code>isTrusted=false</code> que ningún userscript puede saltar.</p>
+
+  <h2>1 · Rubrica</h2>
+  <table>
+    <thead><tr><th>Eje</th><th class="n">Peso</th><th class="n">Nota</th><th>Evidencia</th></tr></thead>
+    <tbody>
+      <tr><td>Gates y CI</td><td class="n">20%</td><td class="n pos">9,5</td><td>417 + 86 + 31 + 9 + 24 en cinco workflows; smoke cross-engine en la imagen Playwright (#17)</td></tr>
+      <tr><td>Cadena de publicación</td><td class="n">15%</td><td class="n">8,0</td><td>inyección cerrada (#23); la actualización aún acepta versión mayor sin hash fijado</td></tr>
+      <tr><td>Commits y releases</td><td class="n">15%</td><td class="n pos">9,5</td><td>234 commits, 2 autores, releases automáticas, 27 PRs numerados</td></tr>
+      <tr><td>Dependencias</td><td class="n">10%</td><td class="n pos">9,5</td><td>0 en runtime; 1 devDep (Playwright) justificado y usado en CI</td></tr>
+      <tr><td>Modularidad</td><td class="n">15%</td><td class="n">6,5</td><td><code>36-queue-policy</code> puro (25 checks), helpers, panel partido; los dos monolitos siguen</td></tr>
+      <tr><td>Documentación</td><td class="n">10%</td><td class="n pos">9,0</td><td>AGENTS, DESIGN, SECURITY, CHANGELOG, API local documentada, auditoría de 452 líneas</td></tr>
+      <tr><td>Robustez de dominio</td><td class="n">15%</td><td class="n pos">9,0</td><td>modelo con literatura, watchdog de acreditación, calendario, guardia fail-closed</td></tr>
+    </tbody>
+  </table>
+
+  <h2>2 · Frente a la competencia</h2>
+  <table>
+    <thead><tr><th></th><th class="n">Pruebas</th><th class="n">Realismo</th><th class="n">UI</th><th class="n">Mantenim.</th></tr></thead>
+    <tbody>
+      <tr><td><b>nitro-wraith</b> (userscript, MIT)</td><td class="n pos">567 checks</td><td class="n pos">log-logística citada, fatiga, curva, descansos, watchdog</td><td class="n pos">panel + temas + a11y + API pública</td><td class="n pos">234 commits / 12 días</td></tr>
+      <tr><td>UltraTypeBot (extensión, MIT)</td><td class="n neg">0</td><td class="n">"anti-ban" sin especificar; auto-avg (v1.9)</td><td class="n">popup + API de add-ons</td><td class="n neg">dormido (v2.0.1)</td></tr>
+      <tr><td>Greasyfork 536103 (5.141 inst.)</td><td class="n neg">0</td><td class="n">micro-pausa/ráfaga/dudación por azar</td><td class="n neg">sin UI; config editando constantes</td><td class="n">archivo único</td></tr>
+      <tr><td>Greasyfork 552185</td><td class="n neg">0</td><td class="n">día/noche fijo, 5-7 pausas, ratón simulado</td><td class="n neg">consola: start/stop</td><td class="n neg">7 KB, un archivo</td></tr>
+      <tr><td>571935 "UNDETECTABLE"</td><td class="n neg">0</td><td class="n neg">promesa sin evidencia; pisa ajustes</td><td class="n neg">—</td><td class="n neg">—</td></tr>
+      <tr><td>NitroTyper.org (cerrado)</td><td class="n neg">—</td><td class="n">"variación y precisión imperfecta"</td><td class="n">web propia</td><td class="n neg">no auditable</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Única ventaja rival real: 552185 simula movimiento de ratón (nosotros no) y UltraType distribuía extensión. En la frontera física todos empatan: un userscript despacha eventos con <code>isTrusted=false</code>; ni UltraType ni nadie lo resuelve sin <code>chrome.debugger</code>.</p>
+
+  <h2>3 · Lo que la investigación añade y lo que falta</h2>
+  <div class="cols">
+    <div>
+      <table>
+        <thead><tr><th>Modelo</th><th>Fuente</th></tr></thead>
+        <tbody>
+          <tr><td>dwell 90-100 ms · flight 190-230 ms</td><td>CMU-CS-20-134</td></tr>
+          <tr><td>log-logística &gt; log-normal en cola</td><td>González 2021</td></tr>
+          <tr><td>ráfagas + picos periódicos delatan bots</td><td>Frontiers 2020, RSC ACM</td></tr>
+          <tr><td>curva diurna: mejor a mediodía</td><td>BiAffect 2020</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <table>
+        <thead><tr><th>Pendiente</th><th>Estado</th></tr></thead>
+        <tbody>
+          <tr><td>keydown/keyup con dwell medible</td><td class="n">bloqueado: exige juego real</td></tr>
+          <tr><td>simulación de ratón</td><td class="n">nueva, medible en banco</td></tr>
+          <tr><td>ESLint real (<code>no-undef</code>)</td><td class="n">requiere devDep</td></tr>
+          <tr><td>partir 80-panel / 90-queue</td><td class="n">en curso</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

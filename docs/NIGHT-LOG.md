@@ -11,6 +11,23 @@ Una entrada por ciclo, la más reciente arriba. Formato:
 - blocked: (solo si aplica, con el motivo y qué haría falta)
 ```
 
+## 23:15 · review + nota + comparacion (pedido directo del dueno)
+
+- El dueno pidio review, nota, deep research y comparacion con otros. Verificado
+  en HEAD (`486c373`): 86/86 live · 417/417 banco CDP · 31 unit · 9/9
+  Firefox+WebKit (tras `npm ci`: la devDep Playwright estaba declarada pero no
+  instalada en este entorno) · 24/24 visuales.
+- Nota: **8.5/10 (A-)**, subida desde 7.8 y desde el 6.6 de la auditoria de
+  8.14.78. Los tres criticos de esa auditoria estan cerrados con commits
+  verificables: inyeccion shell (#23), coordinacion fail-open (#24), estado
+  cruzado entre cuentas (#25/#26). Informe en `docs/review-2026-11-25.html`.
+- Comparacion: UltraTypeBot (0 pruebas, dormido, API de add-ons),
+  Greasyfork 536103 (5.141 instalaciones, 0 pruebas), 552185 (raton simulado,
+  7 KB), 571935 (promesa sin evidencia), NitroTyper.org (cerrado). Ventaja
+  unica rival: el raton simulado; frontera fisica comun: `isTrusted=false`.
+- siguiente: simulacion de raton medible en banco, ESLint real, partir
+  `80-panel`/`90-queue`. Fase 2 sigue bloqueada (exige juego real).
+
 ## 22:15 · fase 3 · vigilante de acreditacion (y rebase sobre 48 commits del autor)
 
 - El autor movio el repo entero: 48 commits, releases 8.14.63-8.14.83, PRs del
