@@ -11,6 +11,8 @@
 > **Cuarto addendum (8.14.82):** la calibración vuelve a comprobar la identidad después de cada `await` y antes de persistir/aplicar; el listener de resultados ignora y se desengancha si el usuario de la carrera cambió. El lease no atómico sigue abierto.
 >
 > **Quinto addendum (8.14.83):** todas las acciones de cola pasan por `runTabAction()`, que mantiene un Web Lock corto `nta:tab-action` durante la revalidación y el inicio del clic/navegación/request. Una prueba real con dos pestañas demuestra que solo un callback se ejecuta. El lease de localStorage queda como estado advisory, no como autoridad.
+>
+> **Sexto addendum (8.14.84):** las paradas manuales quedan marcadas como `manual`, no prescriben y bloquean `runAuto()`, pageshow/bfcache y recuperación de login hasta Resume/Alt+A. Los reintentos de “Race Again” comprueban `session.stopped` antes de cada pulsación. Las paradas automáticas conservan su retención temporal.
 
 ## TL;DR
 

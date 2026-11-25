@@ -315,7 +315,7 @@
       return;
     }
 
-    panic();
+    panic('stopped manually', 0, true);
   }
 
   // Apagar el bot sin cortar una carrera viva: lo comparten Alt+N, Stop y Esc.
@@ -329,7 +329,7 @@
       return;
     }
 
-    panic('turned off from the panel');
+    panic('turned off from the panel', 0, true);
   }
 
   // Marca de parada deliberada, compartida con la cola del garaje: si el bot se
@@ -376,13 +376,33 @@
     return hold;
   }
 
-  function markStopped(reason, holdMs) {
+  function activeStopInfo() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STOP_MARK) || 'null');
+      return saved && Number.isFinite(Number(saved.at)) ? saved : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function manualStopActive() {
+    const saved = activeStopInfo();
+    return Boolean(saved && saved.manual === true);
+  }
+
+  function markStopped(reason, holdMs, manual = false) {
+    const reasonText = String(reason || '');
+    const previous = activeStopInfo();
+    // Una parada automatica tardia no borra una decision manual; solo un ban
+    // terminal puede reemplazarla porque ademas bloquea por reglas distintas.
+    if (previous && previous.manual && !manual && !/permanently banned/i.test(reasonText)) return;
     // Una parada nueva manda sobre la pausa manual que dejó «Clear ban».
     setBanClearHeld(false);
     const entry = {
       at: Date.now(),
-      reason: String(reason || ''),
+      reason: reasonText,
       holdMs: Number(holdMs) > 0 ? Number(holdMs) : 0,
+      manual: manual === true,
     };
     try {
       localStorage.setItem(STOP_MARK, JSON.stringify(entry));
@@ -412,7 +432,7 @@
       return;
     }
 
-    list.push({ at: entry.at, reason: entry.reason, holdMs: entry.holdMs });
+    list.push({ at: entry.at, reason: entry.reason, holdMs: entry.holdMs, manual: entry.manual === true });
     if (list.length > STOP_HISTORY_MAX) list = list.slice(-STOP_HISTORY_MAX);
     try {
       localStorage.setItem(STOP_HISTORY, JSON.stringify(list));
@@ -435,6 +455,7 @@
           holdMs: Number(stop.holdMs) > 0 ? Number(stop.holdMs) : 0,
           clearedAt: Date.now(),
           clearedBy: 'manual',
+          manual: Boolean(stop.manual),
         }));
       }
       localStorage.removeItem(STOP_MARK);
@@ -455,6 +476,7 @@
         clearedAt,
         clearedBy: String(saved.clearedBy || ''),
         holdMs,
+        manual: Boolean(saved.manual),
         // Un baneo permanente no caduca con el reloj: solo se quita cuando el
         // usuario borra la parada a mano (Clear ban).
         terminal: Boolean(!clearedAt && looksTerminalBan(saved.reason)),
@@ -552,7 +574,7 @@
   // Parada de emergencia: corta el bucle y devuelve el teclado al juego.
   // reason se pinta en la linea de estado: el ultimo aviso debe decir POR QUE
   // se paro, no solo que se paro.
-  function panic(reason, holdMs) {
+  function panic(reason, holdMs, manual = false) {
     releaseTypingLock();
     clearPauseGuard();
     session.paused = false;
@@ -577,7 +599,7 @@
     session.stopped = true;
     releaseTabLease();
     fatigueAt = 0;   // session over: fatigue back to zero
-    markStopped(reason || 'stopped', holdMs);
+    markStopped(reason || 'stopped', holdMs, manual);
 
     // Cualquier parada cierra la tanda: se anota en el registro (Alt+H) y el
     // aviso lleva el resumen (media, desvio, precision y DQ) que antes solo
@@ -612,7 +634,7 @@
       }
 
       if (!session.stopped || session.running || session.paused) {
-        panic();
+        panic('stopped manually', 0, true);
         return true;
       }
       return false;

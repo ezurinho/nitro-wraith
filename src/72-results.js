@@ -414,7 +414,7 @@
       if (session.stopManual) {
         // La parada la pidio el usuario, aunque hubiera un hueco del guardia en
         // curso: no se espera ni se retoma sola la tanda.
-        panic('stop requested; no new race opened');
+        panic('stop requested; no new race opened', 0, true);
         return false;
       }
       if (session.breakUntil > Date.now()) {
@@ -426,7 +426,7 @@
         session.stopManual = false;
         if (session.stopped) return false;
       } else {
-        panic('stop requested; no new race opened');
+        panic('stop requested; no new race opened', 0, true);
         return false;
       }
     }
@@ -524,12 +524,14 @@
       log('Site block: the next race is not started again until the wait passes.');
       return false;
     }
+    if (session.stopped) return false;
     log('The next race did not start; trying Enter (the game takes it too)...');
     pressNextRaceKey();
 
     if (await waitForNewRace(previous, CONFIG.nextRaceRetryMs)) {
       return true;
     }
+    if (session.stopped) return false;
 
     log('The next race did not start with Enter either; retrying "Race Again"...');
     clickNextRace();
@@ -960,8 +962,17 @@
     return false;
   }
 
+  function autoStartAllowed() {
+    return !terminalBanActive() && !manualStopActive();
+  }
+
   async function runAuto() {
     if (session.running) return;
+    if (!autoStartAllowed()) {
+      session.stopped = true;
+      updatePanel();
+      return;
+    }
 
     session.running = true;
     session.stopped = false;

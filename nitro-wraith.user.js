@@ -6972,7 +6972,7 @@ function dayCurveAt(at = Date.now()) {
       return;
     }
 
-    panic();
+    panic('stopped manually', 0, true);
   }
 
   // Apagar el bot sin cortar una carrera viva: lo comparten Alt+N, Stop y Esc.
@@ -6986,7 +6986,7 @@ function dayCurveAt(at = Date.now()) {
       return;
     }
 
-    panic('turned off from the panel');
+    panic('turned off from the panel', 0, true);
   }
 
   // Marca de parada deliberada, compartida con la cola del garaje: si el bot se
@@ -7033,13 +7033,33 @@ function dayCurveAt(at = Date.now()) {
     return hold;
   }
 
-  function markStopped(reason, holdMs) {
+  function activeStopInfo() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STOP_MARK) || 'null');
+      return saved && Number.isFinite(Number(saved.at)) ? saved : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function manualStopActive() {
+    const saved = activeStopInfo();
+    return Boolean(saved && saved.manual === true);
+  }
+
+  function markStopped(reason, holdMs, manual = false) {
+    const reasonText = String(reason || '');
+    const previous = activeStopInfo();
+    // Una parada automatica tardia no borra una decision manual; solo un ban
+    // terminal puede reemplazarla porque ademas bloquea por reglas distintas.
+    if (previous && previous.manual && !manual && !/permanently banned/i.test(reasonText)) return;
     // Una parada nueva manda sobre la pausa manual que dejó «Clear ban».
     setBanClearHeld(false);
     const entry = {
       at: Date.now(),
-      reason: String(reason || ''),
+      reason: reasonText,
       holdMs: Number(holdMs) > 0 ? Number(holdMs) : 0,
+      manual: manual === true,
     };
     try {
       localStorage.setItem(STOP_MARK, JSON.stringify(entry));
@@ -7069,7 +7089,7 @@ function dayCurveAt(at = Date.now()) {
       return;
     }
 
-    list.push({ at: entry.at, reason: entry.reason, holdMs: entry.holdMs });
+    list.push({ at: entry.at, reason: entry.reason, holdMs: entry.holdMs, manual: entry.manual === true });
     if (list.length > STOP_HISTORY_MAX) list = list.slice(-STOP_HISTORY_MAX);
     try {
       localStorage.setItem(STOP_HISTORY, JSON.stringify(list));
@@ -7092,6 +7112,7 @@ function dayCurveAt(at = Date.now()) {
           holdMs: Number(stop.holdMs) > 0 ? Number(stop.holdMs) : 0,
           clearedAt: Date.now(),
           clearedBy: 'manual',
+          manual: Boolean(stop.manual),
         }));
       }
       localStorage.removeItem(STOP_MARK);
@@ -7112,6 +7133,7 @@ function dayCurveAt(at = Date.now()) {
         clearedAt,
         clearedBy: String(saved.clearedBy || ''),
         holdMs,
+        manual: Boolean(saved.manual),
         // Un baneo permanente no caduca con el reloj: solo se quita cuando el
         // usuario borra la parada a mano (Clear ban).
         terminal: Boolean(!clearedAt && looksTerminalBan(saved.reason)),
@@ -7209,7 +7231,7 @@ function dayCurveAt(at = Date.now()) {
   // Parada de emergencia: corta el bucle y devuelve el teclado al juego.
   // reason se pinta en la linea de estado: el ultimo aviso debe decir POR QUE
   // se paro, no solo que se paro.
-  function panic(reason, holdMs) {
+  function panic(reason, holdMs, manual = false) {
     releaseTypingLock();
     clearPauseGuard();
     session.paused = false;
@@ -7234,7 +7256,7 @@ function dayCurveAt(at = Date.now()) {
     session.stopped = true;
     releaseTabLease();
     fatigueAt = 0;   // session over: fatigue back to zero
-    markStopped(reason || 'stopped', holdMs);
+    markStopped(reason || 'stopped', holdMs, manual);
 
     // Cualquier parada cierra la tanda: se anota en el registro (Alt+H) y el
     // aviso lleva el resumen (media, desvio, precision y DQ) que antes solo
@@ -7269,7 +7291,7 @@ function dayCurveAt(at = Date.now()) {
       }
 
       if (!session.stopped || session.running || session.paused) {
-        panic();
+        panic('stopped manually', 0, true);
         return true;
       }
       return false;
@@ -8702,7 +8724,7 @@ function dayCurveAt(at = Date.now()) {
       if (session.stopManual) {
         // La parada la pidio el usuario, aunque hubiera un hueco del guardia en
         // curso: no se espera ni se retoma sola la tanda.
-        panic('stop requested; no new race opened');
+        panic('stop requested; no new race opened', 0, true);
         return false;
       }
       if (session.breakUntil > Date.now()) {
@@ -8714,7 +8736,7 @@ function dayCurveAt(at = Date.now()) {
         session.stopManual = false;
         if (session.stopped) return false;
       } else {
-        panic('stop requested; no new race opened');
+        panic('stop requested; no new race opened', 0, true);
         return false;
       }
     }
@@ -8812,12 +8834,14 @@ function dayCurveAt(at = Date.now()) {
       log('Site block: the next race is not started again until the wait passes.');
       return false;
     }
+    if (session.stopped) return false;
     log('The next race did not start; trying Enter (the game takes it too)...');
     pressNextRaceKey();
 
     if (await waitForNewRace(previous, CONFIG.nextRaceRetryMs)) {
       return true;
     }
+    if (session.stopped) return false;
 
     log('The next race did not start with Enter either; retrying "Race Again"...');
     clickNextRace();
@@ -9248,8 +9272,17 @@ function dayCurveAt(at = Date.now()) {
     return false;
   }
 
+  function autoStartAllowed() {
+    return !terminalBanActive() && !manualStopActive();
+  }
+
   async function runAuto() {
     if (session.running) return;
+    if (!autoStartAllowed()) {
+      session.stopped = true;
+      updatePanel();
+      return;
+    }
 
     session.running = true;
     session.stopped = false;
@@ -11748,6 +11781,9 @@ function dayCurveAt(at = Date.now()) {
   // El banco detiene esta copia sin tocar el teclado: el guardia debe soltar el
   // registro en el siguiente latido para que la otra copia tome el relevo.
   window.__ntaDebug.stop = () => panic('debug stop');
+  window.__ntaDebug.manualStop = () => panic('manual test stop', 0, true);
+  window.__ntaDebug.autoStartAllowed = () => autoStartAllowed();
+  window.__ntaDebug.manualStopActive = () => manualStopActive();
   window.__ntaDebug.resume = () => resumeAuto();
   // Las pruebas que siembran el historico necesitan un pintado real sin
   // depender de que la pestana este visible o de la cache de 1.5 s.
@@ -19133,6 +19169,8 @@ function dayCurveAt(at = Date.now()) {
       if (terminalBanActive()) return true;
       const saved = stoppedInfo();
       if (!saved) return false;
+      // Una parada manual no prescribe: solo Resume/Alt+A la borra.
+      if (saved.manual) return true;
       // Una parada de emergencia (racha de DQ) trae su propia retencion: mas
       // larga que la de un tope normal, para no reanudar sola en mitad de una
       // ausencia y regalar la quinta DQ.
@@ -19929,7 +19967,7 @@ function dayCurveAt(at = Date.now()) {
         clearRaceNow();
         setArmed(false);
         garageAutoDone = true;
-        markStopped('stopped from the garage', CONFIG.queue.stopHoldMs);
+        markStopped('stopped from the garage', CONFIG.queue.stopHoldMs, true);
         queueWhy('Stop: queue stopped from the garage; use Resume or Alt+A to start again.');
         paintGaragePanel();
       });
@@ -21872,7 +21910,7 @@ function dayCurveAt(at = Date.now()) {
       hideLoginRefreshBadge();
       // Recuperar la sesion no salta una parada terminal ni la pausa manual
       // que deja «Clear ban»: la cola sigue quieta hasta un Resume explicito.
-      const resumeQueue = !terminalBanActive() && !banClearHeld();
+      const resumeQueue = !stoppedRecently() && !banClearHeld();
       if (resumeQueue) setArmed(true);
       clearLoginRetry();
 

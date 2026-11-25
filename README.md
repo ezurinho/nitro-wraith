@@ -239,7 +239,10 @@ without an accepted character. If Web Locks or the cross-tab lease storage are
 unavailable, automation waits instead of typing without coordination. Queue
 clicks, navigations and Mystery Box requests also hold a short `nta:tab-action`
 Web Lock through revalidation and action initiation; the localStorage lease is
-advisory state, not the authority that permits the action.
+advisory state, not the authority that permits the action. A manual Stop is
+persistent across reloads, bfcache and login recovery; only Resume or
+<kbd>Alt</kbd>+<kbd>A</kbd> clears it. Automatic limits and safety stops keep
+their timed holds.
 
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never

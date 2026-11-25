@@ -1806,6 +1806,8 @@
       if (terminalBanActive()) return true;
       const saved = stoppedInfo();
       if (!saved) return false;
+      // Una parada manual no prescribe: solo Resume/Alt+A la borra.
+      if (saved.manual) return true;
       // Una parada de emergencia (racha de DQ) trae su propia retencion: mas
       // larga que la de un tope normal, para no reanudar sola en mitad de una
       // ausencia y regalar la quinta DQ.
@@ -2602,7 +2604,7 @@
         clearRaceNow();
         setArmed(false);
         garageAutoDone = true;
-        markStopped('stopped from the garage', CONFIG.queue.stopHoldMs);
+        markStopped('stopped from the garage', CONFIG.queue.stopHoldMs, true);
         queueWhy('Stop: queue stopped from the garage; use Resume or Alt+A to start again.');
         paintGaragePanel();
       });
@@ -4545,7 +4547,7 @@
       hideLoginRefreshBadge();
       // Recuperar la sesion no salta una parada terminal ni la pausa manual
       // que deja «Clear ban»: la cola sigue quieta hasta un Resume explicito.
-      const resumeQueue = !terminalBanActive() && !banClearHeld();
+      const resumeQueue = !stoppedRecently() && !banClearHeld();
       if (resumeQueue) setArmed(true);
       clearLoginRetry();
 
