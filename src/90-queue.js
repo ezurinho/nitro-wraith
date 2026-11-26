@@ -1900,6 +1900,23 @@
       }
     }
 
+    function saveQPanelPos() {
+      try {
+        localStorage.setItem(QPANEL_POS, JSON.stringify({
+          left: Math.round(parseFloat(qpanel.host.style.left) || 0),
+          top: Math.round(parseFloat(qpanel.host.style.top) || 0),
+        }));
+      } catch { /* almacenamiento bloqueado */ }
+    }
+
+    function resetQPanelPos() {
+      try { localStorage.removeItem(QPANEL_POS); } catch { /* bloqueado */ }
+      qpanel.host.style.left = 'auto';
+      qpanel.host.style.top = 'auto';
+      qpanel.host.style.right = '16px';
+      qpanel.host.style.bottom = '16px';
+    }
+
     function dragQPanel(handle) {
       let dragging = false;
       let offsetX = 0;
@@ -1927,23 +1944,41 @@
         if (!dragging) return;
         dragging = false;
         handle.style.cursor = 'grab';
-        try {
-          localStorage.setItem(QPANEL_POS, JSON.stringify({
-            left: parseFloat(qpanel.host.style.left) || 0,
-            top: parseFloat(qpanel.host.style.top) || 0,
-          }));
-        } catch { /* almacenamiento bloqueado */ }
+        saveQPanelPos();
       };
 
       handle.addEventListener('pointerup', stop);
       handle.addEventListener('pointercancel', stop);
 
-      handle.addEventListener('dblclick', () => {
-        try { localStorage.removeItem(QPANEL_POS); } catch { /* bloqueado */ }
-        qpanel.host.style.left = 'auto';
-        qpanel.host.style.top = 'auto';
-        qpanel.host.style.right = '16px';
-        qpanel.host.style.bottom = '16px';
+      handle.addEventListener('dblclick', resetQPanelPos);
+
+      // La cabecera tambien es un control de teclado, como la del panel de
+      // carrera: flechas mueven 8 px, Shift 24 y Home devuelve el panel a su
+      // esquina. placeQPanel recorta y saveQPanelPos persiste, asi que puntero
+      // y teclado no pueden acabar en dos posiciones distintas.
+      handle.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) return;
+        if (event.target !== handle && event.target.closest
+          && event.target.closest('button, input, select, textarea, a')) return;
+        event.preventDefault();
+        if (event.key === 'Home') {
+          resetQPanelPos();
+          return;
+        }
+        const step = event.shiftKey ? 24 : 8;
+        let left = parseFloat(qpanel.host.style.left);
+        let top = parseFloat(qpanel.host.style.top);
+        if (!Number.isFinite(left) || !Number.isFinite(top)) {
+          const rect = qpanel.host.getBoundingClientRect();
+          left = rect.left;
+          top = rect.top;
+        }
+        if (event.key === 'ArrowLeft') left -= step;
+        else if (event.key === 'ArrowRight') left += step;
+        else if (event.key === 'ArrowUp') top -= step;
+        else top += step;
+        placeQPanel(left, top);
+        saveQPanelPos();
       });
     }
 
@@ -2330,7 +2365,7 @@
           }
         </style>
         <div class="p" data-mode="auto" data-theme="${panelTheme}">
-          <div class="h" title="Drag to move · double-click to put it back in the corner">
+          <div class="h" tabindex="0" role="group" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Home" aria-label="Garage panel header. Drag or use the arrow keys to move it; Home puts it back in the corner." title="Drag to move · arrow keys move · Home resets · double-click to put it back in the corner">
             <span class="mark" aria-hidden="true">
               <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".2" stroke-width="1.5" stroke-dasharray="1.1 3.4"/><path d="M7 9.5 11.2 22.5 16 13.6 20.8 22.5 25 9.5" stroke-width="2.4"/></svg>
               <i class="dot"></i>

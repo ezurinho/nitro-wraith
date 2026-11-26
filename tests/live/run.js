@@ -5250,6 +5250,48 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         && garageUi.title && garageUi.primary,
       garageUi);
 
+    // La cabecera del garaje es el mismo control que la del panel de carrera:
+    // flechas 8 px, Shift 24 y Home a la esquina. Sin foco de teclado el panel
+    // solo se podia mover con el puntero.
+    const garageKeyboard = await cdp.evaluate(`(() => {
+      const host = document.getElementById('nt-queue-panel');
+      const root = host && host.shadowRoot;
+      const head = root && root.querySelector('.h');
+      if (!head) return { missing: true };
+      localStorage.removeItem('ntQueue:garagePanelPos');
+      host.style.left = '40px';
+      host.style.top = '50px';
+      host.style.right = 'auto';
+      host.style.bottom = 'auto';
+      head.focus();
+      const fire = (key, extra = {}) => head.dispatchEvent(new KeyboardEvent('keydown', {
+        key, bubbles: true, cancelable: true, ...extra,
+      }));
+      fire('ArrowRight');
+      const right = parseFloat(host.style.left);
+      fire('ArrowDown', { shiftKey: true });
+      const down = parseFloat(host.style.top);
+      const stored = JSON.parse(localStorage.getItem('ntQueue:garagePanelPos') || 'null');
+      fire('Home');
+      return {
+        tabIndex: head.tabIndex,
+        right,
+        down,
+        stored,
+        home: { left: host.style.left, top: host.style.top, right: host.style.right, bottom: host.style.bottom },
+        shortcuts: head.getAttribute('aria-keyshortcuts') || '',
+      };
+    })()`, true);
+    check('the garage panel moves 8 px with arrows, 24 px with Shift and returns to its corner on Home',
+      !garageKeyboard.missing
+        && garageKeyboard.tabIndex === 0
+        && garageKeyboard.right === 48 && garageKeyboard.down === 74
+        && garageKeyboard.stored
+        && garageKeyboard.stored.left === 48 && garageKeyboard.stored.top === 74
+        && garageKeyboard.home.left === 'auto' && garageKeyboard.home.top === 'auto'
+        && garageKeyboard.home.right === '16px' && garageKeyboard.home.bottom === '16px'
+        && /Arrow/.test(garageKeyboard.shortcuts), garageKeyboard);
+
     // El AFK y la recuperacion de foco viven en el marco de la carrera, pero el
     // panel del garaje se pinta en la ventana de arriba. Un freeze/resume real
     // del iframe tiene que repintar el estado sin recargar la pagina.

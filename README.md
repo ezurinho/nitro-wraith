@@ -188,6 +188,7 @@ Manual install: create a new Tampermonkey script and paste
 | <kbd>Esc</kbd> / <kbd>Alt</kbd> + <kbd>S</kbd> | Stop after the current race |
 | <kbd>Alt</kbd> + <kbd>T</kbd> | Cycle the panel theme |
 | <kbd>Alt</kbd> + <kbd>G</kbd> | Fold the garage panel |
+| <kbd>Home</kbd> (focus the garage header) | Return the garage panel to its corner |
 | <kbd>Alt</kbd> + <kbd>M</kbd> | Mini-HUD: full, compact or hidden |
 | <kbd>Alt</kbd> + <kbd>R</kbd> | Clear the panel history |
 | <kbd>Alt</kbd> + <kbd>H</kbd> | Print closed sessions to the console |
