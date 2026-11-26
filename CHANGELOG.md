@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.87 — 2026-11-26
+
+- feat(garage): move the panel with the keyboard and Home
+
 ## 8.14.86 — 2026-11-25
 
 - fix(stop): keep a manual stop until an explicit resume
