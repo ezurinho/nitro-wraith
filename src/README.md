@@ -28,6 +28,7 @@ listed in `tools/build.js`:
 | `82-panel-rail.js` | Rail tabs, view mounting and slider fills |
 | `83-panel-html.js` | Panel shadow-root markup, built lazily once per page (`panelHtml()`) |
 | `85-queue-helpers.js` | Queue helpers that carry no queue state (DOM, labels, routes, formatting) |
+| `89-queue-garage-html.js` | Garage panel HTML/CSS template; the only interpolation is the saved theme |
 | `90-queue.js` | Queue, navigation and recovery |
 | `95-stickers.js` | Sticker selection |
 | `96-guard.js` | WPM guard and duplicate-instance protection |

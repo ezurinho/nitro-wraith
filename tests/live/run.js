@@ -1529,6 +1529,30 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && keyboardMove.stored && keyboardMove.stored.left === 16 && keyboardMove.stored.top === 16
       && /Arrow/.test(keyboardMove.shortcuts), keyboardMove);
 
+  const tabMemory = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const tune = s.querySelector('[data-tab-btn="tune"]');
+    const stats = s.querySelector('[data-tab-btn="stats"]');
+    if (!tune || !stats) return { missing: true };
+    tune.click();
+    const tuned = {
+      stored: w.localStorage.getItem('autoTyperPanelTab'),
+      selected: tune.getAttribute('aria-selected'),
+      tabIndex: tune.tabIndex,
+      statsSelected: stats.getAttribute('aria-selected'),
+      statsTab: stats.tabIndex,
+    };
+    stats.click();
+    return { ...tuned, final: w.localStorage.getItem('autoTyperPanelTab') };
+  })()`, true);
+  check('the rail remembers the last tab and keeps roving tabindex',
+    !tabMemory.missing
+      && tabMemory.stored === 'tune' && tabMemory.final === 'stats'
+      && tabMemory.selected === 'true' && tabMemory.tabIndex === 0
+      && tabMemory.statsSelected === 'false' && tabMemory.statsTab === -1,
+    tabMemory);
+
   const rhythm = await cdp.evaluate(`(() => {
     const w = document.querySelector('iframe').contentWindow;
     const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;

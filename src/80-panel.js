@@ -3018,7 +3018,8 @@
         if (!btn) return;
         event.stopPropagation();
         showTab(btn.dataset.tabBtn);
-        btn      });
+        btn.focus();
+      });
 
       // Patron tablist: flechas, Home y End mueven la vista y el foco. No toca
       // el teclado del juego porque solo se activa con el foco dentro del rail.
@@ -3207,7 +3208,8 @@
       panel.refs.acctRefresh.addEventListener('click', (event) => {
         event.stopPropagation();
         refreshCalibration();
-        panel.refs.acctRefresh      });
+        panel.refs.acctRefresh.focus();
+      });
     }
 
     // Overrides manuales de WPM y precision. `change` evita aplicar cada tecla
@@ -3278,7 +3280,8 @@
     panel.refs.toggle.addEventListener('click', (event) => {
       event.stopPropagation();
       setPaused(!session.paused);
-      panel.refs.toggle    });
+      panel.refs.toggle.focus();
+    });
 
     panel.refs.stop.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -3286,7 +3289,8 @@
       // lo mismo que Alt+A, con las mismas puertas (tope diario y horas).
       if (session.stopped) resumeAuto();
       else requestStop();
-      panel.refs.stop    });
+      panel.refs.stop.focus();
+    });
 
     panel.refs.collapse.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -3294,7 +3298,8 @@
       applyCollapsed(collapsed);
       restorePosition();
       if (!collapsed) updatePanel(true);
-      panel.refs.collapse    });
+      panel.refs.collapse.focus();
+    });
 
     // El chip del modo no es un interruptor: dice AUTO y nada mas. Parar es
     // cosa de Stop / Esc, y la cola se rearma sola.
@@ -3305,7 +3310,8 @@
         event.stopPropagation();
         const index = PACE_ORDER.indexOf(paceProfile);
         setPaceProfile(PACE_ORDER[(index + 1) % PACE_ORDER.length]);
-        panel.refs.pace      });
+        panel.refs.pace.focus();
+      });
     }
 
     // Tema: un solo escuchador para las seis muestras. El CSS hace el resto.
@@ -3315,7 +3321,8 @@
         if (!chip) return;
         event.stopPropagation();
         setTheme(chip.dataset.themeBtn);
-        chip      });
+        chip.focus();
+      });
     }
 
     if (panel.refs.rgbLab) {
@@ -3363,7 +3370,8 @@
       panel.refs.gear.addEventListener('click', (event) => {
         event.stopPropagation();
         showTab(panel.root.dataset.tab === 'tune' ? 'stats' : 'tune');
-        panel.refs.gear      });
+        panel.refs.gear.focus();
+      });
     }
 
     // Los chips del cajon: perfil, interruptores y exportar/importar. Un solo
@@ -3433,7 +3441,8 @@
           try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
         }
 
-        chip      });
+        chip.focus();
+      });
     }
 
     if (panel.refs.nitroStrategy) {
@@ -3449,7 +3458,8 @@
       panel.refs.liveLoad.addEventListener('click', (event) => {
         event.stopPropagation();
         panel.refs.liveFile.click();
-        panel.refs.liveLoad      });
+        panel.refs.liveLoad.focus();
+      });
       panel.refs.liveFile.addEventListener('change', () => {
         const file = panel.refs.liveFile.files && panel.refs.liveFile.files[0];
         if (file) loadLiveCsv(file);
@@ -3461,7 +3471,8 @@
       panel.refs.liveClear.addEventListener('click', (event) => {
         event.stopPropagation();
         clearLivePasses();
-        panel.refs.liveClear      });
+        panel.refs.liveClear.focus();
+      });
     }
     for (const select of [panel.refs.livePickA, panel.refs.livePickB]) {
       if (select) select.addEventListener('change', paintLivePick);
@@ -3470,9 +3481,16 @@
       panel.refs.livePickExport.addEventListener('click', (event) => {
         event.stopPropagation();
         downloadLiveCompareCsv();
-        panel.refs.livePickExport      });
+        panel.refs.livePickExport.focus();
+      });
     }
     renderLivePasses();
+
+    // El rail recuerda la ultima vista, como la posicion: abrir Tune y volver
+    // manana no debe devolver el panel a Live. El valor se sanea contra el
+    // orden real de pestanas, no contra un string guardado cualquiera.
+    const savedTab = disk.get(KEYS.panelTab);
+    showTab(TAB_ORDER.includes(savedTab) ? savedTab : 'stats');
 
     paintConfig();
     updatePanel();

@@ -43,6 +43,7 @@
     hydrateView(name);
     const index = TAB_ORDER.indexOf(name);
     panel.root.dataset.tab = name;
+    disk.set(KEYS.panelTab, name);
     if (panel.refs.rail) {
       if (panel.refs.rail.dataset.index !== String(index)) {
         panel.refs.rail.dataset.index = String(index);

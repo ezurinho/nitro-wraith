@@ -53,8 +53,9 @@ function panelCssFrom(script) {
 }
 
 function garageCssFrom(script) {
-  const marker = 'root.innerHTML = `';
-  const at = script.indexOf(marker);
+  // La plantilla vive en 89-queue-garage-html.js desde 8.14.87; el bundle la
+  // concatena, asi que la funcion sigue siendo la unica marca estable.
+  const at = script.indexOf('function garagePanelHtml(');
   if (at < 0) return '';
   const style = script.indexOf('<style>', at);
   const end = style < 0 ? -1 : script.indexOf('</style>', style);

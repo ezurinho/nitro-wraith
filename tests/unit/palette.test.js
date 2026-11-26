@@ -2,7 +2,8 @@
 
 /*
  * Las dos pieles viven en fragmentos distintos: el panel grande declara sus
- * temas en `src/79-panel-css.js` y el garaje los repite en `src/90-queue.js`
+ * temas en `src/79-panel-css.js` y el garaje los repite en
+ * `src/89-queue-garage-html.js`
  * porque cada uno tiene su propio shadow root. Copiar a mano invita a que un
  * tema quede a medias entre paneles, asi que esta prueba compara las dos
  * declaraciones token a token sin abrir Chrome.
@@ -57,7 +58,7 @@ function baseBlock(text, selector) {
 }
 
 const panel = read('79-panel-css.js');
-const garage = read('90-queue.js');
+const garage = read('89-queue-garage-html.js');
 
 test('the garage repeats every themed palette token for token', () => {
   const panelThemes = themeBlocks(panel, '\\.panel');

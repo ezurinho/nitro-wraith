@@ -17,6 +17,14 @@ export default [
       // El bundle es un solo IIFE: una declaracion que ya nadie lee es deuda
       // o el residuo de una extraccion. no-undef no la ve; esta regla si.
       'no-unused-vars': ['error', { args: 'after-used', caughtErrors: 'none' }],
+      // Un identificador suelto como `btn      });` parsea y no hace nada:
+      // asi se perdieron doce llamadas a .focus(). Las expresiones de
+      // cortocircuito y ternario siguen permitidas; el no-op no.
+      'no-unused-expressions': ['error', {
+        allowShortCircuit: true,
+        allowTernary: true,
+        allowTaggedTemplates: true,
+      }],
     },
   },
   {

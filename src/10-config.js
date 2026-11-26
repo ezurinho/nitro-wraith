@@ -856,6 +856,7 @@
     accSeries: 'dynamicAccuracies',
     panelCollapsed: 'autoTyperPanelCollapsed',
     panelPosition: 'autoTyperPanelPosition',
+    panelTab: 'autoTyperPanelTab',
     panelTheme: 'autoTyperPanelTheme',
     visuals: 'autoTyperVisuals',
     season: 'autoTyperSeason',
