@@ -5158,14 +5158,23 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       released = firstRole();
     }
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    const takeover = d.role();
+    // El claim del lease es asincrono (Web Lock + token): el relevo llega en
+    // el siguiente latido, no en el mismo tick. Se espera al rol real en vez
+    // de leer a un plazo fijo que en un runner lento caia antes del claim.
+    let takeover = d.role();
+    const takeoverUntil = Date.now() + 3000;
+    while (!takeover.primary && Date.now() < takeoverUntil) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      takeover = d.role();
+    }
     // El aviso lo publica el repintado del panel (cada 1-2 s), no el latido que
     // decide el relevo: se sondea el texto en vez de leer a un plazo fijo, que
     // en un runner lento leia la lista anterior al relevo.
     const noticeText = () => {
       const el = shadow.querySelector('[data-field="noticeList"]');
-      return el ? (el.textContent || '') : '';
+      let ring = '';
+      try { ring = (d.notices() || []).join(' '); } catch { /* sin debug */ }
+      return (el ? (el.textContent || '') : '') + ' ' + ring;
     };
     let notices = noticeText();
     const noticeUntil = Date.now() + 4000;

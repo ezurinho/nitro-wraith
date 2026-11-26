@@ -19,7 +19,14 @@ test('the tab-action lock is short-lived and fails closed', () => {
   assert.match(guard, /const TAB_ACTION_LOCK = 'nta:tab-action'/);
   assert.match(guard, /navigator\.locks\.request\(TAB_ACTION_LOCK, \{ ifAvailable: true \}/);
   assert.match(guard, /if \(!lock\) return false/);
-  assert.match(guard, /if \(!claimTabLease\(String\(reason \|\| ''\), false\)\) return false/);
+  assert.match(guard, /await claimTabLeaseAtomic\(String\(reason \|\| ''\), false\)/);
+});
+
+test('the tab lease is claimed under a Web Lock and sealed with a token', () => {
+  assert.match(guard, /const TAB_LEASE_LOCK = 'nta:tab-lease'/);
+  assert.match(guard, /navigator\.locks\.request\(TAB_LEASE_LOCK, \{ ifAvailable: true \}/);
+  assert.match(guard, /token,/);
+  assert.match(guard, /String\(lease\.token \|\| ''\) === tabLeaseToken/);
 });
 
 summary('tab action lock');

@@ -25,6 +25,10 @@
   const GUARD_REGISTRY = '__ntaInstances';
   const GUARD_STANDBY = '__ntaStandby';
   const TAB_LEASE = 'nta:tabLease';
+  const TAB_LEASE_LOCK = 'nta:tab-lease';
+  // Un lease recien reclamado no es un lease de garaje: se le da un latido
+  // para marcarse como 'typing' antes de que otra carrera viva lo tome.
+  const TAB_TAKEOVER_GRACE_MS = 2500;
   const TAB_NAME_PREFIX = 'nta-tab:';
   const TYPING_LOCK = 'nta:typing';
   const TAB_ACTION_LOCK = 'nta:tab-action';
@@ -33,10 +37,11 @@
   let typingLockRelease = null;
   let typingLockPending = null;
   let typingLockEpoch = 0;
-  let tabPrimary = true;       // false = otra pestaña tiene el lease
+  let tabPrimary = false;      // false = el lease aun no se ha reclamado o es de otra pestaña
   let typingRescueUntil = 0;   // ventana en la que una carrera viva recupera el teclado
   let typingRescueAt = 0;      // ultimo rescate, para no repetir el aviso cada tick
   let tabRoleNoted = false;
+  let tabLeaseNoted = false;   // esta pestaña estuvo en espera por el lease
   let guardId = null;          // id de esta copia en el registro del documento
   let guardSince = 0;          // cuando se registro (desempate de la eleccion)
   let guardReleased = false;   // solto el mando al pararse; al volver entra como nueva
@@ -44,7 +49,6 @@
   let penSince = 0;            // cuando esta copia tomo el turno (0 = no lo tiene)
   let primaryRole = true;      // false = otra copia de la misma pagina manda
   let peerCount = 1;           // copias del script vivas en esta pagina
-  let roleNoted = false;       // el aviso de "otra copia" se da una sola vez
   let roleCheckedAt = 0;       // ultima eleccion consultada (cada 250 ms)
   let hudWarnedAt = 0;         // ultimo aviso de "el HUD no cuadra con lo mio"
   let abandonRace = false;     // el guardia manda: esta carrera se suelta
@@ -88,6 +92,34 @@
       if (window.top === window) window.name = TAB_NAME_PREFIX + id;
     } catch { /* window.name bloqueado */ }
     return tabId;
+  }
+
+  // El token es la prueba de que el lease sigue siendo de esta pestaña. Sin
+  // el, dos pestañas pueden leer el mismo hueco y creerse dueñas; con el, la
+  // que pierde la carrera atomica ve un token distinto y se aparta.
+  function newLeaseToken() {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+    } catch { /* contexto sin crypto */ }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+
+  // Las dos mitades de una pestaña (cola y iframe) comparten el token por el
+  // top, igual que comparten tabId. Dos pestañas distintas no lo comparten.
+  function tabLeaseTokenForTab() {
+    if (tabLeaseToken) return tabLeaseToken;
+    try {
+      if (window.top && window.top.__ntaLeaseToken) {
+        tabLeaseToken = String(window.top.__ntaLeaseToken);
+      }
+    } catch { /* top de otro origen */ }
+    if (!tabLeaseToken) tabLeaseToken = newLeaseToken();
+    try {
+      if (window.top) window.top.__ntaLeaseToken = tabLeaseToken;
+    } catch { /* top de otro origen */ }
+    return tabLeaseToken;
   }
 
   // Web Locks es la exclusion real entre pestañas: localStorage solo sirve de
@@ -165,6 +197,7 @@
   // pestañas del perfil. No sustituye a la eleccion del window: la complementa.
   // Un tipador de la pestaña A no puede mandar teclas si la pestaña B lo tiene.
   let tabLeaseStorageError = false;
+  let tabLeaseToken = '';
   function readTabLease() {
     tabLeaseStorageError = false;
     try {
@@ -187,40 +220,86 @@
     return Boolean(lease && String(lease.tab) !== tabIdentity());
   }
 
-  // true = esta pestaña puede actuar. Si el lease es de otra pestaña y sigue
-  // fresco, no se toca: la copia en espera no abre carreras ni reclama cajas.
-  function claimTabLease(reason = '', force = false) {
-    try {
-      const now = Date.now();
-      const tab = tabIdentity();
-      const lease = readTabLease();
-      if (tabLeaseStorageError) return false;
-      // Una carrera viva puede recuperar el turno de una pestaña de garaje que
-      // lo tenia sin estar escribiendo. Sin esto, pulsar Resume/Race Now en el
-      // garaje dejaba a la pestaña de la carrera en standby y la carrera se
-      // quedaba sin teclas hasta la DQ. No se pisa a otra pestaña que ya esta
-      // escribiendo (reason 'typing'): esa es la que debe seguir.
-      if (lease && String(lease.tab) !== tab && !force) return false;
-      if (lease && lease.id === INSTANCE_ID && now - Number(lease.at) < 900) return true;
+  // Un lease solo vale mientras su token siga siendo el de esta pestaña. La
+  // lectura puede ser vieja; el token es lo que impide que una copia que perdio
+  // la carrera siga actuando con el lease de la otra.
+  function tabLeaseOwned() {
+    const lease = readTabLease();
+    if (tabLeaseStorageError || !lease) return false;
+    return String(lease.tab) === tabIdentity()
+      && Boolean(tabLeaseToken)
+      && String(lease.token || '') === tabLeaseToken;
+  }
 
-      // Si el lease es de esta pestaña pero lo escribio la otra mitad (cola o
-      // iframe), se actualiza el titular sin cambiar de pestaña.
-      localStorage.setItem(TAB_LEASE, JSON.stringify({
-        tab, id: INSTANCE_ID, at: now, reason: String(reason || ''),
-      }));
-      return true;
+  // true = esta pestaña puede actuar. El Web Lock es el punto de decision, no
+  // localStorage: dos pestañas pueden leer la misma clave vacia, pero solo una
+  // puede estar dentro de este callback. `ifAvailable` es deliberado: una
+  // accion que no consigue el turno ahora se salta y la cola la reintenta, en
+  // vez de esperar detras de una pestaña que puede estar ocupada.
+  function claimTabLeaseAtomic(reason = '', force = false) {
+    if (!typingLocksAvailable()) return Promise.resolve(false);
+    let request;
+    try {
+      request = navigator.locks.request(TAB_LEASE_LOCK, { ifAvailable: true }, (lock) => {
+        if (!lock) return false;
+        try {
+          const now = Date.now();
+          const tab = tabIdentity();
+          const lease = readTabLease();
+          if (tabLeaseStorageError) return false;
+          // Una carrera viva puede recuperar el turno de una pestaña de garaje
+          // que lo tenia sin estar escribiendo. No se pisa a otra pestaña que ya
+          // esta escribiendo (reason 'typing') salvo con force, que es el rescate
+          // explicito de una carrera que se quedo sin teclas.
+          if (lease && String(lease.tab) !== tab && !force) return false;
+
+          // Las dos mitades de esta pestaña comparten token. Una toma forzada
+          // desde otra pestaña recibe uno nuevo para invalidar al dueño anterior.
+          let token = tabLeaseTokenForTab();
+          if (lease && String(lease.tab) === tab && lease.token && !force) {
+            token = String(lease.token);
+            tabLeaseToken = token;
+            try { if (window.top) window.top.__ntaLeaseToken = token; } catch { /* top bloqueado */ }
+          } else if (force) {
+            token = newLeaseToken();
+            tabLeaseToken = token;
+            try { if (window.top) window.top.__ntaLeaseToken = token; } catch { /* top bloqueado */ }
+          }
+
+          // Un clic de cola no borra la marca de que esta pestaña es la que
+          // teclea: si lo hiciera, otra pestaña con carrera viva podria tomar el
+          // lease como si fuera una pestaña de garaje.
+          const nextReason = lease && String(lease.tab) === tab
+            && String(lease.reason || '') === 'typing'
+            ? 'typing'
+            : String(reason || '');
+          localStorage.setItem(TAB_LEASE, JSON.stringify({
+            tab, id: INSTANCE_ID, token, at: now, reason: nextReason,
+          }));
+          return true;
+        } catch {
+          // Sin localStorage no se puede coordinar: no se actua ni se escribe.
+          return false;
+        }
+      });
     } catch {
-      // Sin localStorage no se puede coordinar: no se actua ni se escribe.
-      return false;
+      return Promise.resolve(false);
     }
+    return request.catch(() => false);
+  }
+
+  // Vista sincrona para diagnostico y para el check fail-closed. No concede
+  // nada: solo claimTabLeaseAtomic() escribe un lease nuevo.
+  function claimTabLease() {
+    return tabLeaseOwned();
   }
 
   async function runTabAction(reason, action) {
     if (!typingLocksAvailable() || typeof action !== 'function') return false;
     try {
-      return await navigator.locks.request(TAB_ACTION_LOCK, { ifAvailable: true }, (lock) => {
+      return await navigator.locks.request(TAB_ACTION_LOCK, { ifAvailable: true }, async (lock) => {
         if (!lock) return false;
-        if (!claimTabLease(String(reason || ''), false)) return false;
+        if (!(await claimTabLeaseAtomic(String(reason || ''), false))) return false;
         try {
           return action() === true;
         } catch {
@@ -244,8 +323,17 @@
       if (!raw) return false;
       const lease = JSON.parse(raw);
       if (!lease) return false;
-      if (!force && String(lease.tab) !== tabIdentity()) return false;
+      // La otra mitad de la misma pestaña puede soltar el lease sin token (una
+      // instalacion vieja o el harness) o con el token compartido. Una copia
+      // parada que ya limpio su token no puede borrar el lease que acaba de
+      // reclamar la copia viva de la misma pestaña.
+      if (!force) {
+        if (String(lease.tab) !== tabIdentity()) return false;
+        if (lease.token && String(lease.token) !== tabLeaseToken) return false;
+      }
       localStorage.removeItem(TAB_LEASE);
+      tabLeaseToken = '';
+      try { if (window.top) delete window.top.__ntaLeaseToken; } catch { /* top bloqueado */ }
       return true;
     } catch {
       return false;
@@ -257,12 +345,12 @@
   // pestaña parada no se queda el turno, y nunca toca el de otra pestaña.
   function renewTabLease() {
     try {
+      if (!tabLeaseOwned()) return false;
       const raw = localStorage.getItem(TAB_LEASE);
       if (!raw) return false;
       const lease = JSON.parse(raw);
-      if (!lease || String(lease.tab) !== tabIdentity()) return false;
-      if (Date.now() - Number(lease.at) > CONFIG.guard.tabLeaseStaleMs) return false;
-      localStorage.setItem(TAB_LEASE, JSON.stringify({ ...lease, at: Date.now() }));
+      if (!lease) return false;
+      localStorage.setItem(TAB_LEASE, JSON.stringify({ ...lease, token: tabLeaseToken, at: Date.now() }));
       return true;
     } catch {
       return false;
@@ -276,7 +364,9 @@
       tab,
       owner: lease ? String(lease.tab) : null,
       holder: lease ? String(lease.id || '') : '',
+      token: lease ? String(lease.token || '') : '',
       mine: Boolean(lease && String(lease.tab) === tab),
+      owned: tabLeaseOwned(),
       at: lease ? Number(lease.at) : 0,
       // Tiempo que le queda al titular antes de que otra pestaña pueda tomar
       // el relevo. Negativo o 0 = ya caducado (readTabLease lo ignora).
@@ -297,7 +387,12 @@
     leaseBeatQueued = true;
     preciseSleep(4000).then(() => {
       leaseBeatQueued = false;
-      renewTabLease();
+      // Una copia parada no reclama el turno: su refreshRole ya lo solto y el
+      // latido no debe resucitarlo mientras la copia viva sigue escribiendo.
+      if (!session.stopped) {
+        if (tabLeaseOwned()) renewTabLease();
+        else claimTabLeaseAtomic('lease beat', false);
+      }
       leaseBeat();
     });
   }
@@ -346,19 +441,33 @@
     // de una misma pestaña comparten tabIdentity, asi que no compiten aqui.
     const wasTabPrimary = tabPrimary;
     const lease = readTabLease();
-    const ownLease = !lease || String(lease.tab) === tabIdentity();
+    const ownLease = tabLeaseOwned();
     // Una pestaña con carrera viva manda sobre una pestaña de garaje que solo
     // tiene el lease por haber pulsado Resume/Race Now. Si la otra pestaña ya
     // esta escribiendo, no se toca: solo hay un teclado.
+    const leaseAge = lease ? Date.now() - Number(lease.at) : Infinity;
     const liveTakeover = Boolean(primary && !ownLease && raceIsLive()
-      && String(lease.reason || '') !== 'typing');
+      && String(lease.reason || '') !== 'typing'
+      && leaseAge >= TAB_TAKEOVER_GRACE_MS);
     let tabTurn = false;
     if (primary) {
-      tabTurn = claimTabLease('typing', liveTakeover);
+      tabTurn = ownLease;
+      // El claim es atomico y asincrono; el siguiente latido ve el token. Hasta
+      // entonces esta copia no teclea ni pulsa nada. Si el lease es nuestro pero
+      // un clic de cola le cambio el motivo, se vuelve a marcar como 'typing'
+      // para que otra pestaña no lo tome por un lease de garaje.
+      if (!tabTurn || String(lease.reason || '') !== 'typing') {
+        requestTabLeaseClaim('typing', liveTakeover);
+      }
     } else {
       tabTurn = ownLease;
     }
     tabPrimary = tabTurn;
+    if (primary && !tabTurn) tabLeaseNoted = true;
+    if (tabTurn && !wasTabPrimary && tabLeaseNoted) {
+      tabLeaseNoted = false;
+      log(`Pen: this copy #${shortId(guardId || INSTANCE_ID)} takes the turn.`);
+    }
     // El lock de tecleo pertenece al rol que acaba de decidir esta funcion. Si
     // el turno se fue a otra copia/pestaña, se suelta aqui mismo: esperar al
     // siguiente await del bucle dejaba una ventana en la que la pestaña en
@@ -384,14 +493,13 @@
         const holder = leader ? `#${shortId(leader.id)}` : 'another copy';
         log(`Pen: ${holder} has the turn; this copy #${shortId(guardId || INSTANCE_ID)} stands by.`);
         beep('standby');
-      } else if (roleNoted) {
+      } else {
         const from = previousLeader && previousLeader.id !== (guardId || INSTANCE_ID)
           ? ` from #${shortId(previousLeader.id)}`
           : '';
         log(`Pen: this copy #${shortId(guardId || INSTANCE_ID)} takes the turn${from}.`);
       }
 
-      roleNoted = !primary;
     }
 
     // El turno se cuenta desde que esta copia lo tomo, no desde que arranco:
@@ -465,17 +573,30 @@
   function takeTypingTurn(reason) {
     const now = Date.now();
     if (now - typingRescueAt < 1000) return false;
-    if (!claimTabLease('typing', true)) return false;
     typingRescueAt = now;
-    typingRescueUntil = now + 6000;
-    try {
-      const flag = { keep: INSTANCE_ID, reason: reason || 'live race rescue', at: now };
-      window[GUARD_STANDBY] = flag;
-      if (window.top !== window) window.top[GUARD_STANDBY] = flag;
-    } catch { /* sin acceso */ }
-    tabPrimary = true;
-    log('The live race had no keys for a few seconds; taking the typing turn back.');
+    requestTabLeaseClaim('typing', true).then((ok) => {
+      if (!ok) return;
+      typingRescueUntil = Date.now() + 6000;
+      try {
+        const flag = { keep: INSTANCE_ID, reason: reason || 'live race rescue', at: Date.now() };
+        window[GUARD_STANDBY] = flag;
+        if (window.top !== window) window.top[GUARD_STANDBY] = flag;
+      } catch { /* sin acceso */ }
+      // No se adelanta tabPrimary: el rescate ya desbloquea standbySnapshot y
+      // refreshRole debe ver la transicion para anunciar el relevo en el log.
+      log('The live race had no keys for a few seconds; taking the typing turn back.');
+    });
     return true;
+  }
+
+  // Reclama el lease sin bloquear el latido. Si otro claim de esta pestaña ya
+  // esta en vuelo, se comparte; si el lock esta ocupado, el siguiente latido
+  // vuelve a intentarlo.
+  function requestTabLeaseClaim(reason, force) {
+    // No se pinta el rol desde aqui: refreshRole debe ver la transicion
+    // false -> true en su siguiente latido para anunciar el relevo. Adelantar
+    // tabPrimary borraba el aviso "takes the turn" y dejaba el panel mudo.
+    return claimTabLeaseAtomic(reason, force);
   }
 
   // Esta copia no manda teclas: o la eleccion de esta ventana ha dado el mando a

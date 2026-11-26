@@ -1670,6 +1670,8 @@
   window.__ntaDebug.acquireTypingLock = (options = {}) => acquireTypingLock(options);
   window.__ntaDebug.claimTabLease = (reason = '', force = false) =>
     claimTabLease(String(reason || ''), Boolean(force));
+  window.__ntaDebug.claimTabLeaseAtomic = (reason = '', force = false) =>
+    claimTabLeaseAtomic(String(reason || ''), Boolean(force));
   window.__ntaDebug.tabAction = (reason, action) => runTabAction(reason, action);
   window.__ntaDebug.dropTabLease = () => releaseTabLease(true);
   // La eleccion de copia, sobre un registro de mentira: el harness comprueba
@@ -1678,6 +1680,10 @@
   // Liberacion normal (sin force), para el banco: comprueba que una pestaña
   // suelta el lease aunque lo haya escrito su otra mitad.
   window.__ntaDebug.releaseLease = () => releaseTabLease();
+  // La copia que no pinta el panel (createPanel reutiliza el existente) sigue
+  // teniendo su propio anillo de avisos; el banco lee la fuente real, no solo
+  // el DOM del panel de la primera copia.
+  window.__ntaDebug.notices = () => noticeRing.map((item) => item.text);
   window.__ntaDebug.role = () => {
     const standby = standbyActive();
     let frame = null;
