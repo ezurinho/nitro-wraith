@@ -142,7 +142,96 @@
   function resetAfkFreezeStats() {
     afkFreezeStats = { count: 0, lastAt: 0, lastDurationMs: 0, totalMs: 0 };
     saveAfkFreezeStats();
+    // El reset de AFK tambien levanta el freno posterior a un freeze: es la
+    // salida manual cuando el usuario ya esta delante y quiere volver a probar.
+    clearAfkHold('freeze stats reset');
     return { ...afkFreezeStats };
+  }
+
+  // AFK freeze hold. Un freeze durante una carrera significa que el navegador
+  // ya ignoro el keep-alive: abrir otra carrera oculta al volver es repetir el
+  // mismo experimento. En vez de apagar AFK del todo, se exige una carrera con
+  // la pestana visible; esa carrera demuestra que el documento puede teclear y
+  // limpia el freno. Vive en localStorage porque el freeze ocurre en el marco
+  // de la carrera y la cola puede estar en la ventana de arriba.
+  const AFK_HOLD_KEY = 'nta:afkHold';
+  let afkHoldPrivate = false;
+  function parseAfkHold(raw) {
+    try {
+      const saved = JSON.parse(raw || 'null');
+      const at = Math.max(0, Number(saved && saved.at) || 0);
+      if (!at) return null;
+      return {
+        at,
+        reason: String((saved && saved.reason) || 'a freeze during a race').slice(0, 160),
+      };
+    } catch {
+      return null;
+    }
+  }
+  let afkHold = (() => {
+    try { return parseAfkHold(localStorage.getItem(AFK_HOLD_KEY)); } catch { return null; }
+  })();
+  function saveAfkHold() {
+    try {
+      if (afkHold) localStorage.setItem(AFK_HOLD_KEY, JSON.stringify(afkHold));
+      else localStorage.removeItem(AFK_HOLD_KEY);
+      afkHoldPrivate = false;
+    } catch {
+      // Modo privado o cuota llena: el freno sigue valiendo en esta ventana.
+      afkHoldPrivate = true;
+    }
+  }
+  function refreshAfkHold() {
+    if (afkHoldPrivate) return afkHold;
+    let raw = null;
+    try {
+      raw = localStorage.getItem(AFK_HOLD_KEY);
+    } catch {
+      return afkHold;
+    }
+    if (raw === null) {
+      afkHold = null;
+      return null;
+    }
+    const saved = parseAfkHold(raw);
+    if (saved) {
+      if (!afkHold || afkHold.at !== saved.at || afkHold.reason !== saved.reason) afkHold = saved;
+    }
+    return afkHold;
+  }
+  function afkHoldActive() {
+    const hold = refreshAfkHold();
+    return Boolean(hold && hold.at);
+  }
+  function afkHoldInfo() {
+    const hold = refreshAfkHold();
+    if (!hold) return { active: false, at: 0, reason: '', ageMs: 0 };
+    return {
+      active: true,
+      at: hold.at,
+      reason: hold.reason,
+      ageMs: Math.max(0, Date.now() - hold.at),
+    };
+  }
+  function armAfkHold(reason) {
+    if (afkHoldActive()) return false;
+    afkHold = {
+      at: Date.now(),
+      reason: String(reason || 'a freeze during a race').slice(0, 160),
+    };
+    saveAfkHold();
+    log(`AFK freeze hold: ${afkHold.reason}. Hidden races wait for one visible race.`);
+    if (typeof noteFlight === 'function') noteFlight('afk-hold', afkHold.reason);
+    return true;
+  }
+  function clearAfkHold(reason) {
+    if (!afkHoldActive()) return false;
+    afkHold = null;
+    saveAfkHold();
+    log(`AFK freeze hold cleared${reason ? `: ${reason}` : ''}.`);
+    if (typeof noteFlight === 'function') noteFlight('afk-hold', `cleared: ${reason || 'manual'}`);
+    return true;
   }
   // El freeze ocurre en el iframe de la carrera, pero el garaje vive en la
   // ventana de arriba. Sin esta relectura, el contador del garaje se quedaba

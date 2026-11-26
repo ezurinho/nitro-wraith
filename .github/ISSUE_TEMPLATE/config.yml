@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/ezurinho/nitro-wraith/blob/main/docs/TROUBLESHOOTING.md
+    about: Safe mode, UI drift, queue gates, updates and the support bundle.
+  - name: Security policy
+    url: https://github.com/ezurinho/nitro-wraith/security/policy
+    about: Report a vulnerability privately. Never post tokens or account data.

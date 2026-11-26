@@ -253,6 +253,39 @@
     return null;
   })();
 
+  // Objetivo recomendado, no una serie fija: el centro sale de la cuenta y se
+  // mueve despues de cada carrera medida. La serie de diez solo reparte ese
+  // centro en una banda humana; la primera carrera de cada ciclo usa el centro.
+  // `adapted` tiene que sobrevivir a la recarga: sin el, la siguiente lectura
+  // de cuenta volvia a subir el centro al recomendado y el freno aprendido en
+  // las ultimas carreras se perdia.
+  function readAdaptivePace() {
+    try {
+      const raw = JSON.parse(disk.get(KEYS.adaptivePace, 'null'));
+      if (!raw || !Number.isFinite(raw.wpm) || !Number.isFinite(raw.accuracy)) return null;
+      return {
+        wpm: Math.round(raw.wpm),
+        accuracy: Math.round(raw.accuracy),
+        clean: clamp(Number(raw.clean) || 0, 0, 9),
+        accClean: clamp(Number(raw.accClean) || 0, 0, 9),
+        adapted: raw.adapted === true,
+        account: String(raw.account || ''),
+        at: Number(raw.at) || 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  let adaptivePace = readAdaptivePace();
+  // El estado guardado es de una cuenta: otro usuario en este navegador no
+  // puede heredar su ritmo. Si no hay identidad (arranque muy temprano) no se
+  // descarta; se comprueba en la primera calibracion.
+  if (adaptivePace) {
+    const id = readAccountIdentity();
+    if (id && adaptivePace.account && adaptivePace.account !== id) adaptivePace = null;
+  }
+
   // La calibracion de localStorage es del navegador, no de la cuenta. Si en
   // este navegador se entra con otra cuenta, el rango de la anterior no puede
   // seguir mandando: se borra una vez y se vuelve a leer la cuenta actual.
@@ -274,9 +307,11 @@
       KEYS.calibrationAt,
       KEYS.calibrationVersion,
       KEYS.lifetimeWpm,
+      KEYS.adaptivePace,
     ]) disk.remove(key);
     calibratedRange = null;
     calibratedAccuracy = null;
+    adaptivePace = null;
     accountStats = null;
     calibrationError = '';
     calibrationFailures = 0;
@@ -583,11 +618,220 @@
     CONFIG.wpm.max = range.max;
   })();
 
-  function series(key, count, min, max, pace = '') {
-    // El perfil forma parte de la firma: dos perfiles pueden compartir rango
-    // (balanced calibrado y otro futuro), y la serie no debe reutilizarse como
-    // si sus objetivos fueran del mismo ritmo.
-    const signature = `${pace}:${count}:${min}:${max}`;
+  // --- Gobernador de ritmo -------------------------------------------------
+  // El centro no es una constante ni la media corta a secas: sale de la cuenta
+  // (media reciente, historica y suelo de recuperacion del top) y el control
+  // lo mueve despues de cada carrera medida. La banda de la serie solo evita
+  // un WPM identico en todas las carreras; el centro es el recomendado.
+  // El centro vive en el sobre balanced de la cuenta. Los perfiles soft/fast
+  // solo recortan la ventana de la carrera: cambiar a soft y volver no puede
+  // dejar el objetivo pegado al maximo de soft.
+  function baseRange() {
+    if (calibratedRange) return { min: calibratedRange.min, max: calibratedRange.max };
+    return { min: PACE_PROFILES.balanced.min, max: PACE_PROFILES.balanced.max };
+  }
+
+  function recommendedWpm() {
+    const range = baseRange();
+    const source = accountStats || readPersistedUser() || {};
+    const center = effectivePaceCenter(source).center;
+    const fallback = Math.round((range.min + range.max) / 2);
+    return clamp(Math.round(center || fallback), range.min, range.max);
+  }
+
+  function recommendedAccuracy() {
+    const source = accountStats || readPersistedUser() || {};
+    const value = Number(source.accuracy);
+    if (Number.isFinite(value) && value >= 96) return clamp(Math.floor(value), 96, 99);
+    return clamp(Math.round((CONFIG.accuracy.min + CONFIG.accuracy.max) / 2), 96, 99);
+  }
+
+  function ensureAdaptivePace() {
+    const range = baseRange();
+    const account = readAccountIdentity();
+    if (!adaptivePace) {
+      adaptivePace = {
+        wpm: recommendedWpm(),
+        accuracy: recommendedAccuracy(),
+        clean: 0,
+        accClean: 0,
+        account,
+        adapted: false,
+        at: Date.now(),
+      };
+    } else if (account && !adaptivePace.account) {
+      // Se guardo antes de poder leer la identidad: se adopta la cuenta actual
+      // en vez de tirar el aprendizaje. El cambio real de cuenta ya lo detecta
+      // ensureCalibrationAccount al arrancar.
+      adaptivePace.account = account;
+    } else if (account && adaptivePace.account !== account) {
+      // Otra cuenta en este navegador: no puede heredar el ritmo anterior.
+      adaptivePace = {
+        wpm: recommendedWpm(),
+        accuracy: recommendedAccuracy(),
+        clean: 0,
+        accClean: 0,
+        account,
+        adapted: false,
+        at: Date.now(),
+      };
+    }
+
+    const manualWpm = customWpm();
+    const manualAcc = customAccuracy();
+    if (manualWpm) adaptivePace.wpm = manualWpm;
+    if (manualAcc) adaptivePace.accuracy = manualAcc;
+    adaptivePace.wpm = clamp(Math.round(adaptivePace.wpm), range.min, range.max);
+    adaptivePace.accuracy = clamp(Math.round(adaptivePace.accuracy), 96, manualAcc ? 100 : 99);
+    adaptivePace.clean = clamp(Number(adaptivePace.clean) || 0, 0, 9);
+    adaptivePace.accClean = clamp(Number(adaptivePace.accClean) || 0, 0, 9);
+    if (account) adaptivePace.account = account;
+    return adaptivePace;
+  }
+
+  function saveAdaptivePace() {
+    if (!adaptivePace) return;
+    adaptivePace.at = Date.now();
+    disk.set(KEYS.adaptivePace, JSON.stringify(adaptivePace));
+  }
+
+  function adaptiveTargetWpm() {
+    return ensureAdaptivePace().wpm;
+  }
+
+  function adaptiveTargetAccuracy() {
+    return ensureAdaptivePace().accuracy;
+  }
+
+  function adaptiveSeriesRefresh() {
+    ensureAdaptivePace();
+    profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm());
+    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
+    saveAdaptivePace();
+    paintCalibration();
+    updatePanel();
+  }
+
+  // Despues de una carrera medida: sube despacio si el ritmo y la precision
+  // aguantan; baja en cuanto falla. El objetivo no se sortea, se corrige.
+  function adaptPace(row = null) {
+    if (!row || customWpm() || customAccuracy()) return false;
+    const wpm = Number(row.serverWpm) > 0 ? Number(row.serverWpm) : Number(row.wpm);
+    const acc = Number(row.acc);
+    if (!(wpm > 0) || !(acc > 0)) return false;
+
+    ensureAdaptivePace();
+    const range = baseRange();
+    const before = { ...adaptivePace };
+    const target = Number(row.target) || profile.targetWPM;
+    // La precision exigida en ESA carrera. Las ultimas sesiones del ciclo no
+    // llevan buffer; mirar siempre el buffer 0 pedia 0,7 puntos de mas y
+    // convertia carreras limpias en fallos del gobernador.
+    const raceGoal = Number(row.goal);
+    const goal = Number.isFinite(raceGoal) && raceGoal > 0
+      ? Math.min(100, raceGoal)
+      : Math.min(100, adaptivePace.accuracy + CONFIG.accuracyBuffers[0]);
+    const clean = wpm >= target - Math.max(1, target * 0.04) && acc >= goal - 0.4;
+
+    adaptivePace.adapted = true;
+    if (clean) {
+      adaptivePace.clean++;
+      adaptivePace.accClean++;
+      if (adaptivePace.clean >= 3 && adaptivePace.wpm < range.max) {
+        adaptivePace.wpm = Math.min(range.max, adaptivePace.wpm + 1);
+        adaptivePace.clean = 0;
+      }
+      if (adaptivePace.accClean >= 4 && adaptivePace.accuracy < 99 && acc >= goal + 0.2) {
+        adaptivePace.accuracy = Math.min(99, adaptivePace.accuracy + 1);
+        adaptivePace.accClean = 0;
+      }
+    } else {
+      adaptivePace.wpm = Math.max(range.min, adaptivePace.wpm - (acc < goal - 0.8 ? 2 : 1));
+      adaptivePace.clean = 0;
+      adaptivePace.accClean = 0;
+      if (acc < goal - 0.8) adaptivePace.accuracy = Math.max(96, adaptivePace.accuracy - 1);
+    }
+
+    adaptivePace.wpm = clamp(Math.round(adaptivePace.wpm), range.min, range.max);
+    adaptivePace.accuracy = clamp(Math.round(adaptivePace.accuracy), 96, 99);
+    adaptivePace.clean = clamp(adaptivePace.clean, 0, 9);
+    adaptivePace.accClean = clamp(adaptivePace.accClean, 0, 9);
+    const moved = before.wpm !== adaptivePace.wpm || before.accuracy !== adaptivePace.accuracy;
+    if (moved) {
+      adaptiveSeriesRefresh();
+      log(`Pace auto-adjusted: ${before.wpm}->${adaptivePace.wpm} WPM, ${before.accuracy}->${adaptivePace.accuracy}% (${clean ? 'clean' : 'below target'}).`);
+    } else {
+      saveAdaptivePace();
+      paintCalibration();
+    }
+    return moved;
+  }
+
+  // Una DQ no entra al historial, pero si al control: la siguiente carrera sale
+  // mas conservadora. Se llama desde noteDisqualification.
+  function penalizeAdaptivePace() {
+    if (customWpm() || customAccuracy()) return false;
+    ensureAdaptivePace();
+    const range = baseRange();
+    const before = { ...adaptivePace };
+    adaptivePace.wpm = Math.max(range.min, adaptivePace.wpm - 2);
+    adaptivePace.accuracy = Math.max(96, adaptivePace.accuracy - 1);
+    adaptivePace.clean = 0;
+    adaptivePace.accClean = 0;
+    adaptivePace.adapted = true;
+    adaptivePace.wpm = clamp(Math.round(adaptivePace.wpm), range.min, range.max);
+    adaptivePace.accuracy = clamp(Math.round(adaptivePace.accuracy), 96, 99);
+    saveAdaptivePace();
+    adaptiveSeriesRefresh();
+    log(`Pace auto-adjusted after a DQ: ${before.wpm}->${adaptivePace.wpm} WPM, ${before.accuracy}->${adaptivePace.accuracy}%.`);
+    return true;
+  }
+
+  // Al calibrar se actualiza el sobre, no el historial de correcciones. Si el
+  // control nunca ha actuado, el centro puede subir hasta la media de la cuenta;
+  // si ya actuo, se respeta lo que aprendieron las carreras.
+  function syncAdaptivePace() {
+    ensureAdaptivePace();
+    const range = baseRange();
+    if (customWpm()) {
+      adaptivePace.wpm = customWpm();
+    } else if (!adaptivePace.adapted) {
+      adaptivePace.wpm = Math.max(adaptivePace.wpm, recommendedWpm());
+    }
+    if (customAccuracy()) adaptivePace.accuracy = customAccuracy();
+    adaptivePace.wpm = clamp(Math.round(adaptivePace.wpm), range.min, range.max);
+    adaptivePace.accuracy = clamp(Math.round(adaptivePace.accuracy), 96, customAccuracy() ? 100 : 99);
+    saveAdaptivePace();
+    profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm());
+    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
+  }
+
+  function hash32(text) {
+    let h = 2166136261;
+    const raw = String(text || '');
+    for (let i = 0; i < raw.length; i++) {
+      h ^= raw.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function series(key, count, min, max, pace = '', center = null) {
+    // El perfil y el centro forman parte de la firma: dos perfiles pueden
+    // compartir rango, y el gobernador mueve el centro sin cambiar el sobre.
+    // La semilla sale de la cuenta, asi que la misma cuenta repite la banda
+    // humana sin depender de Math.random.
+    const hasCenter = Number.isFinite(Number(center)) && Number(center) > 0;
+    const target = hasCenter ? clamp(Math.round(Number(center)), min, max) : 0;
+    const band = hasCenter ? clamp(Math.round((max - min) / 4), 1, 3) : 0;
+    const low = hasCenter ? Math.max(min, target - band) : min;
+    const high = hasCenter ? Math.min(max, target + band) : max;
+    const seed = hasCenter
+      ? hash32(`${disk.get(KEYS.calibrationAccount, '') || 'anonymous'}|${pace}|${key}|${target}|${min}|${max}`)
+      : 0;
+    const signature = hasCenter
+      ? `${pace}:${count}:${min}:${max}:${target}:${band}:${seed}`
+      : `${pace}:${count}:${min}:${max}`;
     let stored = null;
     try {
       stored = JSON.parse(disk.get(key, 'null'));
@@ -602,15 +846,34 @@
 
     if (valid) return stored;
 
-    const next = Array.from({ length: count }, () => randInt(min, max));
+    let next;
+    if (hasCenter) {
+      let state = seed >>> 0;
+      const step = () => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state;
+      };
+      next = Array.from({ length: count }, (_, index) => {
+        if (index === 0) return target;
+        return low + (step() % (high - low + 1));
+      });
+      // La primera carrera usa el centro y la segunda no puede repetirlo: el
+      // cierre de una carrera siempre deja un objetivo distinto que medir.
+      if (count > 1 && next[1] === target) {
+        next[1] = target < high ? target + 1 : Math.max(low, target - 1);
+      }
+    } else {
+      next = Array.from({ length: count }, () => randInt(min, max));
+    }
     disk.set(key, JSON.stringify(next));
     disk.set(`${key}:signature`, signature);
     return next;
   }
 
+  ensureAdaptivePace();
   const profile = {
-    wpm: series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile),
-    accuracy: series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max),
+    wpm: series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm()),
+    accuracy: series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy()),
 
     get wpmSession() {
       return clamp(readCount(KEYS.wpmCount), 1, this.wpm.length);
@@ -652,8 +915,8 @@
         disk.remove(key);
         disk.remove(`${key}:signature`);
       }
-      profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile);
-      profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+      profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm());
+      profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
     }
   }
 
@@ -670,7 +933,7 @@
     CONFIG.wpm.max = range.max;
     // El perfil va en la firma igual que en la declaracion y en advanceSessions:
     // si no, la serie guardada de otro perfil con el mismo rango se reutilizaba.
-    profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile);
+    profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm());
     if (options.persist !== false) disk.set(KEYS.paceProfile, name);
 
     if (before !== name || options.force) {
@@ -693,6 +956,10 @@
     CONFIG.calibration.customWpm = next;
     if (options.persist !== false) savePrefs();
     if (next) {
+      ensureAdaptivePace();
+      adaptivePace.wpm = next;
+      adaptivePace.adapted = true;
+      saveAdaptivePace();
       applyCalibratedRange(next, { allowLower: true });
       setPaceProfile(paceProfile, { force: true });
       log(`Custom WPM: ${next} target, range ${CONFIG.wpm.min}-${CONFIG.wpm.max}. Automatic calibration is overridden until you clear it.`);
@@ -700,6 +967,11 @@
       const source = accountStats || readPersistedUser();
       const center = effectivePaceCenter(source || {}).center;
       if (center && applyCalibratedRange(center, { allowLower: true }).applied) {
+        ensureAdaptivePace();
+        adaptivePace.wpm = recommendedWpm();
+        adaptivePace.clean = 0;
+        adaptivePace.adapted = false;
+        saveAdaptivePace();
         setPaceProfile(paceProfile, { force: true });
         log(`Custom WPM cleared; automatic target ${CONFIG.wpm.min}-${CONFIG.wpm.max} WPM.`);
       } else {
@@ -720,19 +992,28 @@
     CONFIG.calibration.customAccuracy = next;
     if (options.persist !== false) savePrefs();
     if (next) {
+      ensureAdaptivePace();
+      adaptivePace.accuracy = next;
+      adaptivePace.adapted = true;
+      saveAdaptivePace();
       applyCalibratedAccuracy(next, { allowLower: true });
+      profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', next);
       log(`Custom accuracy: ${next}% target, range ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%. Automatic calibration is overridden until you clear it.`);
     } else {
       const source = accountStats || readPersistedUser();
       const accuracy = Number(source && source.accuracy);
       if (Number.isFinite(accuracy) && accuracy >= 96) {
         applyCalibratedAccuracy(accuracy, { allowLower: true, maxCenter: 99 });
+        ensureAdaptivePace();
+        adaptivePace.accuracy = recommendedAccuracy();
+        adaptivePace.accClean = 0;
+        saveAdaptivePace();
         log(`Custom accuracy cleared; automatic range ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
       } else {
         log('Custom accuracy cleared; keeping the current automatic range.');
       }
     }
-    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
     paintConfig();
     paintCalibration();
     updatePanel();
@@ -1078,7 +1359,7 @@
     if (manualAcc) {
       const applied = applyCalibratedAccuracy(manualAcc, { allowLower: true });
       if (applied.applied) {
-        profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+        profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', manualAcc);
         log(`Accuracy set manually: ${manualAcc}% -> ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
       }
     } else if (stats.accuracy) {
@@ -1090,13 +1371,17 @@
       } else {
         const applied = applyCalibratedAccuracy(stats.accuracy, { maxCenter: 99 });
         if (applied.applied) {
-          profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+          profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
           log(`Accuracy auto-calibrated: account average ${stats.accuracy.toFixed(1)}% -> ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
         } else if (applied.blocked) {
           log(`Accuracy kept at ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}: the latest average would lower it.`);
         }
       }
     }
+
+    // El sobre cambio: el gobernador se ajusta al nuevo rango y, si nunca ha
+    // corrido, arranca en la media real en vez de en el centro por defecto.
+    syncAdaptivePace();
 
     const moved = beforeWpm.min !== CONFIG.wpm.min || beforeWpm.max !== CONFIG.wpm.max
       || beforeAcc.min !== CONFIG.accuracy.min || beforeAcc.max !== CONFIG.accuracy.max;
@@ -1183,15 +1468,11 @@
     // enseñaba "38.0 WPM" al lado de un objetivo de 110 y parecia que el bot
     // seguia calibrado a 38.
     const accountAvg = Number(accountStats && accountStats.wpm) || 0;
-    const accountTarget = Number(accountStats && accountStats.targetWpm) || 0;
-    const accountTop = Number(accountStats && accountStats.bestWpm) || 0;
-    const accountRaised = accountTarget > 0 && accountAvg > 0
-      && Math.abs(accountTarget - accountAvg) >= 0.5;
+    // La ficha de cuenta no repite el target/top del sitio: el objetivo es el
+    // que calcula el gobernador y el sobre de la cuenta ya esta en `range`.
     const accountText = accountStats && (accountAvg || accountStats.accuracy)
       ? [
-        accountAvg ? `${accountAvg.toFixed(1)} ${accountRaised ? 'avg' : 'WPM'}` : '',
-        accountRaised ? `${Math.round(accountTarget)} target` : '',
-        accountRaised && accountTop > 0 ? `${Math.round(accountTop)} top` : '',
+        accountAvg ? `${accountAvg.toFixed(1)} WPM` : '',
         accountStats.accuracy ? `${accountStats.accuracy.toFixed(1)}%` : '',
       ].filter(Boolean).join(' · ')
       : '—';
@@ -1221,7 +1502,14 @@
       acctHistory, acctRead, calibrating, calibrationError, calibrationRetryAt,
       Number(accountStats && accountStats.targetWpm) || 0,
       Number(accountStats && accountStats.bestWpm) || 0,
-      Number(accountStats && accountStats.races) || 0].join('|');
+      Number(accountStats && accountStats.races) || 0,
+      Number(profile.targetWPM) || 0,
+      Number(profile.accuracyGoal.toFixed(1)) || 0,
+      Number(adaptivePace && adaptivePace.wpm) || 0,
+      Number(adaptivePace && adaptivePace.accuracy) || 0,
+      Number(adaptivePace && adaptivePace.clean) || 0,
+      Number(adaptivePace && adaptivePace.accClean) || 0,
+      adaptivePace && adaptivePace.adapted ? 1 : 0].join('|');
     if (panel.calSig === calSig) {
       paintAccuracyDelta();
       return;
@@ -1239,10 +1527,10 @@
     setText(panel.refs.acctId, accountId ? `#${accountId}` : 'not signed in');
     setText(panel.refs.acctAvg, accountStats && Number(accountStats.wpm) > 0
       ? Number(accountStats.wpm).toFixed(1) : '—');
-    setText(panel.refs.acctTarget, accountStats && Number(accountStats.targetWpm) > 0
-      ? String(Math.round(Number(accountStats.targetWpm))) : '—');
-    setText(panel.refs.acctTop, accountStats && Number(accountStats.bestWpm) > 0
-      ? String(Math.round(Number(accountStats.bestWpm))) : '—');
+    setText(panel.refs.acctTarget, Number(profile.targetWPM) > 0
+      ? String(Math.round(Number(profile.targetWPM))) : '—');
+    setText(panel.refs.acctAcc, Number(profile.accuracyGoal) > 0
+      ? `${profile.accuracyGoal.toFixed(1)}%` : '—');
     setText(panel.refs.acctHistory, acctHistory);
     setText(panel.refs.acctRange, wpmText === '—' ? '—' : `${wpmText} wpm`);
     setText(panel.refs.acctRead, acctRead);
@@ -1273,22 +1561,16 @@
         : 'Read the account again now: profile and full monthly history.';
     }
 
-    // La chapa de la vista Live: el usuario ve de donde sale su objetivo sin
-    // abrir TUNE. Se muestra el target, no la media corta que puede estar
-    // hundida; el tooltip explica ambos numeros y el suelo de recuperacion.
+    // La chapa de la vista Live muestra la ventana adaptativa, no el target/top
+    // del sitio: el numero vivo esta en la fila target y se reajusta tras cada
+    // carrera medida. El tooltip explica de donde sale el centro.
     if (panel.refs.paceSource) {
       const manualWpm = customWpm();
-      const average = !manualWpm && accountStats && Number(accountStats.targetWpm) > 0
-        ? Math.round(Number(accountStats.targetWpm)) : null;
-      const top = accountStats && Number(accountStats.bestWpm) > 0
-        ? Math.round(Number(accountStats.bestWpm)) : null;
       const label = manualWpm
         ? `manual · ${manualWpm} wpm${customAccuracy() ? ` · ${customAccuracy()}% acc` : ''}`
-        : average
-          ? `auto · ${average} target${top ? ` · ${top} top` : ''}`
-          : calibratedRange
-            ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm`
-            : 'auto · reading account';
+        : calibratedRange
+          ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm · live`
+          : 'auto · reading account';
       setText(panel.refs.paceSource, label);
       const recent = accountStats && Number(accountStats.currentWpm) > 0
         ? Math.round(Number(accountStats.currentWpm)) : null;
@@ -1300,15 +1582,18 @@
       const provenance = lifetimeInfo && lifetimeInfo.rows
         ? ` ${lifetimeInfo.rows} month${lifetimeInfo.rows === 1 ? '' : 's'} across ${lifetimeInfo.pages} page${lifetimeInfo.pages === 1 ? '' : 's'}${lifetimeInfo.stale ? ' (cached fallback)' : ''}.`
         : '';
-      const recovery = accountStats && accountStats.recovery;
       const source = manualWpm
         ? ' Custom WPM is active; clear it to return to automatic calibration.'
-        : recovery && recovery.floor && average && profileAverage && average > profileAverage
-          ? ` The short profile average is ${profileAverage} WPM, but the ${top} WPM top sets a ${average} WPM recovery floor.${provenance}`
-          : lifetime && recent && lifetime > recent
-            ? ` The target is anchored to the lifetime monthly average${recent ? ` (${lifetime} WPM); the short profile window is ${recent} WPM` : ''}.${provenance}`
-            : provenance;
-      panel.refs.paceSource.title = `Pace target ${wpmText} WPM${top ? `; account top ${top} WPM` : ''}. Automatic calibration only raises the target; a short average cannot lower it. Use custom WPM or custom accuracy in TUNE to override it.${source}`;
+        : lifetime && recent && lifetime > recent
+          ? ` The recommendation is anchored to the lifetime monthly average (${lifetime} WPM); the short profile window is ${recent} WPM.${provenance}`
+          : provenance;
+      const governor = adaptivePace
+        ? ` Learned target ${adaptivePace.wpm} WPM / ${adaptivePace.accuracy}% accuracy`
+          + ` (${adaptivePace.clean}/3 clean races to the next +1 WPM,`
+          + ` ${adaptivePace.accClean}/4 to the next +1% accuracy`
+          + `${adaptivePace.adapted ? '' : '; still at the account recommendation'}).`
+        : '';
+      panel.refs.paceSource.title = `Adaptive window ${wpmText} WPM; the live target in the target row is re-evaluated after every measured race.${governor}${source}`;
     }
 
     // La tarjeta de la vista LOG: cuando se leyo y que rango dejo. Se pinta
@@ -1448,7 +1733,7 @@
 
     const tier = paceRange();
     setText(panel.refs.pace, `LEGIT · ${paceProfile}`);
-    const paceTitle = `Pace profile: ${paceProfile} (target ${tier.min}-${tier.max} WPM, hard ceiling ${CONFIG.wpm.hardCap}). Click to change; all three keep the human cadence.`;
+    const paceTitle = `Pace profile: ${paceProfile} (adaptive window ${tier.min}-${tier.max} WPM, hard ceiling ${CONFIG.wpm.hardCap}). Click to change; all three keep the human cadence.`;
     if (panel.refs.pace.title !== paceTitle) panel.refs.pace.title = paceTitle;
     if (panel.root) panel.root.dataset.paceProfile = paceProfile;
 

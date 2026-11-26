@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest a change that fits the project's safety limits.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        NITRO WRAITH is deliberately conservative: one account, no credential
+        typing, no CAPTCHA solving, no telemetry, and a hard WPM ceiling. Ideas
+        that need any of those are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest change that solves it.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Panel / garage UI
+        - Pace and calibration
+        - Queue and session limits
+        - Reliability and diagnostics
+        - Release and tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety impact
+      description: Could it increase the risk of a disqualification, a ban or a privacy leak?
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: This does not require storing credentials, solving CAPTCHAs or adding telemetry.
+          required: true

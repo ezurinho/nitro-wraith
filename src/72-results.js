@@ -388,7 +388,14 @@
 
     // La serie de WPM/precision solo avanza con una carrera medida: una DQ (o
     // una carrera cortada) cambiaria el objetivo sin datos que lo justifiquen.
-    if (counted) advanceSessions();
+    if (counted) {
+      advanceSessions();
+      // El gobernador mira la carrera recien cerrada: sube si fue limpia y baja
+      // si el ritmo o la precision no llegaron al objetivo de esa carrera.
+      if (typeof adaptPace === 'function') {
+        adaptPace(raceHistory[raceHistory.length - 1] || null);
+      }
+    }
 
 
     // Parada pedida a mitad de carrera: ya esta terminada, asi que se para sin

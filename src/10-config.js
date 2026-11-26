@@ -350,6 +350,10 @@
   const UPDATE_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
   const UPDATE_GITHUB_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
   const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+  // Manifiesto firmado por el release: liga el aviso de version con los bytes
+  // exactos que se van a instalar. El Gist y GitHub son hosts distintos, asi
+  // que un Gist alterado no puede ofrecer un archivo con un hash que no cuadre.
+  const UPDATE_BUILD_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/build.json';
   const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
   const UPDATE_RELEASES_URL = 'https://github.com/ezurinho/nitro-wraith/releases';
   const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
@@ -362,6 +366,75 @@
   // para que una comprobacion iniciada desde la carrera tambien lo actualice.
   let garageUpdateNode = null;
   let garageCompactUpdateNode = null;
+
+  function hexDigest(buffer) {
+    return Array.from(new Uint8Array(buffer))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  async function sha256Hex(buffer) {
+    const subtle = typeof crypto !== 'undefined' && crypto && crypto.subtle;
+    if (!subtle || typeof subtle.digest !== 'function') {
+      const error = new Error('SHA-256 is not available in this browser');
+      error.integrity = true;
+      throw error;
+    }
+    return hexDigest(await subtle.digest('SHA-256', buffer));
+  }
+
+  // El Gist sirve el userscript y GitHub el build.json. Antes de ofrecer una
+  // instalacion se comprueba que el SHA-256 del archivo coincide con el del
+  // manifiesto del mismo canal: un Gist alterado, una CDN con contenido viejo
+  // o un asset corrupto se rechazan en vez de instalarse.
+  async function verifyUpdateArtifact(url, signal) {
+    const get = async (target) => {
+      const response = await fetch(target, {
+        cache: 'no-store',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        signal,
+      });
+      if (!response || !response.ok) {
+        const error = new Error(`HTTP ${Number(response && response.status) || 0}`);
+        error.updateStatus = Number(response && response.status) || 0;
+        throw error;
+      }
+      return response;
+    };
+
+    const manifestResponse = await get(UPDATE_BUILD_URL);
+    let manifest;
+    try {
+      manifest = JSON.parse(await manifestResponse.text());
+    } catch {
+      const error = new Error('build.json is not valid JSON');
+      error.integrity = true;
+      throw error;
+    }
+    const entry = manifest && manifest.files && manifest.files['nitro-wraith.user.js'];
+    const expected = entry && String(entry.sha256 || '').toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(expected)) {
+      const error = new Error('build.json has no usable SHA-256');
+      error.integrity = true;
+      throw error;
+    }
+
+    const artifactResponse = await get(url);
+    if (typeof artifactResponse.arrayBuffer !== 'function') {
+      const error = new Error('the artifact cannot be hashed');
+      error.integrity = true;
+      throw error;
+    }
+    const buffer = await artifactResponse.arrayBuffer();
+    const actual = await sha256Hex(buffer);
+    if (actual !== expected) {
+      const error = new Error('SHA-256 mismatch');
+      error.integrity = true;
+      throw error;
+    }
+    return { sha256: actual, bytes: buffer.byteLength, manifestVersion: String(manifest.version || '') };
+  }
 
   function versionNewer(candidate, current) {
     const a = String(candidate || '').split('.').map((part) => Number(part) || 0);
@@ -387,6 +460,9 @@
         error: saved.error ? String(saved.error) : null,
         latest: saved.latest ? String(saved.latest) : null,
         via: saved.via === 'github' ? 'github' : 'gist',
+        verified: saved.verified === true ? true : (saved.verified === false ? false : null),
+        sha256: saved.sha256 ? String(saved.sha256) : null,
+        bytes: Number(saved.bytes) || 0,
         ageMs: Math.max(0, Date.now() - at),
         retryMs: saved.error ? UPDATE_RETRY_MS : UPDATE_RECHECK_MS,
       };
@@ -478,14 +554,21 @@
   function paintUpdateBadge(node, withVersion = false, iconOnly = false) {
     if (!node) return;
     const info = updateInfo();
-    if (node.hidden !== !info) node.hidden = !info;
+    const blocked = Boolean(info && info.verified === false);
+    // Un update bloqueado por integridad no se queda como enlace clicable: se
+    // oculta igual que si no hubiera novedad y el motivo vive en Health.
+    if (node.hidden !== (blocked || !info)) node.hidden = blocked || !info;
     if (!info) return;
     const textNode = iconOnly ? null : (node.querySelector('span') || node);
-    const badgeText = withVersion ? `update v${info.latest}` : 'update';
+    const badgeText = blocked ? 'update blocked' : withVersion ? `update v${info.latest}` : 'update';
     if (textNode && textNode.textContent !== badgeText) textNode.textContent = badgeText;
-    const title = `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
+    const title = blocked
+      ? `v${info.latest} failed integrity verification; it will not be offered. See TUNE → Health.`
+      : `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
     if (node.title !== title) node.title = title;
-    const label = `Update available: v${info.latest}. Download the new userscript.`;
+    const label = blocked
+      ? `Update v${info.latest} blocked by integrity verification.`
+      : `Update available: v${info.latest}. Download the new userscript.`;
     if (node.getAttribute('aria-label') !== label) node.setAttribute('aria-label', label);
   }
 
@@ -502,7 +585,23 @@
     const fail = (status, error) => {
       const keep = previous && previous.latest ? previous.latest : '';
       const via = previous && previous.via === 'github' ? 'github' : 'gist';
-      saveUpdateState({ at: Date.now(), latest: keep, status, error, via });
+      // El fallo de red no degrada un aviso ya verificado: antes se guardaba sin
+      // `verified`, el badge seguia visible pero `openUpdateDownload` lo
+      // rechazaba y el log culpaba a la integridad. Se conserva el tri-estado
+      // (true/false/null) mientras el `latest` sea el mismo; una comprobacion
+      // buena posterior vuelve a verificar los bytes de todos modos.
+      const same = Boolean(previous) && String(previous.latest || '') === String(keep);
+      const verified = same ? previous.verified : null;
+      saveUpdateState({
+        at: Date.now(),
+        latest: keep,
+        status,
+        error,
+        via,
+        verified: verified === true ? true : (verified === false ? false : null),
+        sha256: verified === true && previous.sha256 ? String(previous.sha256) : null,
+        bytes: verified === true ? Number(previous.bytes) || 0 : 0,
+      });
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       paintUpdateBadge(garageUpdateNode, true);
@@ -553,11 +652,53 @@
         result = await readMeta(UPDATE_GITHUB_META_URL, 'github');
       }
 
-      const keep = previous && previous.latest && versionNewer(previous.latest, VERSION)
-        ? previous.latest
-        : result.version;
+      // Se conserva el aviso mas alto, no el anterior a ciegas: un `latest`
+      // recordado (p. ej. 8.14.63) tapaba para siempre un meta nuevo mas alto
+      // (9.0.0) y el panel seguia ofreciendo la version vieja. Si el meta
+      // retrocede, el aviso anterior se mantiene para no perderlo.
+      const keep = [previous && previous.latest, result.version]
+        .filter(Boolean)
+        .reduce((best, candidate) => (versionNewer(candidate, best) ? candidate : best));
+
+      // Solo se verifica cuando de verdad hay algo nuevo que instalar: las
+      // comprobaciones normales (sin novedad) no descargan un megabyte.
+      let verified = null;
+      if (versionNewer(keep, VERSION)) {
+        const download = result.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
+        try {
+          verified = await verifyUpdateArtifact(download, controller ? controller.signal : undefined);
+        } catch (error) {
+          if (error && error.name === 'AbortError') throw error;
+          const reason = String(error && error.message ? error.message : error || 'verification failed').slice(0, 120);
+          saveUpdateState({
+            at: Date.now(),
+            latest: keep,
+            status: Number(error && error.updateStatus) || 0,
+            error: `integrity: ${reason}`,
+            via: result.via,
+            verified: false,
+            sha256: null,
+            bytes: 0,
+          });
+          paintUpdateHealth(true);
+          paintUpdateBadge(panel.refs && panel.refs.update);
+          paintUpdateBadge(garageUpdateNode, true);
+          paintUpdateBadge(garageCompactUpdateNode, false, true);
+          log(`Update v${keep} blocked: ${reason}.`);
+          noteFlight('update-integrity', reason);
+          return false;
+        }
+      }
+
       saveUpdateState({
-        at: Date.now(), latest: keep, status: result.status, error: null, via: result.via,
+        at: Date.now(),
+        latest: keep,
+        status: result.status,
+        error: null,
+        via: result.via,
+        verified: verified ? true : null,
+        sha256: verified ? verified.sha256 : null,
+        bytes: verified ? verified.bytes : 0,
       });
       noteFlight('update', `v${result.version} via ${result.via}${versionNewer(keep, VERSION) ? ' (newer)' : ''}`);
       if (versionNewer(keep, VERSION)
@@ -587,10 +728,20 @@
 
   function openUpdateDownload() {
     const info = updateInfo();
+    if (!info) return false;
+    // Sin hash verificado no se abre la instalacion. El aviso puede seguir en
+    // el panel para que el usuario vea que hay una version nueva y por que no
+    // se le ofrece; lo que no se hace es mandarlo a ciegas.
+    if (info.verified !== true) {
+      log('Update blocked: the artifact did not match the published SHA-256.');
+      paintUpdateHealth(true);
+      return false;
+    }
     // Si el Gist fallo y el aviso vino del fallback, la descarga tambien usa
     // el asset de la release: no se manda al usuario a un endpoint caido.
-    const url = info && info.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
+    const url = info.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
     try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+    return true;
   }
 
   // Handshake para el dry-run y el banco: la version se publica en el window
@@ -638,6 +789,7 @@
     calibrationAt: 'autoTyperCalibrationAt',
     calibrationVersion: 'autoTyperCalibrationVersion',
     calibrationAccount: 'autoTyperCalibrationAccount',
+    adaptivePace: 'autoTyperAdaptivePace',
     lifetimeWpm: 'autoTyperLifetimeWpm',
     challengeSelector: 'autoTyperChallengeSelector',
     trim: 'autoTyperTrim',

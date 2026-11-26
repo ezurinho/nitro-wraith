@@ -29,7 +29,12 @@ const TABS = path.join(__dirname, 'tabs.js');
 const REPORT = path.join(__dirname, 'report.js');
 const EXPORT = path.join(__dirname, '..', '..', 'tools', 'export-downloads.js');
 const CANARY = path.join(__dirname, '..', '..', 'tools', 'canary.js');
+const ROOT = path.join(__dirname, '..', '..');
 const SCRIPT_PATH = path.join(__dirname, '..', '..', 'nitro-wraith.user.js');
+const META_PATH = path.join(__dirname, '..', '..', 'nitro-wraith.meta.js');
+const GITATTRIBUTES = path.join(__dirname, '..', '..', '.gitattributes');
+const MANIFEST = require(path.join(ROOT, 'tools', 'manifest.js'));
+const RELEASE = require(path.join(ROOT, 'tools', 'release.js'));
 const SPAWN_TIMEOUT_MS = 25000;
 
 function runNode(script, args = [], env = {}) {
@@ -870,9 +875,13 @@ async function runCase(item) {
         && manifest.tag === `canary-${expected}`,
       JSON.stringify(manifest));
 
+    // El checkout de Windows puede estar en CRLF y el build escribe LF. La
+    // comprobacion valida contenido, no finales de linea: .gitattributes nueva
+    // evita el caso, pero el test no debe depender de como se clono el repo.
+    const sameText = (a, b) => a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
     unit('preparing canary leaves the stable artifacts untouched',
-      fs.readFileSync(SCRIPT_PATH, 'utf8') === stableScript
-        && fs.readFileSync(path.join(__dirname, '..', '..', 'nitro-wraith.meta.js'), 'utf8') === stableMeta
+      sameText(fs.readFileSync(SCRIPT_PATH, 'utf8'), stableScript)
+        && sameText(fs.readFileSync(path.join(__dirname, '..', '..', 'nitro-wraith.meta.js'), 'utf8'), stableMeta)
         && stableScript.includes("const CHANNEL = 'stable';"),
       'stable files changed');
   } finally {
@@ -947,6 +956,101 @@ async function runCase(item) {
       && canaryWorkflow.includes('tag-plan --repo "$GITHUB_WORKSPACE"')
       && !canaryWorkflow.includes('node tools/canary.js tag-plan'),
     'canary.yml tag-plan step');
+
+  // Higiene del checkout: el mismo repo se clona en Windows y en Linux, y el
+  // build publica LF. El test del canary ya compara contenido, pero el archivo
+  // tiene que seguir existiendo para que un checkout nuevo no vuelva al ruido.
+  const gitattributes = fs.existsSync(GITATTRIBUTES) ? fs.readFileSync(GITATTRIBUTES, 'utf8') : '';
+  unit('the repository pins LF line endings for source and release artifacts',
+    /\* text=auto eol=lf/.test(gitattributes)
+      && /\*\.user\.js text eol=lf/.test(gitattributes)
+      && /\*\.meta\.js text eol=lf/.test(gitattributes)
+      && /\*\.png binary/.test(gitattributes),
+    gitattributes.split('\n').slice(0, 4).join(' | '));
+
+  // Invariantes de seguridad que no hace falta ejecutar en Chrome: el techo y
+  // el suelo de precision no pueden salir del sobre que promete el README, y el
+  // artefacto no puede traer codigo dinamico.
+  const configSource = fs.readFileSync(path.join(ROOT, 'src', '10-config.js'), 'utf8');
+  const bundleText = fs.readFileSync(SCRIPT_PATH, 'utf8');
+  const hardCap = Number((configSource.match(/hardCap:\s*(\d+)/) || [])[1]);
+  const accuracyFloor = Number((configSource.match(/accuracy:\s*\{\s*min:\s*(\d+)/) || [])[1]);
+  unit('the configured hard cap and accuracy floor stay inside the safety envelope',
+    hardCap > 0 && hardCap <= 120 && accuracyFloor >= 96 && accuracyFloor <= 100,
+    { hardCap, accuracyFloor });
+  unit('the installable userscript has no eval or dynamic Function constructor',
+    !/\beval\s*\(/.test(bundleText) && !/new Function\s*\(/.test(bundleText),
+    'dynamic code scan');
+
+  // Manifiesto de release: los mismos hashes que se publican se comprueban
+  // antes de subir, y un byte cambiado tiene que fallar.
+  const manifestDir = path.join(ROOT, '.tmp', `manifest-test-${process.pid}`);
+  try {
+    const manifest = MANIFEST.writeBundle(manifestDir, {
+      channel: 'test',
+      version: '1.2.3',
+      commit: 'deadbeef',
+      sourceRef: 'refs/heads/main',
+      files: [SCRIPT_PATH, META_PATH],
+    });
+    const valid = MANIFEST.verifyBundle(manifestDir, { version: '1.2.3', channel: 'test', commit: 'deadbeef' });
+    fs.appendFileSync(path.join(manifestDir, 'nitro-wraith.user.js'), 'tamper');
+    const tampered = MANIFEST.verifyBundle(manifestDir);
+    unit('the release manifest verifies both assets and rejects a changed byte',
+      manifest.app === 'nitro-wraith'
+        && Object.keys(manifest.files).length === 2
+        && valid.ok === true
+        && tampered.ok === false
+        && tampered.errors.some((line) => /hash does not match/.test(line)),
+      { valid: valid.errors, tampered: tampered.errors });
+  } finally {
+    fs.rmSync(manifestDir, { recursive: true, force: true });
+  }
+
+  // El plan de hotfix es la parte que se puede probar sin tocar una release:
+  // usa HEAD para no depender de que el checkout traiga tags antiguos.
+  const hotfix = RELEASE.hotfixPlan(['--from', 'HEAD'], { quiet: true });
+  unit('the stable hotfix plan builds a version higher than the bad release',
+    hotfix.nextVersion === RELEASE.bumpPatch(hotfix.currentVersion)
+      && /^\d+\.\d+\.\d+$/.test(hotfix.nextVersion)
+      && hotfix.commit.length >= 7
+      && hotfix.steps.some((step) => /Tampermonkey/.test(step)),
+    hotfix);
+  unit('release:verify accepts a plain version and prefixes the stable tag',
+    RELEASE.normalizeTag('8.14.53') === 'v8.14.53'
+      && RELEASE.normalizeTag('v8.14.53') === 'v8.14.53'
+      && RELEASE.normalizeTag('canary-8.14.53.12') === 'canary-8.14.53.12',
+    'tag normalization');
+
+  const visualWorkflow = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'visual.yml'), 'utf8');
+  unit('the visual workflow runs the committed baselines on a matching Windows runner',
+    visualWorkflow.includes('runs-on: windows-latest')
+      && visualWorkflow.includes('npm run visual')
+      && visualWorkflow.includes('tests/visual/current'),
+    'visual.yml');
+
+  const releaseWorkflow = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'release.yml'), 'utf8');
+  unit('the stable release uploads and verifies build.json plus SHA256SUMS',
+    releaseWorkflow.includes('node tools/release.js bundle')
+      && releaseWorkflow.includes('dist/release/build.json')
+      && releaseWorkflow.includes('dist/release/SHA256SUMS')
+      && releaseWorkflow.includes('node tools/release.js verify'),
+    'release.yml');
+
+  unit('the canary workflow checksums old rollback builds and verifies them',
+    canaryWorkflow.includes('Checksum the canary artifacts')
+      && canaryWorkflow.includes('dist/canary/SHA256SUMS')
+      && canaryWorkflow.includes('SHA256SUMS') && canaryWorkflow.includes('manifest.files[name]'),
+    'canary.yml checksums');
+
+  unit('the support docs and issue templates are present',
+    fs.existsSync(path.join(ROOT, 'README.es.md'))
+      && fs.existsSync(path.join(ROOT, 'SECURITY.md'))
+      && fs.existsSync(path.join(ROOT, 'docs', 'TROUBLESHOOTING.md'))
+      && fs.existsSync(path.join(ROOT, 'docs', 'ROLLBACK.md'))
+      && fs.existsSync(path.join(ROOT, 'docs', 'COMPATIBILITY.md'))
+      && fs.existsSync(path.join(ROOT, '.github', 'ISSUE_TEMPLATE', 'bug.yml')),
+    'docs and templates');
 
   for (const item of CASES) {
     const result = await runCase(item);

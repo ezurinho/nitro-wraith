@@ -27,12 +27,12 @@ jobs:
     env:
       GIST_ID: 88f8b25546f8bb0ea588291bab8ffa58
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
 
@@ -121,6 +121,10 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 
+      - name: Build the release manifest
+        if: steps.current.outputs.skip != '1' && steps.decision.outputs.MODE != 'none'
+        run: node tools/release.js bundle
+
       - name: Update Gist
         if: steps.current.outputs.skip != '1' && steps.decision.outputs.MODE != 'none'
         env:
@@ -151,7 +155,11 @@ jobs:
           fi
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" nitro-wraith.user.js nitro-wraith.meta.js --clobber
+            gh release upload "$tag" \
+              dist/release/nitro-wraith.user.js \
+              dist/release/nitro-wraith.meta.js \
+              dist/release/build.json \
+              dist/release/SHA256SUMS --clobber
             gh release edit "$tag" \
               --title "NITRO WRAITH — $version" \
               --notes-file .release-notes.md
@@ -159,5 +167,12 @@ jobs:
             gh release create "$tag" --verify-tag \
               --title "NITRO WRAITH — $version" \
               --notes-file .release-notes.md \
-              nitro-wraith.user.js nitro-wraith.meta.js
+              dist/release/nitro-wraith.user.js \
+              dist/release/nitro-wraith.meta.js \
+              dist/release/build.json \
+              dist/release/SHA256SUMS
           fi
+
+      - name: Verify the published release
+        if: steps.current.outputs.skip != '1' && steps.decision.outputs.MODE != 'none'
+        run: node tools/release.js verify "${{ steps.prepare.outputs.TAG }}" --wait

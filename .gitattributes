@@ -1,0 +1,23 @@
+# Un solo final de linea en el checkout, en Windows y en Linux.
+* text=auto eol=lf
+
+# Binary assets: Git must never normalize or diff these as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# The installable artifact and every release/config file are LF.
+*.js text eol=lf
+*.user.js text eol=lf
+*.meta.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.css text eol=lf
+*.html text eol=lf

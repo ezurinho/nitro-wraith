@@ -15,24 +15,23 @@
   // usa el setTimeout de siempre y todo funciona como antes.
   let preciseClockKind = 'page';
   const WORKER_REPLY_GRACE_MS = 1500;
+  // Un fallo aislado no puede dejar AFK sin reloj hasta recargar. Tras degradar
+  // se reintenta crear el Worker; mientras tanto se usa el reloj de la pagina y
+  // `backgroundClockHealthy` sigue negando abrir carrera oculta.
+  const CLOCK_REVIVE_MS = 30000;
   const preciseSleep = (() => {
     let worker = null;
-
-    try {
-      const source = 'self.onmessage = function (event) {'
-        + 'var id = event.data[0];'
-        + 'setTimeout(function () { self.postMessage(id); }, event.data[1]);'
-        + '};';
-      const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
-      worker = new Worker(url);
-      URL.revokeObjectURL(url);
-    } catch {
-      return null;
-    }
-
-    preciseClockKind = 'worker';
     let nextId = 1;
+    let reviveAt = 0;
     const pending = new Map();
+
+    const onMessage = (event) => {
+      const entry = pending.get(event.data);
+      if (!entry) return;
+      pending.delete(event.data);
+      clearTimeout(entry.timer);
+      entry.resolve();
+    };
 
     // Si el Worker deja de contestar (por ejemplo, porque el navegador congela
     // la pestana), una espera no puede quedarse colgada: la carrera se quedaria
@@ -44,27 +43,54 @@
       const dead = worker;
       worker = null;
       preciseClockKind = 'page';
+      reviveAt = Date.now() + CLOCK_REVIVE_MS;
       try { if (dead) dead.terminate(); } catch { /* ya estaba muerto */ }
     };
 
-    worker.onmessage = (event) => {
-      const entry = pending.get(event.data);
-      if (!entry) return;
-      pending.delete(event.data);
-      clearTimeout(entry.timer);
-      entry.resolve();
+    const startClock = () => {
+      if (worker) return true;
+      if (Date.now() < reviveAt) return false;
+
+      let next = null;
+      let url = '';
+      try {
+        const source = 'self.onmessage = function (event) {'
+          + 'var id = event.data[0];'
+          + 'setTimeout(function () { self.postMessage(id); }, event.data[1]);'
+          + '};';
+        url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+        next = new Worker(url);
+      } catch {
+        reviveAt = Date.now() + CLOCK_REVIVE_MS;
+        try { if (url) URL.revokeObjectURL(url); } catch { /* nada que revocar */ }
+        return false;
+      }
+      try { URL.revokeObjectURL(url); } catch { /* nada que revocar */ }
+
+      worker = next;
+      worker.onmessage = onMessage;
+      // El handler se ata a ESTA instancia: un error tardio del Worker viejo no
+      // puede tumbar el nuevo que acaba de arrancar.
+      worker.onerror = () => { if (worker === next) degradeClock(); };
+      preciseClockKind = 'worker';
+      reviveAt = 0;
+      return true;
     };
 
-    worker.onerror = degradeClock;
+    startClock();
 
     return (ms) => new Promise((resolve) => {
       const delay = Math.max(0, Number(ms) || 0);
+      if (!worker) startClock();
       if (!worker) {
         setTimeout(resolve, delay);
         return;
       }
 
       const id = nextId++;
+      // Una espera larga del Worker viejo no puede degradar al Worker nuevo que
+      // ya se creo despues de un fallo: solo degrada si sigue siendo el actual.
+      const origin = worker;
       let settled = false;
       const entry = {
         resolve: () => {
@@ -76,7 +102,7 @@
           if (settled) return;
           settled = true;
           pending.delete(id);
-          degradeClock();
+          if (worker === origin) degradeClock();
           resolve();
         }, delay + WORKER_REPLY_GRACE_MS),
       };
@@ -85,10 +111,10 @@
       try {
         worker.postMessage([id, delay]);
       } catch {
-        degradeClock();
+        if (worker === origin) degradeClock();
       }
     });
-  })() || sleep;
+  })();
   // Temporizadores de la cola (Continue, Race Now, DQ, re-login, caja). Con la
   // pestana oculta el navegador los clampa igual que los del tecleo: a ~1/s, y a
   // 1/min tras cinco minutos, asi que el encadenado se arrastraba justo cuando el
@@ -128,6 +154,23 @@
   }
 
   const normalize = (text) => (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  // El harness y el panel comparten un solo navegador de pruebas; la politica
+  // de soporte se decide por familia, no por una lista de versiones.
+  function browserFamily() {
+    const ua = String((typeof navigator !== 'undefined' && navigator.userAgent) || '');
+    if (/Firefox\//i.test(ua)) return 'firefox';
+    if (/Edg\//i.test(ua)) return 'edge';
+    if (/OPR\//i.test(ua)) return 'opera';
+    if (/Chrome\//i.test(ua)) return 'chrome';
+    if (/Safari\//i.test(ua)) return 'safari';
+    return 'other';
+  }
+
+  function browserSupported() {
+    const family = browserFamily();
+    return family === 'chrome' || family === 'edge';
+  }
 
   // "Human" delay: a short range plus, now and then, a longer pause. Used by the
   // race chaining and by the queue: a person never presses with the same
@@ -286,7 +329,7 @@
     return text.length >= 16 && /[A-Za-z]/.test(text) && /\d/.test(text);
   }
 
-  function scrubFlightText(text) {
+  function scrubSecrets(text) {
     return String(text || '')
       // Cabecera Authorization: el valor va tras «Bearer» y puede ser corto.
       .replace(/Authorization(\s*[=:]\s*)(Bearer\s+)?[^\s,;"'}]+/gi,
@@ -297,8 +340,11 @@
         (match, key, value) => (looksSecret(value) ? `${key}***` : match))
       // Un JWT o una cadena base64 larga son secretos aunque no lleven clave.
       .replace(/[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '***')
-      .replace(/[A-Za-z0-9+/=_-]{80,}/g, '***')
-      .slice(0, 240);
+      .replace(/[A-Za-z0-9+/=_-]{80,}/g, '***');
+  }
+
+  function scrubFlightText(text) {
+    return scrubSecrets(text).slice(0, 240);
   }
 
   function saveFlightNow() {
@@ -343,4 +389,272 @@
     noteFlight('log', text);
     if (statusEl) setText(statusEl, text);
   };
+
+  /* --------------------------------------------------------------------------
+   * RED DE SEGURIDAD
+   * --------------------------------------------------------------------------
+   * Un fallo asincrono no puede dejar el bot "en carrera" sin teclear. El
+   * latido aísla sus pasos con `heart()`, pero no cubre promesas sueltas, el
+   * arranque ni los callbacks de eventos. Este bloque contiene esos fallos,
+   * los apunta en el grabador y, si son durante una carrera o se repiten,
+   * entra en modo seguro: suelta el lock, para la cola y lo dice en pantalla.
+   * ------------------------------------------------------------------------ */
+  const SAFE_MODE_KEY = 'nta:safeMode';
+  const BOOT_FAIL_KEY = 'nta:bootFails';
+  const RUNTIME_ERROR_WINDOW_MS = 30000;
+  const RUNTIME_ERROR_LIMIT = 3;
+  let safeMode = false;
+  let safeModeReason = '';
+  let runtimeErrorCount = 0;
+  let runtimeErrorFirstAt = 0;
+  let safeModeBanner = null;
+  let bootFailures = (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BOOT_FAIL_KEY) || 'null');
+      if (!saved || !Number.isFinite(Number(saved.count))) return { count: 0, lastAt: 0, message: '' };
+      return {
+        count: clamp(Number(saved.count) || 0, 0, 99),
+        lastAt: Number(saved.lastAt) || 0,
+        message: String(saved.message || '').slice(0, 240),
+      };
+    } catch {
+      return { count: 0, lastAt: 0, message: '' };
+    }
+  })();
+
+  function safeModeState() {
+    return {
+      on: safeMode,
+      reason: safeModeReason || null,
+      errors: runtimeErrorCount,
+      bootFailures: bootFailures.count,
+    };
+  }
+
+  function readSafeModeRecord() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SAFE_MODE_KEY) || 'null');
+      return saved && saved.on ? saved : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSafeModeRecord(reason) {
+    try {
+      localStorage.setItem(SAFE_MODE_KEY, JSON.stringify({
+        on: true,
+        reason: String(reason || 'internal error').slice(0, 240),
+        at: Date.now(),
+      }));
+    } catch { /* almacenamiento bloqueado: el modo sigue en memoria */ }
+  }
+
+  function clearSafeModeRecord() {
+    try { localStorage.removeItem(SAFE_MODE_KEY); } catch { /* bloqueado */ }
+  }
+
+  function noteBootFailure(error) {
+    const now = Date.now();
+    if (!bootFailures.lastAt || now - bootFailures.lastAt > 10 * 60000) {
+      bootFailures = { count: 0, lastAt: now, message: '' };
+    }
+    bootFailures.count += 1;
+    bootFailures.lastAt = now;
+    bootFailures.message = String((error && error.message) || error || 'boot failed').slice(0, 240);
+    try { localStorage.setItem(BOOT_FAIL_KEY, JSON.stringify(bootFailures)); } catch { /* bloqueado */ }
+    noteFlight('boot-error', `boot ${bootFailures.count}/${RUNTIME_ERROR_LIMIT}: ${bootFailures.message}`);
+    showSafeModeBanner(
+      `The script failed to start (${bootFailures.count}/${RUNTIME_ERROR_LIMIT}): ${bootFailures.message}`,
+      bootFailures.count < RUNTIME_ERROR_LIMIT,
+    );
+    if (bootFailures.count >= RUNTIME_ERROR_LIMIT) {
+      enterSafeMode(`three boot failures in a row: ${bootFailures.message}`);
+    }
+  }
+
+  function clearBootFailures() {
+    bootFailures = { count: 0, lastAt: 0, message: '' };
+    try { localStorage.removeItem(BOOT_FAIL_KEY); } catch { /* bloqueado */ }
+  }
+
+  function safeModeBannerHost() {
+    return document.body || document.documentElement;
+  }
+
+  function removeSafeModeBanner() {
+    if (!safeModeBanner) return;
+    try { safeModeBanner.remove(); } catch { /* ya estaba fuera */ }
+    safeModeBanner = null;
+  }
+
+  function showSafeModeBanner(reason, resumable = true) {
+    const mount = () => {
+      if (safeModeBanner || !document.documentElement) return;
+      const host = safeModeBannerHost();
+      if (!host) return;
+
+      const banner = document.createElement('div');
+      banner.id = 'nta-safe-mode';
+      banner.setAttribute('role', 'alert');
+      banner.style.cssText = [
+        'position:fixed', 'top:16px', 'left:50%', 'transform:translateX(-50%)',
+        'z-index:2147483647', 'max-width:min(560px,calc(100vw - 32px))',
+        'padding:12px 14px', 'border:1px solid #ffb340', 'border-radius:10px',
+        'background:rgba(12,17,14,.98)', 'color:#f4f1e8', 'font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace',
+        'box-shadow:0 10px 30px rgba(0,0,0,.45)', 'white-space:pre-wrap',
+      ].join(';');
+
+      const title = document.createElement('b');
+      title.textContent = safeMode ? 'NITRO WRAITH · safe mode' : 'NITRO WRAITH · internal error';
+      title.style.cssText = 'display:block;color:#ffb340;margin-bottom:4px';
+
+      const body = document.createElement('span');
+      body.textContent = String(reason || 'automation stopped');
+      body.style.cssText = 'display:block;color:#cfe9db';
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px';
+
+      const makeButton = (label, handler) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.style.cssText = 'appearance:none;border:1px solid #35ea86;border-radius:7px;background:transparent;color:#35ea86;font:inherit;padding:4px 9px;cursor:pointer';
+        button.addEventListener('click', handler);
+        actions.appendChild(button);
+        return button;
+      };
+
+      if (resumable) {
+        makeButton('resume', () => {
+          clearSafeMode();
+          try { location.reload(); } catch { /* sin acceso */ }
+        });
+      }
+      makeButton('copy report', () => {
+        try {
+          if (typeof diagnosticReport !== 'function') return;
+          const text = JSON.stringify(diagnosticReport(), null, 1);
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(() => {});
+          }
+        } catch { /* portapapeles bloqueado */ }
+      });
+
+      banner.appendChild(title);
+      banner.appendChild(body);
+      banner.appendChild(actions);
+      host.appendChild(banner);
+      safeModeBanner = banner;
+    };
+
+    if (document.documentElement) mount();
+    else document.addEventListener('DOMContentLoaded', mount, { once: true });
+  }
+
+  function enterSafeMode(reason) {
+    if (safeMode) return;
+    safeMode = true;
+    safeModeReason = String(reason || 'internal error').slice(0, 240);
+    writeSafeModeRecord(safeModeReason);
+    noteFlight('safe-mode', safeModeReason);
+    log(`SAFE MODE: ${safeModeReason}. Automation stopped; the keyboard is back to the game.`);
+
+    try {
+      if (typeof panic === 'function') panic(`safe mode: ${safeModeReason}`, 24 * 60 * 60 * 1000);
+      else if (typeof releaseTypingLock === 'function') releaseTypingLock();
+    } catch (error) {
+      try { console.error('[NTAuto · safe mode]', error); } catch { /* sin consola */ }
+    }
+
+    showSafeModeBanner(safeModeReason, true);
+    try { if (typeof updatePanel === 'function') updatePanel(true); } catch { /* panel no listo */ }
+  }
+
+  function clearSafeMode() {
+    safeMode = false;
+    safeModeReason = '';
+    runtimeErrorCount = 0;
+    runtimeErrorFirstAt = 0;
+    clearSafeModeRecord();
+    clearBootFailures();
+    removeSafeModeBanner();
+  }
+
+  // Un fallo de la pagina del juego no es un fallo del script: se apunta, pero
+  // no cuenta para el modo seguro. Solo se aceptan stacks que lleven nombres de
+  // funciones de este archivo; asi un error de React no apaga la automatizacion.
+  function isOwnFailure(error, filename) {
+    const text = [
+      error && error.stack,
+      error && error.message,
+      typeof error === 'string' ? error : '',
+      filename,
+    ].filter(Boolean).join(' ');
+    if (!text) return false;
+    return /(?:nitro-wraith|NTAUTO|ntaWraith|runAuto|superviseLive|watchRaceResults|guardCheck|updatePanel|paintGaragePanel|paintConfig|runQueue|typeRace|clickCaptchaContinue|closeChallengePopup|handleSessionWarning)/.test(text);
+  }
+
+  function noteRuntimeError(kind, error, options = {}) {
+    const message = String((error && error.message) || error || 'unknown error').slice(0, 240);
+    noteFlight('error', `${kind}: ${message}`);
+    try { console.error(`[NTAuto · ${kind}]`, error); } catch { /* sin consola */ }
+
+    const now = Date.now();
+    if (!runtimeErrorFirstAt || now - runtimeErrorFirstAt > RUNTIME_ERROR_WINDOW_MS) {
+      runtimeErrorCount = 0;
+      runtimeErrorFirstAt = now;
+    }
+    runtimeErrorCount += 1;
+
+    if (options.fatal === true || runtimeErrorCount >= RUNTIME_ERROR_LIMIT) {
+      enterSafeMode(`${kind}: ${message}`);
+      return;
+    }
+    if (options.visible !== false) {
+      showSafeModeBanner(
+        `An internal error was contained (${runtimeErrorCount}/${RUNTIME_ERROR_LIMIT}): ${message}`,
+        true,
+      );
+    }
+  }
+
+  function installErrorBoundary() {
+    if (window.__ntaErrorBoundaryInstalled) return;
+    window.__ntaErrorBoundaryInstalled = true;
+
+    const inLiveRace = () => Boolean(
+      typeof session === 'object' && session
+      && session.liveRound && !session.stopped
+      && (session.typing || Date.now() - (session.startedAt || 0) < 60000),
+    );
+
+    window.addEventListener('error', (event) => {
+      if (!event || !event.error) return;   // recursos e imagenes no cuentan
+      if (!isOwnFailure(event.error, event.filename)) {
+        noteFlight('page-error', String(event.message || 'page error'));
+        return;
+      }
+      noteRuntimeError('error', event.error, { fatal: inLiveRace() });
+    });
+
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event && event.reason;
+      if (!isOwnFailure(reason, '')) {
+        noteFlight('page-rejection', String((reason && reason.message) || reason || 'page rejection'));
+        return;
+      }
+      noteRuntimeError('rejection', reason, { fatal: inLiveRace() });
+    });
+
+    // Si otra pestana sale del modo seguro, esta retira el banner. La recarga
+    // completa la hace el boton de la pestana que lo pulso.
+    window.addEventListener('storage', (event) => {
+      if (event.key !== SAFE_MODE_KEY || readSafeModeRecord()) return;
+      safeMode = false;
+      safeModeReason = '';
+      removeSafeModeBanner();
+    });
+  }
 

@@ -6,19 +6,59 @@
   // ver si el ritmo marcado se esta cumpliendo de verdad.
   let raceHistory = loadHistory();
 
+  // Una fila se reconstruye campo a campo. El panel la pinta con innerHTML, asi
+  // que un valor corrupto en localStorage no puede llegar al DOM como texto:
+  // los numeros se validan y cualquier campo fuera de esta lista se descarta.
+  // De paso normaliza filas viejas (sin `goal`) y olvida restos de versiones
+  // anteriores.
+  function historyNumber(value, min, max) {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= min && number <= max ? number : null;
+  }
+
+  function sanitizeHistoryRow(item) {
+    if (!item || typeof item !== 'object') return null;
+    const wpm = historyNumber(item.wpm, 1, 400);
+    const acc = historyNumber(item.acc, 0, 100);
+    if (wpm === null || acc === null) return null;
+
+    const row = {
+      wpm: Math.round(wpm * 10) / 10,
+      acc: Math.round(acc * 10) / 10,
+    };
+    const at = historyNumber(item.at, 1, Number.MAX_SAFE_INTEGER);
+    if (at !== null) row.at = at;
+    const target = historyNumber(item.target, 15, 400);
+    if (target !== null) row.target = Math.round(target);
+    const goal = historyNumber(item.goal, 90, 100);
+    if (goal !== null) row.goal = Math.round(goal * 10) / 10;
+    const place = historyNumber(item.place, 1, 1000);
+    if (place !== null) row.place = Math.trunc(place);
+    const xp = historyNumber(item.xp, 0, MAX_RACE_XP);
+    if (xp !== null) row.xp = Math.round(xp);
+    const cash = historyNumber(item.cash, 0, MAX_RACE_CASH);
+    if (cash !== null) row.cash = Math.round(cash);
+    const model = historyNumber(item.modelWpm, 0, 400);
+    if (model !== null) row.modelWpm = Math.round(model * 10) / 10;
+    const server = historyNumber(item.serverWpm, 0, 400);
+    if (server !== null) row.serverWpm = Math.round(server * 10) / 10;
+    const game = historyNumber(item.gameWpm, 0, 400);
+    if (game !== null) row.gameWpm = Math.round(game * 10) / 10;
+    const nitroWords = historyNumber(item.nitroWords, 0, 1000000);
+    if (nitroWords !== null) row.nitroWords = Math.trunc(nitroWords);
+    const nitroChars = historyNumber(item.nitroChars, 0, 1000000);
+    if (nitroChars !== null) row.nitroChars = Math.trunc(nitroChars);
+    return row;
+  }
+
   function loadHistory() {
     try {
       const raw = JSON.parse(localStorage.getItem(KEYS.history) || '[]');
       if (!Array.isArray(raw)) return [];
       return raw
-        .filter((item) => item && Number.isFinite(item.wpm) && Number.isFinite(item.acc))
-        .slice(-CONFIG.historySize)
-        .map((item) => {
-          // Premio corrupto de una version anterior: se cae el campo, no la fila.
-          if (Number(item.cash) > MAX_RACE_CASH) delete item.cash;
-          if (Number(item.xp) > MAX_RACE_XP) delete item.xp;
-          return item;
-        });
+        .map(sanitizeHistoryRow)
+        .filter(Boolean)
+        .slice(-CONFIG.historySize);
     } catch {
       return [];
     }
@@ -44,6 +84,9 @@
       nitroWords: session.nitroWords || 0,
       nitroChars: session.nitroChars || 0,
       target: profile.targetWPM,   // para poder mostrar el desvio de cada carrera
+      // Precision exigida en esta carrera, con su buffer: el gobernador
+      // compara contra esta cifra y no contra la sesion siguiente.
+      goal: Math.round(profile.accuracyGoal * 10) / 10,
       at: Date.now(),
     });
 

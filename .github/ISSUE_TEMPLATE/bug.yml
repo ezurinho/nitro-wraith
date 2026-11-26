@@ -1,0 +1,81 @@
+name: Bug report
+description: The panel, the queue or a release is not behaving as expected.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before pasting anything, remove tokens, passwords,
+        cookies and full account exports. The **support** button in TUNE → Health
+        produces a redacted bundle, but you should still review it.
+
+        Security issues belong in the private advisory flow, not in a public issue.
+  - type: input
+    id: version
+    attributes:
+      label: Userscript version
+      description: The panel footer or Tampermonkey shows it.
+      placeholder: 8.14.53
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      options:
+        - stable
+        - canary
+        - not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome
+        - Edge
+        - Firefox (not tested, reports are welcome)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, and in which page (garage, race, results, login)?
+      placeholder: |
+        1. Open the garage
+        2. Start a session with ...
+        3. After ... the panel shows ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Include the visible panel message, not only "it stopped".
+    validations:
+      required: true
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Support bundle (optional)
+      description: TUNE → Health → support. It is redacted, but review it before pasting.
+      render: json
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I did not paste a token, password, cookie or full account export.
+          required: true
+        - label: I checked the troubleshooting guide first.
+          required: true

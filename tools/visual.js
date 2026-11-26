@@ -13,18 +13,31 @@
  *   npm run visual         # captura + compara
  *   npm run visual:accept  # captura + guarda las baselines nuevas
  *
+ * Para investigar un diff sin repetir las quince fotos:
+ *
+ *   npm run visual -- --only=view-garage-idle
+ *   npm run visual:accept -- --only=view-garage-idle
+ *
+ * La captura corre en modo `VISUAL_ONLY`: el banco se salta los 85 checks y va
+ * directo a la galeria, que limpia el almacenamiento y siembra su propia cuenta
+ * demo. Asi un run visual tarda segundos, no hereda estado de las pruebas y
+ * `npm test` sigue siendo el encargado de la logica.
+ *
  * El umbral vive en tests/visual/config.json. La tolerancia por canal perdona
  * el antialiasing; el ratio de pixeles distintos detecta un layout movido, una
  * fila nueva o un tema roto. Cada captura lleva una huella del navegador: una
  * baseline de otra plataforma se avisa en el informe (las fuentes no son las
- * mismas), y se regenera con `visual:accept` en esa maquina.
+ * mismas), y se regenera con `visual:accept` en esa maquina. El manifiesto
+ * guarda el SHA-256 de cada PNG: si una baseline se edita o se reemplaza sin
+ * pasar por `accept`, la comparacion lo dice en vez de medir contra bytes que
+ * nadie aprobo.
  */
 
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const CONFIG_FILE = path.join(ROOT, 'tests', 'visual', 'config.json');
@@ -32,6 +45,7 @@ const CURRENT_DIR = path.join(ROOT, 'tests', 'visual', 'current');
 const BASELINE_DIR = path.join(ROOT, 'tests', 'visual', 'baselines');
 const REPORT_FILE = path.join(CURRENT_DIR, 'report.json');
 const MANIFEST_FILE = path.join(BASELINE_DIR, 'manifest.json');
+const HARNESS = path.join(ROOT, 'tests', 'live', 'run.js');
 
 function fail(message) {
   console.error(`visual: ${message}`);
@@ -84,6 +98,67 @@ function shotList(cfg) {
     }
   }
   return shots;
+}
+
+function parseArgs(argv) {
+  const options = { command: 'run', only: null, timeoutMs: 600000, help: false };
+  let index = 0;
+  if (argv[0] && !argv[0].startsWith('-')) {
+    options.command = argv[0];
+    index = 1;
+  }
+
+  for (; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--help' || arg === '-h') {
+      options.help = true;
+      continue;
+    }
+    const match = /^--(only|timeout)(?:=(.*))?$/.exec(arg);
+    if (!match) fail(`unknown argument: ${arg}`);
+    let value = match[2];
+    if (value === undefined) {
+      index += 1;
+      value = argv[index];
+      if (value === undefined) fail(`--${match[1]} needs a value`);
+    }
+    if (match[1] === 'only') {
+      const ids = value.split(',').map((id) => id.trim()).filter(Boolean);
+      if (!ids.length) fail('--only needs at least one shot id');
+      options.only = new Set(ids);
+    } else {
+      const seconds = Number(value);
+      if (!Number.isFinite(seconds) || seconds <= 0) fail('--timeout needs a positive number of seconds');
+      options.timeoutMs = seconds * 1000;
+    }
+  }
+
+  return options;
+}
+
+function selectedShots(cfg, only) {
+  const shots = shotList(cfg);
+  if (!only) return shots;
+  const known = new Set(shots.map((shot) => shot.id));
+  const missing = [...only].filter((id) => !known.has(id));
+  if (missing.length) {
+    fail(`unknown shot id(s): ${missing.join(', ')}. Known ids: ${[...known].join(', ')}`);
+  }
+  return shots.filter((shot) => only.has(shot.id));
+}
+
+function usage() {
+  return [
+    'usage: node tools/visual.js [run|capture|compare|accept] [options]',
+    '',
+    '  run       capture and compare (default)',
+    '  capture   capture only; the live checks are skipped',
+    '  compare   compare tests/visual/current against the baselines',
+    '  accept    save the current captures as baselines',
+    '',
+    '  --only=id[,id]   limit compare/accept to these shots',
+    '  --timeout=secs   capture watchdog (default 600)',
+  ].join('\n');
 }
 
 /* --------------------------------------------------------------------------
@@ -312,29 +387,73 @@ function comparePair(baselineFile, currentFile, thresholds) {
   };
 }
 
-function capture() {
-  fs.rmSync(CURRENT_DIR, { recursive: true, force: true });
-  fs.mkdirSync(CURRENT_DIR, { recursive: true });
-  console.log('visual: capturing Live themes plus Tune, Log and the garage with the harness...');
-  const result = spawnSync(process.execPath, [path.join(ROOT, 'tests', 'live', 'run.js')], {
-    cwd: ROOT,
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      SHOT_DIR: CURRENT_DIR,
-      VISUAL_CAPTURE: '1',
-    },
-  });
-  if (result.error) fail(result.error.message);
-  if (result.status !== 0) {
-    process.exitCode = result.status || 1;
-    return false;
+/* --------------------------------------------------------------------------
+ * Captura
+ * ------------------------------------------------------------------------ */
+
+function stopTree(pid) {
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    // taskkill /T baja tambien el Chrome headless que el banco lanzo.
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    return;
   }
-  return true;
+  try { process.kill(pid, 'SIGTERM'); } catch { /* ya salio */ }
 }
 
-function compare() {
+function capture(options) {
+  fs.rmSync(CURRENT_DIR, { recursive: true, force: true });
+  fs.mkdirSync(CURRENT_DIR, { recursive: true });
+  console.log('visual: capturing the panel with the harness (live checks skipped)...');
+
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [HARNESS], {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        SHOT_DIR: CURRENT_DIR,
+        VISUAL_CAPTURE: '1',
+        VISUAL_ONLY: '1',
+      },
+    });
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      console.error(`visual: capture exceeded ${Math.round(options.timeoutMs / 1000)}s; stopping the harness`);
+      stopTree(child.pid);
+    }, options.timeoutMs);
+
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      console.error(`visual: ${error.message}`);
+      resolve(false);
+    });
+    child.on('exit', (code, signal) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolve(false);
+        return;
+      }
+      if (code !== 0) {
+        console.error(`visual: harness exited with ${signal || code}`);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
+
+/* --------------------------------------------------------------------------
+ * Comparacion contra las baselines
+ * ------------------------------------------------------------------------ */
+
+function compare(options) {
+  const started = Date.now();
   const cfg = config();
+  const shots = selectedShots(cfg, options.only);
   const manifest = readJson(MANIFEST_FILE, {});
   const fingerprint = readJson(path.join(CURRENT_DIR, 'fingerprint.json'), {});
   const currentEngine = fingerprint.engine || null;
@@ -342,6 +461,8 @@ function compare() {
   const engineMatches = Boolean(currentEngine && baselineEngine
     && currentEngine.product === baselineEngine.product
     && currentEngine.platform === baselineEngine.platform);
+
+  if (options.only) console.log(`visual: filter ${[...options.only].join(', ')}`);
 
   if (currentEngine && baselineEngine && !engineMatches) {
     console.warn('visual: baseline was captured with a different browser/platform:');
@@ -353,7 +474,7 @@ function compare() {
   const results = [];
   let failed = 0;
 
-  for (const shot of shotList(cfg)) {
+  for (const shot of shots) {
     const baselineFile = path.join(BASELINE_DIR, shot.file);
     const currentFile = path.join(CURRENT_DIR, shot.file);
     const row = {
@@ -372,6 +493,13 @@ function compare() {
       row.error = 'missing capture';
     } else {
       try {
+        const baseline = fs.readFileSync(baselineFile);
+        const listed = manifest && manifest.images && manifest.images[shot.file];
+        if (!listed) throw new Error('baseline is not listed in the manifest; run visual:accept');
+        if (listed.sha256 && sha256(baseline) !== listed.sha256) {
+          throw new Error('baseline does not match the manifest sha256; review it and run visual:accept');
+        }
+
         const compared = comparePair(baselineFile, currentFile, cfg);
         Object.assign(row, {
           ok: compared.ok,
@@ -399,8 +527,11 @@ function compare() {
 
   const report = {
     at: new Date().toISOString(),
+    durationMs: Date.now() - started,
+    filter: options.only ? [...options.only] : null,
     config: cfg,
     engine: { baseline: baselineEngine, current: currentEngine, matches: engineMatches },
+    summary: { total: results.length, passed: results.length - failed, failed },
     results,
   };
   fs.mkdirSync(CURRENT_DIR, { recursive: true });
@@ -424,23 +555,28 @@ function compare() {
     process.exitCode = 1;
     return false;
   }
-  console.log(`visual: ${results.length}/${results.length} shots within the threshold.`);
+  console.log(`visual: ${results.length}/${results.length} shots within the threshold${options.only ? ' (filtered)' : ''}.`);
   return true;
 }
 
-function accept() {
+function accept(options) {
   const cfg = config();
+  const shots = selectedShots(cfg, options.only);
+  const previous = readJson(MANIFEST_FILE, {});
   const fingerprint = readJson(path.join(CURRENT_DIR, 'fingerprint.json'), {});
-  const shots = shotList(cfg);
   const images = {};
-  const expected = new Set(shots.map((shot) => shot.file));
 
   fs.mkdirSync(BASELINE_DIR, { recursive: true });
+
   // Una baseline retirada del config se borra para que nadie la confunda con
-  // una captura viva; el resto del directorio no se toca.
-  for (const file of fs.readdirSync(BASELINE_DIR)) {
-    if (/^(theme|view)-.*\.png$/.test(file) && !expected.has(file)) {
-      fs.rmSync(path.join(BASELINE_DIR, file), { force: true });
+  // una captura viva; el resto del directorio no se toca. Con `--only` no se
+  // borra nada: las demas baselines siguen siendo validas.
+  if (!options.only) {
+    const expected = new Set(shotList(cfg).map((shot) => shot.file));
+    for (const file of fs.readdirSync(BASELINE_DIR)) {
+      if (/^(theme|view)-.*\.png$/.test(file) && !expected.has(file)) {
+        fs.rmSync(path.join(BASELINE_DIR, file), { force: true });
+      }
     }
   }
 
@@ -460,7 +596,7 @@ function accept() {
   const manifest = {
     version: 2,
     capturedAt: new Date().toISOString(),
-    engine: fingerprint.engine || null,
+    engine: fingerprint.engine || previous.engine || null,
     viewport: fingerprint.viewport || cfg.viewport,
     views: cfg.views,
     states: cfg.states,
@@ -468,41 +604,48 @@ function accept() {
       maxDiffRatio: cfg.maxDiffRatio,
       channelTolerance: cfg.channelTolerance,
     },
-    images,
+    images: options.only ? { ...(previous.images || {}), ...images } : images,
   };
   fs.writeFileSync(MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`visual: ${shots.length} baselines saved in ${path.relative(ROOT, BASELINE_DIR)}`);
+  const total = Object.keys(manifest.images).length;
+  console.log(`visual: ${shots.length} baseline(s) saved in ${path.relative(ROOT, BASELINE_DIR)}${options.only ? ` (${total} in the manifest)` : ''}`);
 }
 
-function main() {
-  const command = process.argv[2] || 'run';
-  if (command === 'capture') {
-    capture();
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    console.log(usage());
     return;
   }
-  if (command === 'compare') {
-    compare();
+
+  if (options.command === 'capture') {
+    if (!(await capture(options))) process.exitCode = 1;
     return;
   }
-  if (command === 'accept') {
+  if (options.command === 'compare') {
+    compare(options);
+    return;
+  }
+  if (options.command === 'accept') {
     // Aceptar sin capturas frescas seria guardar lo que hubiera en current.
-    const first = shotList(config())[0];
+    const first = selectedShots(config(), options.only)[0];
     if (!first || !fs.existsSync(path.join(CURRENT_DIR, first.file))) {
-      if (!capture()) return;
+      if (!(await capture(options))) {
+        process.exitCode = 1;
+        return;
+      }
     }
-    accept();
+    accept(options);
     return;
   }
-  if (command === 'run') {
-    if (capture()) compare();
+  if (options.command === 'run') {
+    if (await capture(options)) compare(options);
+    else process.exitCode = 1;
     return;
   }
-  console.error('usage: node tools/visual.js [run|capture|compare|accept]');
-  process.exit(2);
+
+  console.error(usage());
+  process.exitCode = 2;
 }
 
-try {
-  main();
-} catch (error) {
-  fail(error.message || String(error));
-}
+main().catch((error) => fail(error.message || String(error)));

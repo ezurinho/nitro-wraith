@@ -27,7 +27,25 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { execFileSync, spawnSync } = require('node:child_process');
+
+// El helper de tag-plan se copia a un temporal fuera del repo, y un rollback
+// puede ejecutar el canary.js de un tag viejo. No puede depender de que
+// tools/manifest.js este al lado: las dos funciones que necesita viven aqui.
+function digestFile(file) {
+  const buffer = fs.readFileSync(file);
+  return { sha256: crypto.createHash('sha256').update(buffer).digest('hex'), bytes: buffer.length };
+}
+
+function writeChecksums(dir, names) {
+  const lines = names.map((name) => {
+    const digest = digestFile(path.join(dir, name));
+    return `${digest.sha256}  ${name}`;
+  });
+  fs.writeFileSync(path.join(dir, 'SHA256SUMS'), `${lines.join('\n')}\n`, 'utf8');
+  return lines;
+}
 
 const ROOT = path.resolve(__dirname, '..');
 const BUILD = path.join(__dirname, 'build.js');
@@ -90,6 +108,7 @@ function prepare(build, outDir) {
   user = replaceOnce(user, /const UPDATE_META_URL = '[^']+';/, `const UPDATE_META_URL = '${CANARY_META}';`, 'UPDATE_META_URL');
   user = replaceOnce(user, /const UPDATE_GITHUB_META_URL = '[^']+';/, `const UPDATE_GITHUB_META_URL = '${CANARY_META}';`, 'UPDATE_GITHUB_META_URL');
   user = replaceOnce(user, /const UPDATE_DOWNLOAD_URL = '[^']+';/, `const UPDATE_DOWNLOAD_URL = '${CANARY_USER}';`, 'UPDATE_DOWNLOAD_URL');
+  user = replaceOnce(user, /const UPDATE_BUILD_URL = '[^']+';/, `const UPDATE_BUILD_URL = '${REPO}/releases/download/canary/build.json';`, 'UPDATE_BUILD_URL');
   user = replaceOnce(user, /const UPDATE_GITHUB_URL = '[^']+';/, `const UPDATE_GITHUB_URL = '${CANARY_USER}';`, 'UPDATE_GITHUB_URL');
   user = replaceOnce(user, /const UPDATE_PAGE_URL = '[^']+';/, `const UPDATE_PAGE_URL = '${CANARY_PAGE}';`, 'UPDATE_PAGE_URL');
 
@@ -118,11 +137,16 @@ function prepare(build, outDir) {
     installURL: CANARY_USER,
     metaURL: CANARY_META,
     stableURL: 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js',
+    files: {},
   };
 
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'nitro-wraith.user.js'), user);
   fs.writeFileSync(path.join(outDir, 'nitro-wraith.meta.js'), meta);
+  for (const name of ['nitro-wraith.user.js', 'nitro-wraith.meta.js']) {
+    manifest.files[name] = digestFile(path.join(outDir, name));
+  }
+  writeChecksums(outDir, Object.keys(manifest.files));
   fs.writeFileSync(path.join(outDir, 'build.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
   console.log(`canary ${version} (stable ${stable}) -> ${path.relative(ROOT, outDir) || outDir}`);

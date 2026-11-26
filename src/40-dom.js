@@ -60,6 +60,32 @@
     return -1;
   }
 
+  // Contrato minimo con la interfaz del juego. El fallo tipico de una
+  // actualizacion de Nitro Type no es una excepcion: es un componente de React
+  // que ya no aparece y deja al bot pulsando teclas al aire. Esta foto permite
+  // distinguir "esperando" de "la UI cambio" sin recorrer el DOM entero.
+  function typingContract() {
+    const app = findTypingApp();
+    const content = app ? getContent(app) : '';
+    const index = app ? getIndex(app) : -1;
+    const input = document.querySelector('input:not([type="hidden"]), textarea, [contenteditable="true"]');
+    const modal = document.querySelector('.modal, [role="dialog"], [role="alertdialog"]');
+    return {
+      at: Date.now(),
+      race: /^\/race(\/|$)/.test(location.pathname),
+      body: Boolean(document.body),
+      app: Boolean(app),
+      content: content.length,
+      index,
+      input: Boolean(input),
+      modal: Boolean(modal),
+    };
+  }
+
+  if (window.__ntaDebug) {
+    window.__ntaDebug.typingContract = () => typingContract();
+  }
+
   function press(app, key) {
     const event = new KeyboardEvent('keypress', {
       key,

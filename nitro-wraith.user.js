@@ -789,6 +789,10 @@ All of this only aims at believable statistics. It is your call and your risk.
   const UPDATE_META_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.meta.js';
   const UPDATE_GITHUB_META_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.meta.js';
   const UPDATE_DOWNLOAD_URL = 'https://gist.githubusercontent.com/ezurinho/88f8b25546f8bb0ea588291bab8ffa58/raw/nitro-wraith.user.js';
+  // Manifiesto firmado por el release: liga el aviso de version con los bytes
+  // exactos que se van a instalar. El Gist y GitHub son hosts distintos, asi
+  // que un Gist alterado no puede ofrecer un archivo con un hash que no cuadre.
+  const UPDATE_BUILD_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/build.json';
   const UPDATE_PAGE_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest';
   const UPDATE_RELEASES_URL = 'https://github.com/ezurinho/nitro-wraith/releases';
   const UPDATE_GITHUB_URL = 'https://github.com/ezurinho/nitro-wraith/releases/latest/download/nitro-wraith.user.js';
@@ -801,6 +805,75 @@ All of this only aims at believable statistics. It is your call and your risk.
   // para que una comprobacion iniciada desde la carrera tambien lo actualice.
   let garageUpdateNode = null;
   let garageCompactUpdateNode = null;
+
+  function hexDigest(buffer) {
+    return Array.from(new Uint8Array(buffer))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  async function sha256Hex(buffer) {
+    const subtle = typeof crypto !== 'undefined' && crypto && crypto.subtle;
+    if (!subtle || typeof subtle.digest !== 'function') {
+      const error = new Error('SHA-256 is not available in this browser');
+      error.integrity = true;
+      throw error;
+    }
+    return hexDigest(await subtle.digest('SHA-256', buffer));
+  }
+
+  // El Gist sirve el userscript y GitHub el build.json. Antes de ofrecer una
+  // instalacion se comprueba que el SHA-256 del archivo coincide con el del
+  // manifiesto del mismo canal: un Gist alterado, una CDN con contenido viejo
+  // o un asset corrupto se rechazan en vez de instalarse.
+  async function verifyUpdateArtifact(url, signal) {
+    const get = async (target) => {
+      const response = await fetch(target, {
+        cache: 'no-store',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        signal,
+      });
+      if (!response || !response.ok) {
+        const error = new Error(`HTTP ${Number(response && response.status) || 0}`);
+        error.updateStatus = Number(response && response.status) || 0;
+        throw error;
+      }
+      return response;
+    };
+
+    const manifestResponse = await get(UPDATE_BUILD_URL);
+    let manifest;
+    try {
+      manifest = JSON.parse(await manifestResponse.text());
+    } catch {
+      const error = new Error('build.json is not valid JSON');
+      error.integrity = true;
+      throw error;
+    }
+    const entry = manifest && manifest.files && manifest.files['nitro-wraith.user.js'];
+    const expected = entry && String(entry.sha256 || '').toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(expected)) {
+      const error = new Error('build.json has no usable SHA-256');
+      error.integrity = true;
+      throw error;
+    }
+
+    const artifactResponse = await get(url);
+    if (typeof artifactResponse.arrayBuffer !== 'function') {
+      const error = new Error('the artifact cannot be hashed');
+      error.integrity = true;
+      throw error;
+    }
+    const buffer = await artifactResponse.arrayBuffer();
+    const actual = await sha256Hex(buffer);
+    if (actual !== expected) {
+      const error = new Error('SHA-256 mismatch');
+      error.integrity = true;
+      throw error;
+    }
+    return { sha256: actual, bytes: buffer.byteLength, manifestVersion: String(manifest.version || '') };
+  }
 
   function versionNewer(candidate, current) {
     const a = String(candidate || '').split('.').map((part) => Number(part) || 0);
@@ -826,6 +899,9 @@ All of this only aims at believable statistics. It is your call and your risk.
         error: saved.error ? String(saved.error) : null,
         latest: saved.latest ? String(saved.latest) : null,
         via: saved.via === 'github' ? 'github' : 'gist',
+        verified: saved.verified === true ? true : (saved.verified === false ? false : null),
+        sha256: saved.sha256 ? String(saved.sha256) : null,
+        bytes: Number(saved.bytes) || 0,
         ageMs: Math.max(0, Date.now() - at),
         retryMs: saved.error ? UPDATE_RETRY_MS : UPDATE_RECHECK_MS,
       };
@@ -917,14 +993,21 @@ All of this only aims at believable statistics. It is your call and your risk.
   function paintUpdateBadge(node, withVersion = false, iconOnly = false) {
     if (!node) return;
     const info = updateInfo();
-    if (node.hidden !== !info) node.hidden = !info;
+    const blocked = Boolean(info && info.verified === false);
+    // Un update bloqueado por integridad no se queda como enlace clicable: se
+    // oculta igual que si no hubiera novedad y el motivo vive en Health.
+    if (node.hidden !== (blocked || !info)) node.hidden = blocked || !info;
     if (!info) return;
     const textNode = iconOnly ? null : (node.querySelector('span') || node);
-    const badgeText = withVersion ? `update v${info.latest}` : 'update';
+    const badgeText = blocked ? 'update blocked' : withVersion ? `update v${info.latest}` : 'update';
     if (textNode && textNode.textContent !== badgeText) textNode.textContent = badgeText;
-    const title = `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
+    const title = blocked
+      ? `v${info.latest} failed integrity verification; it will not be offered. See TUNE → Health.`
+      : `v${info.latest} is available; this copy is v${VERSION}. Click to download the new userscript.`;
     if (node.title !== title) node.title = title;
-    const label = `Update available: v${info.latest}. Download the new userscript.`;
+    const label = blocked
+      ? `Update v${info.latest} blocked by integrity verification.`
+      : `Update available: v${info.latest}. Download the new userscript.`;
     if (node.getAttribute('aria-label') !== label) node.setAttribute('aria-label', label);
   }
 
@@ -941,7 +1024,23 @@ All of this only aims at believable statistics. It is your call and your risk.
     const fail = (status, error) => {
       const keep = previous && previous.latest ? previous.latest : '';
       const via = previous && previous.via === 'github' ? 'github' : 'gist';
-      saveUpdateState({ at: Date.now(), latest: keep, status, error, via });
+      // El fallo de red no degrada un aviso ya verificado: antes se guardaba sin
+      // `verified`, el badge seguia visible pero `openUpdateDownload` lo
+      // rechazaba y el log culpaba a la integridad. Se conserva el tri-estado
+      // (true/false/null) mientras el `latest` sea el mismo; una comprobacion
+      // buena posterior vuelve a verificar los bytes de todos modos.
+      const same = Boolean(previous) && String(previous.latest || '') === String(keep);
+      const verified = same ? previous.verified : null;
+      saveUpdateState({
+        at: Date.now(),
+        latest: keep,
+        status,
+        error,
+        via,
+        verified: verified === true ? true : (verified === false ? false : null),
+        sha256: verified === true && previous.sha256 ? String(previous.sha256) : null,
+        bytes: verified === true ? Number(previous.bytes) || 0 : 0,
+      });
       paintUpdateHealth(true);
       paintUpdateBadge(panel.refs && panel.refs.update);
       paintUpdateBadge(garageUpdateNode, true);
@@ -992,11 +1091,53 @@ All of this only aims at believable statistics. It is your call and your risk.
         result = await readMeta(UPDATE_GITHUB_META_URL, 'github');
       }
 
-      const keep = previous && previous.latest && versionNewer(previous.latest, VERSION)
-        ? previous.latest
-        : result.version;
+      // Se conserva el aviso mas alto, no el anterior a ciegas: un `latest`
+      // recordado (p. ej. 8.14.63) tapaba para siempre un meta nuevo mas alto
+      // (9.0.0) y el panel seguia ofreciendo la version vieja. Si el meta
+      // retrocede, el aviso anterior se mantiene para no perderlo.
+      const keep = [previous && previous.latest, result.version]
+        .filter(Boolean)
+        .reduce((best, candidate) => (versionNewer(candidate, best) ? candidate : best));
+
+      // Solo se verifica cuando de verdad hay algo nuevo que instalar: las
+      // comprobaciones normales (sin novedad) no descargan un megabyte.
+      let verified = null;
+      if (versionNewer(keep, VERSION)) {
+        const download = result.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
+        try {
+          verified = await verifyUpdateArtifact(download, controller ? controller.signal : undefined);
+        } catch (error) {
+          if (error && error.name === 'AbortError') throw error;
+          const reason = String(error && error.message ? error.message : error || 'verification failed').slice(0, 120);
+          saveUpdateState({
+            at: Date.now(),
+            latest: keep,
+            status: Number(error && error.updateStatus) || 0,
+            error: `integrity: ${reason}`,
+            via: result.via,
+            verified: false,
+            sha256: null,
+            bytes: 0,
+          });
+          paintUpdateHealth(true);
+          paintUpdateBadge(panel.refs && panel.refs.update);
+          paintUpdateBadge(garageUpdateNode, true);
+          paintUpdateBadge(garageCompactUpdateNode, false, true);
+          log(`Update v${keep} blocked: ${reason}.`);
+          noteFlight('update-integrity', reason);
+          return false;
+        }
+      }
+
       saveUpdateState({
-        at: Date.now(), latest: keep, status: result.status, error: null, via: result.via,
+        at: Date.now(),
+        latest: keep,
+        status: result.status,
+        error: null,
+        via: result.via,
+        verified: verified ? true : null,
+        sha256: verified ? verified.sha256 : null,
+        bytes: verified ? verified.bytes : 0,
       });
       noteFlight('update', `v${result.version} via ${result.via}${versionNewer(keep, VERSION) ? ' (newer)' : ''}`);
       if (versionNewer(keep, VERSION)
@@ -1026,10 +1167,20 @@ All of this only aims at believable statistics. It is your call and your risk.
 
   function openUpdateDownload() {
     const info = updateInfo();
+    if (!info) return false;
+    // Sin hash verificado no se abre la instalacion. El aviso puede seguir en
+    // el panel para que el usuario vea que hay una version nueva y por que no
+    // se le ofrece; lo que no se hace es mandarlo a ciegas.
+    if (info.verified !== true) {
+      log('Update blocked: the artifact did not match the published SHA-256.');
+      paintUpdateHealth(true);
+      return false;
+    }
     // Si el Gist fallo y el aviso vino del fallback, la descarga tambien usa
     // el asset de la release: no se manda al usuario a un endpoint caido.
-    const url = info && info.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
+    const url = info.via === 'github' ? UPDATE_GITHUB_URL : UPDATE_DOWNLOAD_URL;
     try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+    return true;
   }
 
   // Handshake para el dry-run y el banco: la version se publica en el window
@@ -1077,6 +1228,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     calibrationAt: 'autoTyperCalibrationAt',
     calibrationVersion: 'autoTyperCalibrationVersion',
     calibrationAccount: 'autoTyperCalibrationAccount',
+    adaptivePace: 'autoTyperAdaptivePace',
     lifetimeWpm: 'autoTyperLifetimeWpm',
     challengeSelector: 'autoTyperChallengeSelector',
     trim: 'autoTyperTrim',
@@ -1574,24 +1726,23 @@ All of this only aims at believable statistics. It is your call and your risk.
   // usa el setTimeout de siempre y todo funciona como antes.
   let preciseClockKind = 'page';
   const WORKER_REPLY_GRACE_MS = 1500;
+  // Un fallo aislado no puede dejar AFK sin reloj hasta recargar. Tras degradar
+  // se reintenta crear el Worker; mientras tanto se usa el reloj de la pagina y
+  // `backgroundClockHealthy` sigue negando abrir carrera oculta.
+  const CLOCK_REVIVE_MS = 30000;
   const preciseSleep = (() => {
     let worker = null;
-
-    try {
-      const source = 'self.onmessage = function (event) {'
-        + 'var id = event.data[0];'
-        + 'setTimeout(function () { self.postMessage(id); }, event.data[1]);'
-        + '};';
-      const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
-      worker = new Worker(url);
-      URL.revokeObjectURL(url);
-    } catch {
-      return null;
-    }
-
-    preciseClockKind = 'worker';
     let nextId = 1;
+    let reviveAt = 0;
     const pending = new Map();
+
+    const onMessage = (event) => {
+      const entry = pending.get(event.data);
+      if (!entry) return;
+      pending.delete(event.data);
+      clearTimeout(entry.timer);
+      entry.resolve();
+    };
 
     // Si el Worker deja de contestar (por ejemplo, porque el navegador congela
     // la pestana), una espera no puede quedarse colgada: la carrera se quedaria
@@ -1603,27 +1754,54 @@ All of this only aims at believable statistics. It is your call and your risk.
       const dead = worker;
       worker = null;
       preciseClockKind = 'page';
+      reviveAt = Date.now() + CLOCK_REVIVE_MS;
       try { if (dead) dead.terminate(); } catch { /* ya estaba muerto */ }
     };
 
-    worker.onmessage = (event) => {
-      const entry = pending.get(event.data);
-      if (!entry) return;
-      pending.delete(event.data);
-      clearTimeout(entry.timer);
-      entry.resolve();
+    const startClock = () => {
+      if (worker) return true;
+      if (Date.now() < reviveAt) return false;
+
+      let next = null;
+      let url = '';
+      try {
+        const source = 'self.onmessage = function (event) {'
+          + 'var id = event.data[0];'
+          + 'setTimeout(function () { self.postMessage(id); }, event.data[1]);'
+          + '};';
+        url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+        next = new Worker(url);
+      } catch {
+        reviveAt = Date.now() + CLOCK_REVIVE_MS;
+        try { if (url) URL.revokeObjectURL(url); } catch { /* nada que revocar */ }
+        return false;
+      }
+      try { URL.revokeObjectURL(url); } catch { /* nada que revocar */ }
+
+      worker = next;
+      worker.onmessage = onMessage;
+      // El handler se ata a ESTA instancia: un error tardio del Worker viejo no
+      // puede tumbar el nuevo que acaba de arrancar.
+      worker.onerror = () => { if (worker === next) degradeClock(); };
+      preciseClockKind = 'worker';
+      reviveAt = 0;
+      return true;
     };
 
-    worker.onerror = degradeClock;
+    startClock();
 
     return (ms) => new Promise((resolve) => {
       const delay = Math.max(0, Number(ms) || 0);
+      if (!worker) startClock();
       if (!worker) {
         setTimeout(resolve, delay);
         return;
       }
 
       const id = nextId++;
+      // Una espera larga del Worker viejo no puede degradar al Worker nuevo que
+      // ya se creo despues de un fallo: solo degrada si sigue siendo el actual.
+      const origin = worker;
       let settled = false;
       const entry = {
         resolve: () => {
@@ -1635,7 +1813,7 @@ All of this only aims at believable statistics. It is your call and your risk.
           if (settled) return;
           settled = true;
           pending.delete(id);
-          degradeClock();
+          if (worker === origin) degradeClock();
           resolve();
         }, delay + WORKER_REPLY_GRACE_MS),
       };
@@ -1644,10 +1822,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       try {
         worker.postMessage([id, delay]);
       } catch {
-        degradeClock();
+        if (worker === origin) degradeClock();
       }
     });
-  })() || sleep;
+  })();
   // Temporizadores de la cola (Continue, Race Now, DQ, re-login, caja). Con la
   // pestana oculta el navegador los clampa igual que los del tecleo: a ~1/s, y a
   // 1/min tras cinco minutos, asi que el encadenado se arrastraba justo cuando el
@@ -1687,6 +1865,23 @@ All of this only aims at believable statistics. It is your call and your risk.
   }
 
   const normalize = (text) => (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  // El harness y el panel comparten un solo navegador de pruebas; la politica
+  // de soporte se decide por familia, no por una lista de versiones.
+  function browserFamily() {
+    const ua = String((typeof navigator !== 'undefined' && navigator.userAgent) || '');
+    if (/Firefox\//i.test(ua)) return 'firefox';
+    if (/Edg\//i.test(ua)) return 'edge';
+    if (/OPR\//i.test(ua)) return 'opera';
+    if (/Chrome\//i.test(ua)) return 'chrome';
+    if (/Safari\//i.test(ua)) return 'safari';
+    return 'other';
+  }
+
+  function browserSupported() {
+    const family = browserFamily();
+    return family === 'chrome' || family === 'edge';
+  }
 
   // "Human" delay: a short range plus, now and then, a longer pause. Used by the
   // race chaining and by the queue: a person never presses with the same
@@ -1845,7 +2040,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     return text.length >= 16 && /[A-Za-z]/.test(text) && /\d/.test(text);
   }
 
-  function scrubFlightText(text) {
+  function scrubSecrets(text) {
     return String(text || '')
       // Cabecera Authorization: el valor va tras «Bearer» y puede ser corto.
       .replace(/Authorization(\s*[=:]\s*)(Bearer\s+)?[^\s,;"'}]+/gi,
@@ -1856,8 +2051,11 @@ All of this only aims at believable statistics. It is your call and your risk.
         (match, key, value) => (looksSecret(value) ? `${key}***` : match))
       // Un JWT o una cadena base64 larga son secretos aunque no lleven clave.
       .replace(/[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '***')
-      .replace(/[A-Za-z0-9+/=_-]{80,}/g, '***')
-      .slice(0, 240);
+      .replace(/[A-Za-z0-9+/=_-]{80,}/g, '***');
+  }
+
+  function scrubFlightText(text) {
+    return scrubSecrets(text).slice(0, 240);
   }
 
   function saveFlightNow() {
@@ -1902,6 +2100,274 @@ All of this only aims at believable statistics. It is your call and your risk.
     noteFlight('log', text);
     if (statusEl) setText(statusEl, text);
   };
+
+  /* --------------------------------------------------------------------------
+   * RED DE SEGURIDAD
+   * --------------------------------------------------------------------------
+   * Un fallo asincrono no puede dejar el bot "en carrera" sin teclear. El
+   * latido aísla sus pasos con `heart()`, pero no cubre promesas sueltas, el
+   * arranque ni los callbacks de eventos. Este bloque contiene esos fallos,
+   * los apunta en el grabador y, si son durante una carrera o se repiten,
+   * entra en modo seguro: suelta el lock, para la cola y lo dice en pantalla.
+   * ------------------------------------------------------------------------ */
+  const SAFE_MODE_KEY = 'nta:safeMode';
+  const BOOT_FAIL_KEY = 'nta:bootFails';
+  const RUNTIME_ERROR_WINDOW_MS = 30000;
+  const RUNTIME_ERROR_LIMIT = 3;
+  let safeMode = false;
+  let safeModeReason = '';
+  let runtimeErrorCount = 0;
+  let runtimeErrorFirstAt = 0;
+  let safeModeBanner = null;
+  let bootFailures = (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BOOT_FAIL_KEY) || 'null');
+      if (!saved || !Number.isFinite(Number(saved.count))) return { count: 0, lastAt: 0, message: '' };
+      return {
+        count: clamp(Number(saved.count) || 0, 0, 99),
+        lastAt: Number(saved.lastAt) || 0,
+        message: String(saved.message || '').slice(0, 240),
+      };
+    } catch {
+      return { count: 0, lastAt: 0, message: '' };
+    }
+  })();
+
+  function safeModeState() {
+    return {
+      on: safeMode,
+      reason: safeModeReason || null,
+      errors: runtimeErrorCount,
+      bootFailures: bootFailures.count,
+    };
+  }
+
+  function readSafeModeRecord() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SAFE_MODE_KEY) || 'null');
+      return saved && saved.on ? saved : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSafeModeRecord(reason) {
+    try {
+      localStorage.setItem(SAFE_MODE_KEY, JSON.stringify({
+        on: true,
+        reason: String(reason || 'internal error').slice(0, 240),
+        at: Date.now(),
+      }));
+    } catch { /* almacenamiento bloqueado: el modo sigue en memoria */ }
+  }
+
+  function clearSafeModeRecord() {
+    try { localStorage.removeItem(SAFE_MODE_KEY); } catch { /* bloqueado */ }
+  }
+
+  function noteBootFailure(error) {
+    const now = Date.now();
+    if (!bootFailures.lastAt || now - bootFailures.lastAt > 10 * 60000) {
+      bootFailures = { count: 0, lastAt: now, message: '' };
+    }
+    bootFailures.count += 1;
+    bootFailures.lastAt = now;
+    bootFailures.message = String((error && error.message) || error || 'boot failed').slice(0, 240);
+    try { localStorage.setItem(BOOT_FAIL_KEY, JSON.stringify(bootFailures)); } catch { /* bloqueado */ }
+    noteFlight('boot-error', `boot ${bootFailures.count}/${RUNTIME_ERROR_LIMIT}: ${bootFailures.message}`);
+    showSafeModeBanner(
+      `The script failed to start (${bootFailures.count}/${RUNTIME_ERROR_LIMIT}): ${bootFailures.message}`,
+      bootFailures.count < RUNTIME_ERROR_LIMIT,
+    );
+    if (bootFailures.count >= RUNTIME_ERROR_LIMIT) {
+      enterSafeMode(`three boot failures in a row: ${bootFailures.message}`);
+    }
+  }
+
+  function clearBootFailures() {
+    bootFailures = { count: 0, lastAt: 0, message: '' };
+    try { localStorage.removeItem(BOOT_FAIL_KEY); } catch { /* bloqueado */ }
+  }
+
+  function safeModeBannerHost() {
+    return document.body || document.documentElement;
+  }
+
+  function removeSafeModeBanner() {
+    if (!safeModeBanner) return;
+    try { safeModeBanner.remove(); } catch { /* ya estaba fuera */ }
+    safeModeBanner = null;
+  }
+
+  function showSafeModeBanner(reason, resumable = true) {
+    const mount = () => {
+      if (safeModeBanner || !document.documentElement) return;
+      const host = safeModeBannerHost();
+      if (!host) return;
+
+      const banner = document.createElement('div');
+      banner.id = 'nta-safe-mode';
+      banner.setAttribute('role', 'alert');
+      banner.style.cssText = [
+        'position:fixed', 'top:16px', 'left:50%', 'transform:translateX(-50%)',
+        'z-index:2147483647', 'max-width:min(560px,calc(100vw - 32px))',
+        'padding:12px 14px', 'border:1px solid #ffb340', 'border-radius:10px',
+        'background:rgba(12,17,14,.98)', 'color:#f4f1e8', 'font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace',
+        'box-shadow:0 10px 30px rgba(0,0,0,.45)', 'white-space:pre-wrap',
+      ].join(';');
+
+      const title = document.createElement('b');
+      title.textContent = safeMode ? 'NITRO WRAITH · safe mode' : 'NITRO WRAITH · internal error';
+      title.style.cssText = 'display:block;color:#ffb340;margin-bottom:4px';
+
+      const body = document.createElement('span');
+      body.textContent = String(reason || 'automation stopped');
+      body.style.cssText = 'display:block;color:#cfe9db';
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px';
+
+      const makeButton = (label, handler) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.style.cssText = 'appearance:none;border:1px solid #35ea86;border-radius:7px;background:transparent;color:#35ea86;font:inherit;padding:4px 9px;cursor:pointer';
+        button.addEventListener('click', handler);
+        actions.appendChild(button);
+        return button;
+      };
+
+      if (resumable) {
+        makeButton('resume', () => {
+          clearSafeMode();
+          try { location.reload(); } catch { /* sin acceso */ }
+        });
+      }
+      makeButton('copy report', () => {
+        try {
+          if (typeof diagnosticReport !== 'function') return;
+          const text = JSON.stringify(diagnosticReport(), null, 1);
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(() => {});
+          }
+        } catch { /* portapapeles bloqueado */ }
+      });
+
+      banner.appendChild(title);
+      banner.appendChild(body);
+      banner.appendChild(actions);
+      host.appendChild(banner);
+      safeModeBanner = banner;
+    };
+
+    if (document.documentElement) mount();
+    else document.addEventListener('DOMContentLoaded', mount, { once: true });
+  }
+
+  function enterSafeMode(reason) {
+    if (safeMode) return;
+    safeMode = true;
+    safeModeReason = String(reason || 'internal error').slice(0, 240);
+    writeSafeModeRecord(safeModeReason);
+    noteFlight('safe-mode', safeModeReason);
+    log(`SAFE MODE: ${safeModeReason}. Automation stopped; the keyboard is back to the game.`);
+
+    try {
+      if (typeof panic === 'function') panic(`safe mode: ${safeModeReason}`, 24 * 60 * 60 * 1000);
+      else if (typeof releaseTypingLock === 'function') releaseTypingLock();
+    } catch (error) {
+      try { console.error('[NTAuto · safe mode]', error); } catch { /* sin consola */ }
+    }
+
+    showSafeModeBanner(safeModeReason, true);
+    try { if (typeof updatePanel === 'function') updatePanel(true); } catch { /* panel no listo */ }
+  }
+
+  function clearSafeMode() {
+    safeMode = false;
+    safeModeReason = '';
+    runtimeErrorCount = 0;
+    runtimeErrorFirstAt = 0;
+    clearSafeModeRecord();
+    clearBootFailures();
+    removeSafeModeBanner();
+  }
+
+  // Un fallo de la pagina del juego no es un fallo del script: se apunta, pero
+  // no cuenta para el modo seguro. Solo se aceptan stacks que lleven nombres de
+  // funciones de este archivo; asi un error de React no apaga la automatizacion.
+  function isOwnFailure(error, filename) {
+    const text = [
+      error && error.stack,
+      error && error.message,
+      typeof error === 'string' ? error : '',
+      filename,
+    ].filter(Boolean).join(' ');
+    if (!text) return false;
+    return /(?:nitro-wraith|NTAUTO|ntaWraith|runAuto|superviseLive|watchRaceResults|guardCheck|updatePanel|paintGaragePanel|paintConfig|runQueue|typeRace|clickCaptchaContinue|closeChallengePopup|handleSessionWarning)/.test(text);
+  }
+
+  function noteRuntimeError(kind, error, options = {}) {
+    const message = String((error && error.message) || error || 'unknown error').slice(0, 240);
+    noteFlight('error', `${kind}: ${message}`);
+    try { console.error(`[NTAuto · ${kind}]`, error); } catch { /* sin consola */ }
+
+    const now = Date.now();
+    if (!runtimeErrorFirstAt || now - runtimeErrorFirstAt > RUNTIME_ERROR_WINDOW_MS) {
+      runtimeErrorCount = 0;
+      runtimeErrorFirstAt = now;
+    }
+    runtimeErrorCount += 1;
+
+    if (options.fatal === true || runtimeErrorCount >= RUNTIME_ERROR_LIMIT) {
+      enterSafeMode(`${kind}: ${message}`);
+      return;
+    }
+    if (options.visible !== false) {
+      showSafeModeBanner(
+        `An internal error was contained (${runtimeErrorCount}/${RUNTIME_ERROR_LIMIT}): ${message}`,
+        true,
+      );
+    }
+  }
+
+  function installErrorBoundary() {
+    if (window.__ntaErrorBoundaryInstalled) return;
+    window.__ntaErrorBoundaryInstalled = true;
+
+    const inLiveRace = () => Boolean(
+      typeof session === 'object' && session
+      && session.liveRound && !session.stopped
+      && (session.typing || Date.now() - (session.startedAt || 0) < 60000),
+    );
+
+    window.addEventListener('error', (event) => {
+      if (!event || !event.error) return;   // recursos e imagenes no cuentan
+      if (!isOwnFailure(event.error, event.filename)) {
+        noteFlight('page-error', String(event.message || 'page error'));
+        return;
+      }
+      noteRuntimeError('error', event.error, { fatal: inLiveRace() });
+    });
+
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event && event.reason;
+      if (!isOwnFailure(reason, '')) {
+        noteFlight('page-rejection', String((reason && reason.message) || reason || 'page rejection'));
+        return;
+      }
+      noteRuntimeError('rejection', reason, { fatal: inLiveRace() });
+    });
+
+    // Si otra pestana sale del modo seguro, esta retira el banner. La recarga
+    // completa la hace el boton de la pestana que lo pulso.
+    window.addEventListener('storage', (event) => {
+      if (event.key !== SAFE_MODE_KEY || readSafeModeRecord()) return;
+      safeMode = false;
+      safeModeReason = '';
+      removeSafeModeBanner();
+    });
+  }
 
 
   /* ==========================================================================
@@ -2158,6 +2624,39 @@ All of this only aims at believable statistics. It is your call and your risk.
     return null;
   })();
 
+  // Objetivo recomendado, no una serie fija: el centro sale de la cuenta y se
+  // mueve despues de cada carrera medida. La serie de diez solo reparte ese
+  // centro en una banda humana; la primera carrera de cada ciclo usa el centro.
+  // `adapted` tiene que sobrevivir a la recarga: sin el, la siguiente lectura
+  // de cuenta volvia a subir el centro al recomendado y el freno aprendido en
+  // las ultimas carreras se perdia.
+  function readAdaptivePace() {
+    try {
+      const raw = JSON.parse(disk.get(KEYS.adaptivePace, 'null'));
+      if (!raw || !Number.isFinite(raw.wpm) || !Number.isFinite(raw.accuracy)) return null;
+      return {
+        wpm: Math.round(raw.wpm),
+        accuracy: Math.round(raw.accuracy),
+        clean: clamp(Number(raw.clean) || 0, 0, 9),
+        accClean: clamp(Number(raw.accClean) || 0, 0, 9),
+        adapted: raw.adapted === true,
+        account: String(raw.account || ''),
+        at: Number(raw.at) || 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  let adaptivePace = readAdaptivePace();
+  // El estado guardado es de una cuenta: otro usuario en este navegador no
+  // puede heredar su ritmo. Si no hay identidad (arranque muy temprano) no se
+  // descarta; se comprueba en la primera calibracion.
+  if (adaptivePace) {
+    const id = readAccountIdentity();
+    if (id && adaptivePace.account && adaptivePace.account !== id) adaptivePace = null;
+  }
+
   // La calibracion de localStorage es del navegador, no de la cuenta. Si en
   // este navegador se entra con otra cuenta, el rango de la anterior no puede
   // seguir mandando: se borra una vez y se vuelve a leer la cuenta actual.
@@ -2179,9 +2678,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       KEYS.calibrationAt,
       KEYS.calibrationVersion,
       KEYS.lifetimeWpm,
+      KEYS.adaptivePace,
     ]) disk.remove(key);
     calibratedRange = null;
     calibratedAccuracy = null;
+    adaptivePace = null;
     accountStats = null;
     calibrationError = '';
     calibrationFailures = 0;
@@ -2488,11 +2989,220 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.wpm.max = range.max;
   })();
 
-  function series(key, count, min, max, pace = '') {
-    // El perfil forma parte de la firma: dos perfiles pueden compartir rango
-    // (balanced calibrado y otro futuro), y la serie no debe reutilizarse como
-    // si sus objetivos fueran del mismo ritmo.
-    const signature = `${pace}:${count}:${min}:${max}`;
+  // --- Gobernador de ritmo -------------------------------------------------
+  // El centro no es una constante ni la media corta a secas: sale de la cuenta
+  // (media reciente, historica y suelo de recuperacion del top) y el control
+  // lo mueve despues de cada carrera medida. La banda de la serie solo evita
+  // un WPM identico en todas las carreras; el centro es el recomendado.
+  // El centro vive en el sobre balanced de la cuenta. Los perfiles soft/fast
+  // solo recortan la ventana de la carrera: cambiar a soft y volver no puede
+  // dejar el objetivo pegado al maximo de soft.
+  function baseRange() {
+    if (calibratedRange) return { min: calibratedRange.min, max: calibratedRange.max };
+    return { min: PACE_PROFILES.balanced.min, max: PACE_PROFILES.balanced.max };
+  }
+
+  function recommendedWpm() {
+    const range = baseRange();
+    const source = accountStats || readPersistedUser() || {};
+    const center = effectivePaceCenter(source).center;
+    const fallback = Math.round((range.min + range.max) / 2);
+    return clamp(Math.round(center || fallback), range.min, range.max);
+  }
+
+  function recommendedAccuracy() {
+    const source = accountStats || readPersistedUser() || {};
+    const value = Number(source.accuracy);
+    if (Number.isFinite(value) && value >= 96) return clamp(Math.floor(value), 96, 99);
+    return clamp(Math.round((CONFIG.accuracy.min + CONFIG.accuracy.max) / 2), 96, 99);
+  }
+
+  function ensureAdaptivePace() {
+    const range = baseRange();
+    const account = readAccountIdentity();
+    if (!adaptivePace) {
+      adaptivePace = {
+        wpm: recommendedWpm(),
+        accuracy: recommendedAccuracy(),
+        clean: 0,
+        accClean: 0,
+        account,
+        adapted: false,
+        at: Date.now(),
+      };
+    } else if (account && !adaptivePace.account) {
+      // Se guardo antes de poder leer la identidad: se adopta la cuenta actual
+      // en vez de tirar el aprendizaje. El cambio real de cuenta ya lo detecta
+      // ensureCalibrationAccount al arrancar.
+      adaptivePace.account = account;
+    } else if (account && adaptivePace.account !== account) {
+      // Otra cuenta en este navegador: no puede heredar el ritmo anterior.
+      adaptivePace = {
+        wpm: recommendedWpm(),
+        accuracy: recommendedAccuracy(),
+        clean: 0,
+        accClean: 0,
+        account,
+        adapted: false,
+        at: Date.now(),
+      };
+    }
+
+    const manualWpm = customWpm();
+    const manualAcc = customAccuracy();
+    if (manualWpm) adaptivePace.wpm = manualWpm;
+    if (manualAcc) adaptivePace.accuracy = manualAcc;
+    adaptivePace.wpm = clamp(Math.round(adaptivePace.wpm), range.min, range.max);
+    adaptivePace.accuracy = clamp(Math.round(adaptivePace.accuracy), 96, manualAcc ? 100 : 99);
+    adaptivePace.clean = clamp(Number(adaptivePace.clean) || 0, 0, 9);
+    adaptivePace.accClean = clamp(Number(adaptivePace.accClean) || 0, 0, 9);
+    if (account) adaptivePace.account = account;
+    return adaptivePace;
+  }
+
+  function saveAdaptivePace() {
+    if (!adaptivePace) return;
+    adaptivePace.at = Date.now();
+    disk.set(KEYS.adaptivePace, JSON.stringify(adaptivePace));
+  }
+
+  function adaptiveTargetWpm() {
+    return ensureAdaptivePace().wpm;
+  }
+
+  function adaptiveTargetAccuracy() {
+    return ensureAdaptivePace().accuracy;
+  }
+
+  function adaptiveSeriesRefresh() {
+    ensureAdaptivePace();
+    profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm());
+    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
+    saveAdaptivePace();
+    paintCalibration();
+    updatePanel();
+  }
+
+  // Despues de una carrera medida: sube despacio si el ritmo y la precision
+  // aguantan; baja en cuanto falla. El objetivo no se sortea, se corrige.
+  function adaptPace(row = null) {
+    if (!row || customWpm() || customAccuracy()) return false;
+    const wpm = Number(row.serverWpm) > 0 ? Number(row.serverWpm) : Number(row.wpm);
+    const acc = Number(row.acc);
+    if (!(wpm > 0) || !(acc > 0)) return false;
+
+    ensureAdaptivePace();
+    const range = baseRange();
+    const before = { ...adaptivePace };
+    const target = Number(row.target) || profile.targetWPM;
+    // La precision exigida en ESA carrera. Las ultimas sesiones del ciclo no
+    // llevan buffer; mirar siempre el buffer 0 pedia 0,7 puntos de mas y
+    // convertia carreras limpias en fallos del gobernador.
+    const raceGoal = Number(row.goal);
+    const goal = Number.isFinite(raceGoal) && raceGoal > 0
+      ? Math.min(100, raceGoal)
+      : Math.min(100, adaptivePace.accuracy + CONFIG.accuracyBuffers[0]);
+    const clean = wpm >= target - Math.max(1, target * 0.04) && acc >= goal - 0.4;
+
+    adaptivePace.adapted = true;
+    if (clean) {
+      adaptivePace.clean++;
+      adaptivePace.accClean++;
+      if (adaptivePace.clean >= 3 && adaptivePace.wpm < range.max) {
+        adaptivePace.wpm = Math.min(range.max, adaptivePace.wpm + 1);
+        adaptivePace.clean = 0;
+      }
+      if (adaptivePace.accClean >= 4 && adaptivePace.accuracy < 99 && acc >= goal + 0.2) {
+        adaptivePace.accuracy = Math.min(99, adaptivePace.accuracy + 1);
+        adaptivePace.accClean = 0;
+      }
+    } else {
+      adaptivePace.wpm = Math.max(range.min, adaptivePace.wpm - (acc < goal - 0.8 ? 2 : 1));
+      adaptivePace.clean = 0;
+      adaptivePace.accClean = 0;
+      if (acc < goal - 0.8) adaptivePace.accuracy = Math.max(96, adaptivePace.accuracy - 1);
+    }
+
+    adaptivePace.wpm = clamp(Math.round(adaptivePace.wpm), range.min, range.max);
+    adaptivePace.accuracy = clamp(Math.round(adaptivePace.accuracy), 96, 99);
+    adaptivePace.clean = clamp(adaptivePace.clean, 0, 9);
+    adaptivePace.accClean = clamp(adaptivePace.accClean, 0, 9);
+    const moved = before.wpm !== adaptivePace.wpm || before.accuracy !== adaptivePace.accuracy;
+    if (moved) {
+      adaptiveSeriesRefresh();
+      log(`Pace auto-adjusted: ${before.wpm}->${adaptivePace.wpm} WPM, ${before.accuracy}->${adaptivePace.accuracy}% (${clean ? 'clean' : 'below target'}).`);
+    } else {
+      saveAdaptivePace();
+      paintCalibration();
+    }
+    return moved;
+  }
+
+  // Una DQ no entra al historial, pero si al control: la siguiente carrera sale
+  // mas conservadora. Se llama desde noteDisqualification.
+  function penalizeAdaptivePace() {
+    if (customWpm() || customAccuracy()) return false;
+    ensureAdaptivePace();
+    const range = baseRange();
+    const before = { ...adaptivePace };
+    adaptivePace.wpm = Math.max(range.min, adaptivePace.wpm - 2);
+    adaptivePace.accuracy = Math.max(96, adaptivePace.accuracy - 1);
+    adaptivePace.clean = 0;
+    adaptivePace.accClean = 0;
+    adaptivePace.adapted = true;
+    adaptivePace.wpm = clamp(Math.round(adaptivePace.wpm), range.min, range.max);
+    adaptivePace.accuracy = clamp(Math.round(adaptivePace.accuracy), 96, 99);
+    saveAdaptivePace();
+    adaptiveSeriesRefresh();
+    log(`Pace auto-adjusted after a DQ: ${before.wpm}->${adaptivePace.wpm} WPM, ${before.accuracy}->${adaptivePace.accuracy}%.`);
+    return true;
+  }
+
+  // Al calibrar se actualiza el sobre, no el historial de correcciones. Si el
+  // control nunca ha actuado, el centro puede subir hasta la media de la cuenta;
+  // si ya actuo, se respeta lo que aprendieron las carreras.
+  function syncAdaptivePace() {
+    ensureAdaptivePace();
+    const range = baseRange();
+    if (customWpm()) {
+      adaptivePace.wpm = customWpm();
+    } else if (!adaptivePace.adapted) {
+      adaptivePace.wpm = Math.max(adaptivePace.wpm, recommendedWpm());
+    }
+    if (customAccuracy()) adaptivePace.accuracy = customAccuracy();
+    adaptivePace.wpm = clamp(Math.round(adaptivePace.wpm), range.min, range.max);
+    adaptivePace.accuracy = clamp(Math.round(adaptivePace.accuracy), 96, customAccuracy() ? 100 : 99);
+    saveAdaptivePace();
+    profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm());
+    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
+  }
+
+  function hash32(text) {
+    let h = 2166136261;
+    const raw = String(text || '');
+    for (let i = 0; i < raw.length; i++) {
+      h ^= raw.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function series(key, count, min, max, pace = '', center = null) {
+    // El perfil y el centro forman parte de la firma: dos perfiles pueden
+    // compartir rango, y el gobernador mueve el centro sin cambiar el sobre.
+    // La semilla sale de la cuenta, asi que la misma cuenta repite la banda
+    // humana sin depender de Math.random.
+    const hasCenter = Number.isFinite(Number(center)) && Number(center) > 0;
+    const target = hasCenter ? clamp(Math.round(Number(center)), min, max) : 0;
+    const band = hasCenter ? clamp(Math.round((max - min) / 4), 1, 3) : 0;
+    const low = hasCenter ? Math.max(min, target - band) : min;
+    const high = hasCenter ? Math.min(max, target + band) : max;
+    const seed = hasCenter
+      ? hash32(`${disk.get(KEYS.calibrationAccount, '') || 'anonymous'}|${pace}|${key}|${target}|${min}|${max}`)
+      : 0;
+    const signature = hasCenter
+      ? `${pace}:${count}:${min}:${max}:${target}:${band}:${seed}`
+      : `${pace}:${count}:${min}:${max}`;
     let stored = null;
     try {
       stored = JSON.parse(disk.get(key, 'null'));
@@ -2507,15 +3217,34 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     if (valid) return stored;
 
-    const next = Array.from({ length: count }, () => randInt(min, max));
+    let next;
+    if (hasCenter) {
+      let state = seed >>> 0;
+      const step = () => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state;
+      };
+      next = Array.from({ length: count }, (_, index) => {
+        if (index === 0) return target;
+        return low + (step() % (high - low + 1));
+      });
+      // La primera carrera usa el centro y la segunda no puede repetirlo: el
+      // cierre de una carrera siempre deja un objetivo distinto que medir.
+      if (count > 1 && next[1] === target) {
+        next[1] = target < high ? target + 1 : Math.max(low, target - 1);
+      }
+    } else {
+      next = Array.from({ length: count }, () => randInt(min, max));
+    }
     disk.set(key, JSON.stringify(next));
     disk.set(`${key}:signature`, signature);
     return next;
   }
 
+  ensureAdaptivePace();
   const profile = {
-    wpm: series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile),
-    accuracy: series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max),
+    wpm: series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm()),
+    accuracy: series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy()),
 
     get wpmSession() {
       return clamp(readCount(KEYS.wpmCount), 1, this.wpm.length);
@@ -2557,8 +3286,8 @@ All of this only aims at believable statistics. It is your call and your risk.
         disk.remove(key);
         disk.remove(`${key}:signature`);
       }
-      profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile);
-      profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+      profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm());
+      profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
     }
   }
 
@@ -2575,7 +3304,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.wpm.max = range.max;
     // El perfil va en la firma igual que en la declaracion y en advanceSessions:
     // si no, la serie guardada de otro perfil con el mismo rango se reutilizaba.
-    profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile);
+    profile.wpm = series(KEYS.wpmSeries, CONFIG.sessions, CONFIG.wpm.min, CONFIG.wpm.max, paceProfile, adaptiveTargetWpm());
     if (options.persist !== false) disk.set(KEYS.paceProfile, name);
 
     if (before !== name || options.force) {
@@ -2598,6 +3327,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.calibration.customWpm = next;
     if (options.persist !== false) savePrefs();
     if (next) {
+      ensureAdaptivePace();
+      adaptivePace.wpm = next;
+      adaptivePace.adapted = true;
+      saveAdaptivePace();
       applyCalibratedRange(next, { allowLower: true });
       setPaceProfile(paceProfile, { force: true });
       log(`Custom WPM: ${next} target, range ${CONFIG.wpm.min}-${CONFIG.wpm.max}. Automatic calibration is overridden until you clear it.`);
@@ -2605,6 +3338,11 @@ All of this only aims at believable statistics. It is your call and your risk.
       const source = accountStats || readPersistedUser();
       const center = effectivePaceCenter(source || {}).center;
       if (center && applyCalibratedRange(center, { allowLower: true }).applied) {
+        ensureAdaptivePace();
+        adaptivePace.wpm = recommendedWpm();
+        adaptivePace.clean = 0;
+        adaptivePace.adapted = false;
+        saveAdaptivePace();
         setPaceProfile(paceProfile, { force: true });
         log(`Custom WPM cleared; automatic target ${CONFIG.wpm.min}-${CONFIG.wpm.max} WPM.`);
       } else {
@@ -2625,19 +3363,28 @@ All of this only aims at believable statistics. It is your call and your risk.
     CONFIG.calibration.customAccuracy = next;
     if (options.persist !== false) savePrefs();
     if (next) {
+      ensureAdaptivePace();
+      adaptivePace.accuracy = next;
+      adaptivePace.adapted = true;
+      saveAdaptivePace();
       applyCalibratedAccuracy(next, { allowLower: true });
+      profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', next);
       log(`Custom accuracy: ${next}% target, range ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%. Automatic calibration is overridden until you clear it.`);
     } else {
       const source = accountStats || readPersistedUser();
       const accuracy = Number(source && source.accuracy);
       if (Number.isFinite(accuracy) && accuracy >= 96) {
         applyCalibratedAccuracy(accuracy, { allowLower: true, maxCenter: 99 });
+        ensureAdaptivePace();
+        adaptivePace.accuracy = recommendedAccuracy();
+        adaptivePace.accClean = 0;
+        saveAdaptivePace();
         log(`Custom accuracy cleared; automatic range ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
       } else {
         log('Custom accuracy cleared; keeping the current automatic range.');
       }
     }
-    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+    profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
     paintConfig();
     paintCalibration();
     updatePanel();
@@ -2983,7 +3730,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     if (manualAcc) {
       const applied = applyCalibratedAccuracy(manualAcc, { allowLower: true });
       if (applied.applied) {
-        profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+        profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', manualAcc);
         log(`Accuracy set manually: ${manualAcc}% -> ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
       }
     } else if (stats.accuracy) {
@@ -2995,13 +3742,17 @@ All of this only aims at believable statistics. It is your call and your risk.
       } else {
         const applied = applyCalibratedAccuracy(stats.accuracy, { maxCenter: 99 });
         if (applied.applied) {
-          profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max);
+          profile.accuracy = series(KEYS.accSeries, CONFIG.sessions, CONFIG.accuracy.min, CONFIG.accuracy.max, '', adaptiveTargetAccuracy());
           log(`Accuracy auto-calibrated: account average ${stats.accuracy.toFixed(1)}% -> ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}%.`);
         } else if (applied.blocked) {
           log(`Accuracy kept at ${CONFIG.accuracy.min}-${CONFIG.accuracy.max}: the latest average would lower it.`);
         }
       }
     }
+
+    // El sobre cambio: el gobernador se ajusta al nuevo rango y, si nunca ha
+    // corrido, arranca en la media real en vez de en el centro por defecto.
+    syncAdaptivePace();
 
     const moved = beforeWpm.min !== CONFIG.wpm.min || beforeWpm.max !== CONFIG.wpm.max
       || beforeAcc.min !== CONFIG.accuracy.min || beforeAcc.max !== CONFIG.accuracy.max;
@@ -3088,15 +3839,11 @@ All of this only aims at believable statistics. It is your call and your risk.
     // enseñaba "38.0 WPM" al lado de un objetivo de 110 y parecia que el bot
     // seguia calibrado a 38.
     const accountAvg = Number(accountStats && accountStats.wpm) || 0;
-    const accountTarget = Number(accountStats && accountStats.targetWpm) || 0;
-    const accountTop = Number(accountStats && accountStats.bestWpm) || 0;
-    const accountRaised = accountTarget > 0 && accountAvg > 0
-      && Math.abs(accountTarget - accountAvg) >= 0.5;
+    // La ficha de cuenta no repite el target/top del sitio: el objetivo es el
+    // que calcula el gobernador y el sobre de la cuenta ya esta en `range`.
     const accountText = accountStats && (accountAvg || accountStats.accuracy)
       ? [
-        accountAvg ? `${accountAvg.toFixed(1)} ${accountRaised ? 'avg' : 'WPM'}` : '',
-        accountRaised ? `${Math.round(accountTarget)} target` : '',
-        accountRaised && accountTop > 0 ? `${Math.round(accountTop)} top` : '',
+        accountAvg ? `${accountAvg.toFixed(1)} WPM` : '',
         accountStats.accuracy ? `${accountStats.accuracy.toFixed(1)}%` : '',
       ].filter(Boolean).join(' · ')
       : '—';
@@ -3126,7 +3873,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       acctHistory, acctRead, calibrating, calibrationError, calibrationRetryAt,
       Number(accountStats && accountStats.targetWpm) || 0,
       Number(accountStats && accountStats.bestWpm) || 0,
-      Number(accountStats && accountStats.races) || 0].join('|');
+      Number(accountStats && accountStats.races) || 0,
+      Number(profile.targetWPM) || 0,
+      Number(profile.accuracyGoal.toFixed(1)) || 0,
+      Number(adaptivePace && adaptivePace.wpm) || 0,
+      Number(adaptivePace && adaptivePace.accuracy) || 0,
+      Number(adaptivePace && adaptivePace.clean) || 0,
+      Number(adaptivePace && adaptivePace.accClean) || 0,
+      adaptivePace && adaptivePace.adapted ? 1 : 0].join('|');
     if (panel.calSig === calSig) {
       paintAccuracyDelta();
       return;
@@ -3144,10 +3898,10 @@ All of this only aims at believable statistics. It is your call and your risk.
     setText(panel.refs.acctId, accountId ? `#${accountId}` : 'not signed in');
     setText(panel.refs.acctAvg, accountStats && Number(accountStats.wpm) > 0
       ? Number(accountStats.wpm).toFixed(1) : '—');
-    setText(panel.refs.acctTarget, accountStats && Number(accountStats.targetWpm) > 0
-      ? String(Math.round(Number(accountStats.targetWpm))) : '—');
-    setText(panel.refs.acctTop, accountStats && Number(accountStats.bestWpm) > 0
-      ? String(Math.round(Number(accountStats.bestWpm))) : '—');
+    setText(panel.refs.acctTarget, Number(profile.targetWPM) > 0
+      ? String(Math.round(Number(profile.targetWPM))) : '—');
+    setText(panel.refs.acctAcc, Number(profile.accuracyGoal) > 0
+      ? `${profile.accuracyGoal.toFixed(1)}%` : '—');
     setText(panel.refs.acctHistory, acctHistory);
     setText(panel.refs.acctRange, wpmText === '—' ? '—' : `${wpmText} wpm`);
     setText(panel.refs.acctRead, acctRead);
@@ -3178,22 +3932,16 @@ All of this only aims at believable statistics. It is your call and your risk.
         : 'Read the account again now: profile and full monthly history.';
     }
 
-    // La chapa de la vista Live: el usuario ve de donde sale su objetivo sin
-    // abrir TUNE. Se muestra el target, no la media corta que puede estar
-    // hundida; el tooltip explica ambos numeros y el suelo de recuperacion.
+    // La chapa de la vista Live muestra la ventana adaptativa, no el target/top
+    // del sitio: el numero vivo esta en la fila target y se reajusta tras cada
+    // carrera medida. El tooltip explica de donde sale el centro.
     if (panel.refs.paceSource) {
       const manualWpm = customWpm();
-      const average = !manualWpm && accountStats && Number(accountStats.targetWpm) > 0
-        ? Math.round(Number(accountStats.targetWpm)) : null;
-      const top = accountStats && Number(accountStats.bestWpm) > 0
-        ? Math.round(Number(accountStats.bestWpm)) : null;
       const label = manualWpm
         ? `manual · ${manualWpm} wpm${customAccuracy() ? ` · ${customAccuracy()}% acc` : ''}`
-        : average
-          ? `auto · ${average} target${top ? ` · ${top} top` : ''}`
-          : calibratedRange
-            ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm`
-            : 'auto · reading account';
+        : calibratedRange
+          ? `auto · ${calibratedRange.min}–${calibratedRange.max} wpm · live`
+          : 'auto · reading account';
       setText(panel.refs.paceSource, label);
       const recent = accountStats && Number(accountStats.currentWpm) > 0
         ? Math.round(Number(accountStats.currentWpm)) : null;
@@ -3205,15 +3953,18 @@ All of this only aims at believable statistics. It is your call and your risk.
       const provenance = lifetimeInfo && lifetimeInfo.rows
         ? ` ${lifetimeInfo.rows} month${lifetimeInfo.rows === 1 ? '' : 's'} across ${lifetimeInfo.pages} page${lifetimeInfo.pages === 1 ? '' : 's'}${lifetimeInfo.stale ? ' (cached fallback)' : ''}.`
         : '';
-      const recovery = accountStats && accountStats.recovery;
       const source = manualWpm
         ? ' Custom WPM is active; clear it to return to automatic calibration.'
-        : recovery && recovery.floor && average && profileAverage && average > profileAverage
-          ? ` The short profile average is ${profileAverage} WPM, but the ${top} WPM top sets a ${average} WPM recovery floor.${provenance}`
-          : lifetime && recent && lifetime > recent
-            ? ` The target is anchored to the lifetime monthly average${recent ? ` (${lifetime} WPM); the short profile window is ${recent} WPM` : ''}.${provenance}`
-            : provenance;
-      panel.refs.paceSource.title = `Pace target ${wpmText} WPM${top ? `; account top ${top} WPM` : ''}. Automatic calibration only raises the target; a short average cannot lower it. Use custom WPM or custom accuracy in TUNE to override it.${source}`;
+        : lifetime && recent && lifetime > recent
+          ? ` The recommendation is anchored to the lifetime monthly average (${lifetime} WPM); the short profile window is ${recent} WPM.${provenance}`
+          : provenance;
+      const governor = adaptivePace
+        ? ` Learned target ${adaptivePace.wpm} WPM / ${adaptivePace.accuracy}% accuracy`
+          + ` (${adaptivePace.clean}/3 clean races to the next +1 WPM,`
+          + ` ${adaptivePace.accClean}/4 to the next +1% accuracy`
+          + `${adaptivePace.adapted ? '' : '; still at the account recommendation'}).`
+        : '';
+      panel.refs.paceSource.title = `Adaptive window ${wpmText} WPM; the live target in the target row is re-evaluated after every measured race.${governor}${source}`;
     }
 
     // La tarjeta de la vista LOG: cuando se leyo y que rango dejo. Se pinta
@@ -3353,7 +4104,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     const tier = paceRange();
     setText(panel.refs.pace, `LEGIT · ${paceProfile}`);
-    const paceTitle = `Pace profile: ${paceProfile} (target ${tier.min}-${tier.max} WPM, hard ceiling ${CONFIG.wpm.hardCap}). Click to change; all three keep the human cadence.`;
+    const paceTitle = `Pace profile: ${paceProfile} (adaptive window ${tier.min}-${tier.max} WPM, hard ceiling ${CONFIG.wpm.hardCap}). Click to change; all three keep the human cadence.`;
     if (panel.refs.pace.title !== paceTitle) panel.refs.pace.title = paceTitle;
     if (panel.root) panel.root.dataset.paceProfile = paceProfile;
 
@@ -3369,19 +4120,59 @@ All of this only aims at believable statistics. It is your call and your risk.
   // ver si el ritmo marcado se esta cumpliendo de verdad.
   let raceHistory = loadHistory();
 
+  // Una fila se reconstruye campo a campo. El panel la pinta con innerHTML, asi
+  // que un valor corrupto en localStorage no puede llegar al DOM como texto:
+  // los numeros se validan y cualquier campo fuera de esta lista se descarta.
+  // De paso normaliza filas viejas (sin `goal`) y olvida restos de versiones
+  // anteriores.
+  function historyNumber(value, min, max) {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= min && number <= max ? number : null;
+  }
+
+  function sanitizeHistoryRow(item) {
+    if (!item || typeof item !== 'object') return null;
+    const wpm = historyNumber(item.wpm, 1, 400);
+    const acc = historyNumber(item.acc, 0, 100);
+    if (wpm === null || acc === null) return null;
+
+    const row = {
+      wpm: Math.round(wpm * 10) / 10,
+      acc: Math.round(acc * 10) / 10,
+    };
+    const at = historyNumber(item.at, 1, Number.MAX_SAFE_INTEGER);
+    if (at !== null) row.at = at;
+    const target = historyNumber(item.target, 15, 400);
+    if (target !== null) row.target = Math.round(target);
+    const goal = historyNumber(item.goal, 90, 100);
+    if (goal !== null) row.goal = Math.round(goal * 10) / 10;
+    const place = historyNumber(item.place, 1, 1000);
+    if (place !== null) row.place = Math.trunc(place);
+    const xp = historyNumber(item.xp, 0, MAX_RACE_XP);
+    if (xp !== null) row.xp = Math.round(xp);
+    const cash = historyNumber(item.cash, 0, MAX_RACE_CASH);
+    if (cash !== null) row.cash = Math.round(cash);
+    const model = historyNumber(item.modelWpm, 0, 400);
+    if (model !== null) row.modelWpm = Math.round(model * 10) / 10;
+    const server = historyNumber(item.serverWpm, 0, 400);
+    if (server !== null) row.serverWpm = Math.round(server * 10) / 10;
+    const game = historyNumber(item.gameWpm, 0, 400);
+    if (game !== null) row.gameWpm = Math.round(game * 10) / 10;
+    const nitroWords = historyNumber(item.nitroWords, 0, 1000000);
+    if (nitroWords !== null) row.nitroWords = Math.trunc(nitroWords);
+    const nitroChars = historyNumber(item.nitroChars, 0, 1000000);
+    if (nitroChars !== null) row.nitroChars = Math.trunc(nitroChars);
+    return row;
+  }
+
   function loadHistory() {
     try {
       const raw = JSON.parse(localStorage.getItem(KEYS.history) || '[]');
       if (!Array.isArray(raw)) return [];
       return raw
-        .filter((item) => item && Number.isFinite(item.wpm) && Number.isFinite(item.acc))
-        .slice(-CONFIG.historySize)
-        .map((item) => {
-          // Premio corrupto de una version anterior: se cae el campo, no la fila.
-          if (Number(item.cash) > MAX_RACE_CASH) delete item.cash;
-          if (Number(item.xp) > MAX_RACE_XP) delete item.xp;
-          return item;
-        });
+        .map(sanitizeHistoryRow)
+        .filter(Boolean)
+        .slice(-CONFIG.historySize);
     } catch {
       return [];
     }
@@ -3407,6 +4198,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       nitroWords: session.nitroWords || 0,
       nitroChars: session.nitroChars || 0,
       target: profile.targetWPM,   // para poder mostrar el desvio de cada carrera
+      // Precision exigida en esta carrera, con su buffer: el gobernador
+      // compara contra esta cifra y no contra la sesion siguiente.
+      goal: Math.round(profile.accuracyGoal * 10) / 10,
       at: Date.now(),
     });
 
@@ -4268,6 +5062,32 @@ All of this only aims at believable statistics. It is your call and your risk.
     return -1;
   }
 
+  // Contrato minimo con la interfaz del juego. El fallo tipico de una
+  // actualizacion de Nitro Type no es una excepcion: es un componente de React
+  // que ya no aparece y deja al bot pulsando teclas al aire. Esta foto permite
+  // distinguir "esperando" de "la UI cambio" sin recorrer el DOM entero.
+  function typingContract() {
+    const app = findTypingApp();
+    const content = app ? getContent(app) : '';
+    const index = app ? getIndex(app) : -1;
+    const input = document.querySelector('input:not([type="hidden"]), textarea, [contenteditable="true"]');
+    const modal = document.querySelector('.modal, [role="dialog"], [role="alertdialog"]');
+    return {
+      at: Date.now(),
+      race: /^\/race(\/|$)/.test(location.pathname),
+      body: Boolean(document.body),
+      app: Boolean(app),
+      content: content.length,
+      index,
+      input: Boolean(input),
+      modal: Boolean(modal),
+    };
+  }
+
+  if (window.__ntaDebug) {
+    window.__ntaDebug.typingContract = () => typingContract();
+  }
+
   function press(app, key) {
     const event = new KeyboardEvent('keypress', {
       key,
@@ -4734,7 +5554,96 @@ All of this only aims at believable statistics. It is your call and your risk.
   function resetAfkFreezeStats() {
     afkFreezeStats = { count: 0, lastAt: 0, lastDurationMs: 0, totalMs: 0 };
     saveAfkFreezeStats();
+    // El reset de AFK tambien levanta el freno posterior a un freeze: es la
+    // salida manual cuando el usuario ya esta delante y quiere volver a probar.
+    clearAfkHold('freeze stats reset');
     return { ...afkFreezeStats };
+  }
+
+  // AFK freeze hold. Un freeze durante una carrera significa que el navegador
+  // ya ignoro el keep-alive: abrir otra carrera oculta al volver es repetir el
+  // mismo experimento. En vez de apagar AFK del todo, se exige una carrera con
+  // la pestana visible; esa carrera demuestra que el documento puede teclear y
+  // limpia el freno. Vive en localStorage porque el freeze ocurre en el marco
+  // de la carrera y la cola puede estar en la ventana de arriba.
+  const AFK_HOLD_KEY = 'nta:afkHold';
+  let afkHoldPrivate = false;
+  function parseAfkHold(raw) {
+    try {
+      const saved = JSON.parse(raw || 'null');
+      const at = Math.max(0, Number(saved && saved.at) || 0);
+      if (!at) return null;
+      return {
+        at,
+        reason: String((saved && saved.reason) || 'a freeze during a race').slice(0, 160),
+      };
+    } catch {
+      return null;
+    }
+  }
+  let afkHold = (() => {
+    try { return parseAfkHold(localStorage.getItem(AFK_HOLD_KEY)); } catch { return null; }
+  })();
+  function saveAfkHold() {
+    try {
+      if (afkHold) localStorage.setItem(AFK_HOLD_KEY, JSON.stringify(afkHold));
+      else localStorage.removeItem(AFK_HOLD_KEY);
+      afkHoldPrivate = false;
+    } catch {
+      // Modo privado o cuota llena: el freno sigue valiendo en esta ventana.
+      afkHoldPrivate = true;
+    }
+  }
+  function refreshAfkHold() {
+    if (afkHoldPrivate) return afkHold;
+    let raw = null;
+    try {
+      raw = localStorage.getItem(AFK_HOLD_KEY);
+    } catch {
+      return afkHold;
+    }
+    if (raw === null) {
+      afkHold = null;
+      return null;
+    }
+    const saved = parseAfkHold(raw);
+    if (saved) {
+      if (!afkHold || afkHold.at !== saved.at || afkHold.reason !== saved.reason) afkHold = saved;
+    }
+    return afkHold;
+  }
+  function afkHoldActive() {
+    const hold = refreshAfkHold();
+    return Boolean(hold && hold.at);
+  }
+  function afkHoldInfo() {
+    const hold = refreshAfkHold();
+    if (!hold) return { active: false, at: 0, reason: '', ageMs: 0 };
+    return {
+      active: true,
+      at: hold.at,
+      reason: hold.reason,
+      ageMs: Math.max(0, Date.now() - hold.at),
+    };
+  }
+  function armAfkHold(reason) {
+    if (afkHoldActive()) return false;
+    afkHold = {
+      at: Date.now(),
+      reason: String(reason || 'a freeze during a race').slice(0, 160),
+    };
+    saveAfkHold();
+    log(`AFK freeze hold: ${afkHold.reason}. Hidden races wait for one visible race.`);
+    if (typeof noteFlight === 'function') noteFlight('afk-hold', afkHold.reason);
+    return true;
+  }
+  function clearAfkHold(reason) {
+    if (!afkHoldActive()) return false;
+    afkHold = null;
+    saveAfkHold();
+    log(`AFK freeze hold cleared${reason ? `: ${reason}` : ''}.`);
+    if (typeof noteFlight === 'function') noteFlight('afk-hold', `cleared: ${reason || 'manual'}`);
+    return true;
   }
   // El freeze ocurre en el iframe de la carrera, pero el garaje vive en la
   // ventana de arriba. Sin esta relectura, el contador del garaje se quedaba
@@ -6072,12 +6981,47 @@ All of this only aims at believable statistics. It is your call and your risk.
   // copia esta en standby, recupera el turno ya; si la copia que escribe sigue
   // viva, el indice avanza y esto no se dispara.
   let lastLiveWarnAt = 0;
+  let lastContractAt = 0;
+  let uiDrift = null;
+
+  // Se llama cuando el contrato con la UI del juego se rompe. Parar es la
+  // opcion segura: seguir pulsando a ciegas puede abrir una carrera sin teclas
+  // o cerrar el modal equivocado. El aviso queda en el panel y en el grabador.
+  function noteUiDrift(reason) {
+    if (uiDrift || session.stopped) return false;
+    uiDrift = {
+      at: Date.now(),
+      reason: String(reason || 'game UI changed').slice(0, 240),
+      contract: typingContract(),
+    };
+    noteFlight('ui-drift', uiDrift.reason);
+    log(`UI DRIFT: ${uiDrift.reason}. Stopping instead of clicking blind.`);
+    try {
+      panic(`game UI changed: ${uiDrift.reason}`, 10 * 60000);
+    } catch (error) {
+      noteFlight('ui-drift-stop', String((error && error.message) || error));
+    }
+    return true;
+  }
+
   function superviseLive() {
     if (!session.running || session.stopped || session.paused || !session.liveRound) return;
     const now = Date.now();
     const phase = livePhase(now);
     if (phase !== 'racing' && phase !== 'countdown') return;
     if (captchaOnScreen()) return;
+
+    // El componente de tecleo existe al empezar la carrera. Si desaparece
+    // despues de cinco segundos de reloj, no es un montaje lento: es un cambio
+    // de la pagina. Se comprueba cada dos segundos, no en cada tecla.
+    if (now - lastContractAt >= 2000) {
+      lastContractAt = now;
+      const contract = typingContract();
+      if (contract.race && !contract.app && session.startedAt && now - session.startedAt > 5000) {
+        noteUiDrift('the race typing component disappeared');
+        return;
+      }
+    }
 
     const acceptedAt = session.lastAcceptedAt || session.startedAt || 0;
     if (!acceptedAt) return;
@@ -6613,7 +7557,9 @@ All of this only aims at believable statistics. It is your call and your risk.
   // que vuelvan a ir finos: una carrera a 60 WPM con mala precision es peor que
   // no correrla. Devuelve true si hubo que esperar.
   async function backgroundClockHealthy() {
-    if (preciseClockKind !== 'worker') return false;
+    // No se sale antes de esperar: si el Worker se degrado, este preciseSleep
+    // es el que intenta crearlo de nuevo pasados los 30 s. Con la salida
+    // temprana, el iframe se quedaba en reloj de pagina hasta recargar.
     const started = performance.now();
     await preciseSleep(120);
     return preciseClockKind === 'worker' && performance.now() - started < 900;
@@ -6630,7 +7576,7 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       log('Background clock unavailable: waiting for the tab.');
       while (!session.stopped && pageHidden()) {
-        await sleep(1000);
+        await preciseSleep(1000);
         if (await backgroundClockHealthy()) return false;
       }
       if (session.stopped) return true;
@@ -6707,7 +7653,11 @@ All of this only aims at believable statistics. It is your call and your risk.
   // sin depender de que el navegador de pruebas tenga la página en segundo plano.
   function afkHiddenBlocked(hidden = pageHidden()) {
     if (!hidden) return false;
-    return !backgroundFarm() || !afkKeepAliveConfirmed();
+    if (!backgroundFarm()) return true;
+    if (!afkKeepAliveConfirmed()) return true;
+    // Un freeze durante una carrera ya demostro que esta pestana no aguanta
+    // oculta. Hasta que una carrera arranque visible, no se abre otra a ciegas.
+    return CONFIG.queue.afkFreezeGuard !== false && afkHoldActive();
   }
 
   function hiddenBlocked() {
@@ -6720,11 +7670,16 @@ All of this only aims at believable statistics. It is your call and your risk.
   async function waitWhileHidden() {
     if (!pageHidden() || !hiddenBlocked()) return false;
 
+    const hold = backgroundFarm()
+      && CONFIG.queue.afkFreezeGuard !== false
+      && afkHoldActive();
     const strict = backgroundFarm() && CONFIG.queue.afkRequireKeepAlive === true;
-    log(strict
-      ? 'AFK interlock: hidden tab with no running keep-alive; no new race until it is confirmed or the tab is visible again.'
-      : 'Background farming is off: no new race until the tab is visible again.');
-    noteFlight('afk-hold', strict ? 'keep-alive not confirmed' : 'background farming off');
+    log(hold
+      ? 'AFK freeze hold: a freeze was recorded during a race; no new hidden race until one starts with the tab visible.'
+      : strict
+        ? 'AFK interlock: hidden tab with no running keep-alive; no new race until it is confirmed or the tab is visible again.'
+        : 'Background farming is off: no new race until the tab is visible again.');
+    noteFlight('afk-hold', hold ? 'visible race required after a freeze' : strict ? 'keep-alive not confirmed' : 'background farming off');
     while (!session.stopped && pageHidden() && hiddenBlocked()) await preciseSleep(1000);
     return true;
   }
@@ -7159,6 +8114,10 @@ All of this only aims at believable statistics. It is your call and your risk.
         session.lastKeyAt = Date.now();
         session.lastAcceptedAt = Date.now();
         session.typing = true;
+        // Una carrera que arranca con la pestana visible demuestra que el
+        // documento puede teclear; es lo que levanta el freno posterior a un
+        // freeze. Si arranco oculta, el freno sigue vigente hasta la proxima.
+        if (!pageHidden()) clearAfkHold('a visible race started');
         log(`Race started. Target: ${profile.targetWPM} WPM / ${profile.accuracyGoal.toFixed(1)}%`);
         return true;
       }
@@ -7394,6 +8353,18 @@ All of this only aims at believable statistics. It is your call and your risk.
     session.dqStreak++;
     session.dqCount++;
     saveCounters();
+    // La correlacion freeze -> DQ se decide antes de tocar el ritmo: una DQ
+    // que llego tras un freeze no fue un fallo de cadencia, y bajar el
+    // objetivo por ella castigaria las estadisticas sin evitar el siguiente
+    // freeze. La carrera siguiente ya sale mas lenta por carefulRaces.
+    const afkGuard = afkFreezeGuardDecision();
+    if (afkGuard.tripped) {
+      log('Pace governor: the DQ followed a freeze; keeping the learned target (not a pace miss).');
+    } else if (typeof penalizeAdaptivePace === 'function') {
+      // La siguiente carrera no repite el mismo objetivo: el control baja dos
+      // puntos y la precision uno. Una DQ no entra al historial, pero si cuenta.
+      penalizeAdaptivePace();
+    }
     // La racha limpia del dia vuelve a cero y se guarda cuando fue: el resumen
     // del dia lo ensena para saber si el ritmo esta aguantando hoy.
     todayBump({ dq: 1, resetClean: true, dqAt: Date.now() });
@@ -7405,7 +8376,6 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     // Correlacion freeze -> DQ: si el contador de freezes se movio hace poco y
     // AFK estaba abierto, esta DQ es la senal para dejar de farmear a ciegas.
-    const afkGuard = afkFreezeGuardDecision();
     if (afkGuard.tripped) {
       const text = `AFK safety guard: a disqualification followed a freeze (${afkGuard.minutes} min ago). AFK farming was turned off; keep-alive is left as it was.`;
       if (typeof setBackgroundFarm === 'function') setBackgroundFarm(false);
@@ -7834,7 +8804,14 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     // La serie de WPM/precision solo avanza con una carrera medida: una DQ (o
     // una carrera cortada) cambiaria el objetivo sin datos que lo justifiquen.
-    if (counted) advanceSessions();
+    if (counted) {
+      advanceSessions();
+      // El gobernador mira la carrera recien cerrada: sube si fue limpia y baja
+      // si el ritmo o la precision no llegaron al objetivo de esa carrera.
+      if (typeof adaptPace === 'function') {
+        adaptPace(raceHistory[raceHistory.length - 1] || null);
+      }
+    }
 
 
     // Parada pedida a mitad de carrera: ya esta terminada, asi que se para sin
@@ -8526,6 +9503,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     weekSig: '', chSig: '', seasonSig: '', seasonBaseSig: '',
     calSig: '', accSig: null, updateHealthAt: 0, mountedViews: new Set(['stats']),
   };
+  // El panel se puede recrear si el juego lo borra: el listener de resize se
+  // engancha una sola vez, no una por cada montaje.
+  let panelResizeBound = false;
 
   function setText(el, value) {
     if (el && el.textContent !== value) el.textContent = value;
@@ -8797,6 +9777,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     const hidden = pageHidden();
+    const hold = CONFIG.queue.afkFreezeGuard !== false && afkHoldActive();
+    if (hold) {
+      const info = afkHoldInfo();
+      return {
+        text: hidden ? 'hidden · needs visible race' : 'visible · race to clear hold',
+        state: hidden ? 'blocked' : 'ready',
+        title: `AFK freeze hold: ${info.reason}. Hidden races stay paused until one starts with the tab visible; the AFK health reset clears it.${last}`,
+      };
+    }
     if (!hidden) {
       return {
         text: `visible · keep-alive ${keep.label}${count ? ` · freeze ${count}` : ''}`,
@@ -9819,6 +10808,27 @@ All of this only aims at believable statistics. It is your call and your risk.
   };
   window.__ntaDebug.watchRaceResults = () => watchRaceResults();
   window.__ntaDebug.versionNewer = (candidate, current) => versionNewer(candidate, current || VERSION);
+  window.__ntaDebug.openUpdateDownload = () => openUpdateDownload();
+  window.__ntaDebug.verifyUpdateArtifact = (url) => verifyUpdateArtifact(url);
+  // Dry-run de soporte: no teclea ni abre carreras, solo comprueba que las
+  // piezas que suelen romperse (storage, panel, contrato DOM, update) responden.
+  window.__ntaDebug.selfTest = () => {
+    let storage = 'ok';
+    try {
+      localStorage.setItem('nta:selftest', '1');
+      localStorage.removeItem('nta:selftest');
+    } catch {
+      storage = 'blocked';
+    }
+    return {
+      schema: 2,
+      storage,
+      panel: Boolean(panel.root),
+      contract: typeof typingContract === 'function' ? typingContract() : null,
+      update: updateHealth(),
+      safeMode: safeModeState(),
+    };
+  };
   window.__ntaDebug.readCount = (key) => {
     const name = String(key || '');
     countReadCache.delete(name);
@@ -9882,6 +10892,9 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.setAfkFreezeGuard = (on) => setAfkFreezeGuard(on !== false);
   window.__ntaDebug.afkGuardDecision = () => afkFreezeGuardDecision();
   window.__ntaDebug.afkFreeze = () => ({ ...afkFreezeStats });
+  window.__ntaDebug.afkHold = () => afkHoldInfo();
+  window.__ntaDebug.armAfkHold = (reason) => armAfkHold(reason);
+  window.__ntaDebug.clearAfkHold = (reason) => clearAfkHold(reason);
   window.__ntaDebug.resetAfkFreeze = () => resetAfkFreezeStats();
   window.__ntaDebug.notifications = () => ({ ...notificationInfo(), enabled: CONFIG.notifications.enabled === true });
   window.__ntaDebug.setNotifications = (on) => setNotifications(Boolean(on));
@@ -9917,6 +10930,19 @@ All of this only aims at believable statistics. It is your call and your risk.
   // registro en el siguiente latido para que la otra copia tome el relevo.
   window.__ntaDebug.stop = () => panic('debug stop');
   window.__ntaDebug.resume = () => resumeAuto();
+  window.__ntaDebug.safeModeState = () => safeModeState();
+  window.__ntaDebug.enterSafeMode = (reason) => { enterSafeMode(String(reason || 'harness')); return safeModeState(); };
+  window.__ntaDebug.clearSafeMode = () => { clearSafeMode(); return safeModeState(); };
+  window.__ntaDebug.clearBootFailures = () => { clearBootFailures(); return true; };
+  window.__ntaDebug.noteRuntimeError = (kind, message) => {
+    noteRuntimeError(String(kind || 'test'), new Error(String(message || 'simulated')), { fatal: true, visible: false });
+    return safeModeState();
+  };
+  window.__ntaDebug.noteUiDrift = (reason) => noteUiDrift(String(reason || 'harness'));
+  window.__ntaDebug.clearUiDrift = () => { uiDrift = null; return true; };
+  window.__ntaDebug.uiDrift = () => (uiDrift ? { ...uiDrift } : null);
+  window.__ntaDebug.typingContract = () => typingContract();
+  window.__ntaDebug.supportBundle = () => supportBundle();
   // Las pruebas que siembran el historico necesitan un pintado real sin
   // depender de que la pestana este visible o de la cache de 1.5 s.
   window.__ntaDebug.panelRefresh = () => {
@@ -10055,6 +11081,39 @@ All of this only aims at believable statistics. It is your call and your risk.
   window.__ntaDebug.advanceSessions = () => {
     advanceSessions();
     return window.__ntaDebug.trimState();
+  };
+  // El banco siembra un historial corrupto/craftado y comprueba que el panel
+  // solo recibe campos saneados. Tambien sirve para recargar el historial sin
+  // recargar la pagina entera.
+  window.__ntaDebug.historyReload = () => {
+    raceHistory = loadHistory();
+    if (panel.refs) {
+      panel.historySig = '';
+      renderHistory();
+    }
+    return raceHistory;
+  };
+  window.__ntaDebug.adaptivePace = () => {
+    ensureAdaptivePace();
+    return {
+      ...adaptivePace,
+      target: profile.targetWPM,
+      goal: profile.accuracyGoal,
+      range: baseRange(),
+    };
+  };
+  window.__ntaDebug.adaptPace = (row) => adaptPace(row);
+  // El banco prueba que el freno aprendido no se pierde al recargar ni al
+  // volver a calibrar: relee el estado del disco y corre el mismo sync del
+  // arranque real.
+  window.__ntaDebug.adaptiveReload = () => {
+    adaptivePace = readAdaptivePace();
+    ensureAdaptivePace();
+    return window.__ntaDebug.adaptivePace();
+  };
+  window.__ntaDebug.syncAdaptivePace = () => {
+    syncAdaptivePace();
+    return window.__ntaDebug.adaptivePace();
   };
   window.__ntaDebug.hudWpm = (force = true) => hudWpm(Boolean(force));
   window.__ntaDebug.hudForGuard = (typed = 60) => hudForGuard(Number(typed) || 0);
@@ -10797,11 +11856,23 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     return {
       app: 'nitro-wraith',
+      // Version del contrato del informe: un bundle viejo se puede triar sin
+      // adivinar que campos existen.
+      schema: 2,
       version: VERSION,
       channel: CHANNEL,
       at: new Date().toISOString(),
       page: location.pathname,
       mode: MODE,
+      // Estado de la red de seguridad y del contrato con la UI. Van en el
+      // informe para que un fallo raro se pueda diagnosticar sin consola.
+      safeMode: safeModeState(),
+      contract: {
+        ...typingContract(),
+        drift: uiDrift
+          ? { at: new Date(uiDrift.at).toISOString(), reason: uiDrift.reason }
+          : null,
+      },
       profile: { name: paceProfile, min: tier.min, max: tier.max, hardCap: CONFIG.wpm.hardCap },
       calibration: {
         target: calibratedRange ? `${calibratedRange.min}-${calibratedRange.max} WPM` : null,
@@ -10949,6 +12020,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       // se guarda sobrevive a una recarga.
       env: {
         frame: window === window.top ? 'top' : 'iframe',
+        browser: browserFamily(),
+        browserSupported: browserSupported(),
+        userAgent: navigator.userAgent,
+        language: navigator.language,
         visibility: document.visibilityState,
         // 'worker' = la cadencia sobrevive a una pestana oculta; 'page' = el
         // Worker no se pudo crear (CSP) y se usa el reloj normal.
@@ -11003,6 +12078,56 @@ All of this only aims at believable statistics. It is your call and your risk.
     };
   }
 
+  // Claves que identifican a la cuenta o a la sesion. El paquete de soporte
+  // conserva lo tecnico (WPM, contadores, vuelo) y tapa lo personal.
+  const SUPPORT_REDACT_KEY = /^(?:username|userName|userID|userId|user_id|email|player_token|access_token|refresh_token|id_token|authorization|cookie|password|secret|token)$/i;
+
+  function scrubSupport(value, key = '') {
+    if (SUPPORT_REDACT_KEY.test(key)) return '[redacted]';
+    if (Array.isArray(value)) return value.map((item) => scrubSupport(item));
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const [name, item] of Object.entries(value)) out[name] = scrubSupport(item, name);
+      return out;
+    }
+    if (typeof value === 'string') return scrubSecrets(value);
+    return value;
+  }
+
+  function supportBundle() {
+    return {
+      schema: 'nitro-wraith-support/2',
+      generatedAt: new Date().toISOString(),
+      redacted: true,
+      diagnostic: scrubSupport(diagnosticReport()),
+    };
+  }
+
+  function exportSupportBundle() {
+    const text = JSON.stringify(supportBundle(), null, 1);
+    const box = panel.refs && panel.refs.cfgText;
+
+    if (box) {
+      box.value = text;
+      try { box.select(); } catch { /* seleccion no disponible */ }
+    }
+
+    const manual = () => setConfigNote(`Support bundle is in the box (${text.length} chars); copy it by hand.`);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text)
+          .then(() => setConfigNote(`Support bundle copied (${text.length} chars, redacted).`))
+          .catch(manual);
+      } else {
+        manual();
+      }
+    } catch {
+      manual();
+    }
+
+    log(`Support bundle ready: v${VERSION}, ${session.races} races, ${flightRing.length} flight events, redacted.`);
+  }
+
   function exportDiagnostics() {
     const text = JSON.stringify(diagnosticReport(), null, 1);
     const box = panel.refs && panel.refs.cfgText;
@@ -11039,6 +12164,15 @@ All of this only aims at believable statistics. It is your call and your risk.
     panel.host.style.left = `${clamp(left, 0, maxLeft)}px`;
     panel.host.style.top = `${clamp(top, 0, maxTop)}px`;
     panel.host.style.bottom = 'auto';
+  }
+
+  function resetPanelPosition() {
+    if (!panel.host) return false;
+    disk.remove(KEYS.panelPosition);
+    panel.host.style.left = '16px';
+    panel.host.style.top = 'auto';
+    panel.host.style.bottom = '16px';
+    return true;
   }
 
   function savePosition() {
@@ -11103,1983 +12237,53 @@ All of this only aims at believable statistics. It is your call and your risk.
 
     handle.addEventListener('pointerup', stop);
     handle.addEventListener('pointercancel', stop);
-  }
 
-  function createPanel() {
-    if (document.getElementById(PANEL_ID) || !document.body) return;
+    // El arrastre no puede depender del raton: con el foco en la cabecera, las
+    // flechas mueven el panel y Home lo devuelve a su esquina. Es la misma
+    // posicion que se guarda al soltar el puntero.
+    handle.tabIndex = 0;
+    handle.setAttribute('role', 'group');
+    handle.setAttribute(
+      'aria-label',
+      'Panel position. Arrow keys move it; hold Shift for bigger steps; Home restores the corner.',
+    );
+    handle.addEventListener('keydown', (event) => {
+      if (event.target !== handle) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
 
-    // Un panel nuevo trae nodos nuevos: las firmas del anterior ya no valen.
-    panel.calSig = '';
-    panel.accSig = null;
-    panel.updateHealthAt = 0;
-
-    registerThemeProperties();
-
-    const host = document.createElement('div');
-    host.id = PANEL_ID;
-    host.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:2147483000;';
-
-    const shadow = host.attachShadow({ mode: 'open' });
-    shadow.innerHTML = `
-      <style>
-        /* ====================================================================
-           Panel: una sola pieza de shadow DOM. Paleta de overlay de juego
-           (carbon casi negro + verde neon), tipografia pequena y animaciones
-           cortas: entrada, tarjetas escalonadas, rail con deslizador, muelle en
-           los interruptores y un parpadeo cuando un numero cambia.
-           Regla de oro de aqui abajo: el calcado de datos (filas, chips, cajon)
-           no cambia, solo la piel. Todo lo que el JS busca sigue existiendo.
-           ==================================================================== */
-        * { box-sizing: border-box; }
-
-        .panel {
-          /* Una sola piel se cambia con data-theme: todo lo de abajo es el
-             contrato que comparten los seis temas. El borde, el halo y los
-             rellenos se derivan del acento con color-mix, asi que un tema nuevo
-             solo declara su acento, su segundo color y su fondo. */
-          --acc: #35ea86;
-          --acc-2: #9bf7c5;
-          --acc-dim: color-mix(in srgb, var(--acc) 14%, transparent);
-          --line: color-mix(in srgb, var(--acc) 12%, transparent);
-          --line-strong: color-mix(in srgb, var(--acc) 26%, transparent);
-          --ink: #e9f7ef;
-          --ink-2: #cfe9db;
-          --dim: #7d9188;
-          --dim-2: #7f9389;
-          --warn: #ffb340;
-          --bad: #ff6f6f;
-          --info: #63c8ff;
-          --card: rgba(255, 255, 255, .028);
-          --bg-hi: rgba(12, 17, 14, .985);
-          --bg-lo: rgba(5, 8, 6, .995);
-          position: relative;
-          isolation: isolate;
-          width: 322px;
-          max-width: calc(100vw - 32px);
-          color: var(--ink);
-          background:
-            repeating-linear-gradient(0deg, rgba(255, 255, 255, .014) 0 1px, transparent 1px 3px),
-            radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--acc) 10%, transparent), transparent 58%),
-            radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--acc-2) 8%, transparent), transparent 62%),
-            linear-gradient(168deg, var(--bg-hi), var(--bg-lo));
-          border: 1px solid var(--line-strong);
-          border-radius: 13px;
-          box-shadow:
-            0 22px 44px -18px rgba(0, 0, 0, .85),
-            0 0 0 1px rgba(0, 0, 0, .6),
-            0 0 34px -14px color-mix(in srgb, var(--acc) 50%, transparent),
-            inset 0 1px 0 rgba(255, 255, 255, .05);
-          font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-          -webkit-font-smoothing: antialiased;
-          user-select: none;
-          animation: nt-boot .42s cubic-bezier(.2, .9, .25, 1) both;
-        }
-        @keyframes nt-boot {
-          from { opacity: 0; transform: translateY(10px) scale(.97); }
-          to   { opacity: 1; transform: none; }
-        }
-
-        /* ---------- temas --------------------------------------------------- */
-        /* Carbon es la piel de siempre. Las demas solo mueven el acento y el
-           fondo: bordes, halos, rellenos y barras salen de --acc con color-mix,
-           asi que un tema nuevo no toca ni una regla mas. Los avisos (ambar) y
-           los errores (rojo) no cambian: el color sigue significando lo mismo
-           en cualquier tema. */
-        .panel, .panel[data-theme="carbon"] { color-scheme: dark; }
-        .panel[data-theme="aurora"] {
-          --acc: #3fe0c5;
-          --acc-2: #a78bfa;
-          --ink: #e8fbf7;
-          --ink-2: #c3ece5;
-          --dim: #7c9a98;
-          --dim-2: #789693;
-          --bg-hi: rgba(7, 19, 20, .985);
-          --bg-lo: rgba(4, 10, 13, .995);
-        }
-        .panel[data-theme="sunset"] {
-          --acc: #ff9a5c;
-          --acc-2: #ff77b0;
-          --ink: #fff3ea;
-          --ink-2: #f6d8c7;
-          --dim: #a08a80;
-          --dim-2: #9c877d;
-          --bg-hi: rgba(24, 12, 11, .985);
-          --bg-lo: rgba(12, 6, 8, .995);
-        }
-        .panel[data-theme="ice"] {
-          --acc: #66e3ff;
-          --acc-2: #d7f7ff;
-          --ink: #eefaff;
-          --ink-2: #c9e9f6;
-          --dim: #7e97a4;
-          --dim-2: #7a93a0;
-          --bg-hi: rgba(8, 16, 24, .985);
-          --bg-lo: rgba(4, 8, 14, .995);
-        }
-        .panel[data-theme="violet"] {
-          --acc: #c08bff;
-          --acc-2: #f0a9ff;
-          --ink: #f7f0ff;
-          --ink-2: #ddcbf2;
-          --dim: #93849f;
-          --dim-2: #8f809b;
-          --bg-hi: rgba(18, 11, 27, .985);
-          --bg-lo: rgba(8, 5, 14, .995);
-        }
-        /* RGB: el acento es un tono HSL registrado con @property, asi que el
-           navegador puede interpolarlo. El borde conico y el titulo giran con
-           el; sin @property se queda en rojo fijo, que sigue siendo legible. */
-        .panel[data-theme="rgb"] {
-          --nt-hue: 0;
-          --nt-angle: 0deg;
-          --acc: hsl(var(--nt-hue) 92% 63%);
-          --acc-2: hsl(calc(var(--nt-hue) + 70) 94% 76%);
-          --ink: #f6f7ff;
-          --ink-2: #d9dcf0;
-          --dim: #8d90a6;
-          --dim-2: #8a8da3;
-          --bg-hi: rgba(11, 11, 19, .985);
-          --bg-lo: rgba(5, 5, 10, .995);
-          animation:
-            nt-boot .42s cubic-bezier(.2, .9, .25, 1) both,
-            nt-rgb-hue 16s linear infinite,
-            nt-rgb-angle 8s linear infinite;
-        }
-        @keyframes nt-rgb-hue { to { --nt-hue: 360; } }
-        @keyframes nt-rgb-angle { to { --nt-angle: 360deg; } }
-
-        /* Con una carrera viva no se animan propiedades registradas del panel:
-           cada frame obligaria a recalcular todos los color-mix y el borde
-           conico, y el juego necesita ese tiempo. Al terminar la carrera los
-           colores vuelven a girar solos. */
-        .panel[data-theme="rgb"][data-state="running"] {
-          animation-play-state: paused;
-        }
-        .panel[data-theme="rgb"][data-state="running"] .title,
-        .panel[data-theme="rgb"][data-collapsed="true"],
-        .panel[data-theme="rgb"][data-collapsed="true"] .title {
-          animation-play-state: paused;
-        }
-
-        /* El marco arcoiris: una capa conica recortada a 1 px con mask. Solo se
-           enciende en RGB; en el resto queda transparente y no cuesta nada. */
-        .panel::after {
-          content: '';
-          position: absolute;
-          inset: -1px;
-          z-index: 3;
-          padding: 1px;
-          border-radius: 14px;
-          background: conic-gradient(from var(--nt-angle, 0deg),
-            #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
-          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          -webkit-mask-composite: xor;
-          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          mask-composite: exclude;
-          display: none;
-          opacity: .9;
-          pointer-events: none;
-        }
-        .panel[data-theme="rgb"]::after { display: block; }
-        .panel[data-theme="rgb"] .title {
-          background: linear-gradient(90deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
-          background-size: 300% 100%;
-          -webkit-background-clip: text;
-          background-clip: text;
-          color: transparent;
-          text-shadow: none;
-          animation: nt-rgb-title 6s linear infinite;
-        }
-        @keyframes nt-rgb-title { to { background-position: 300% 0; } }
-
-        /* ---------- cabecera ------------------------------------------------- */
-        .head { position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; cursor: grab; touch-action: none; }
-        .head::after {
-          content: '';
-          position: absolute;
-          left: 11px; right: 11px; bottom: 0; height: 1px;
-          background: var(--line);
-          pointer-events: none;
-        }
-        .head:active { cursor: grabbing; }
-        .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim-2) 14%, transparent); transition: background .25s ease, box-shadow .25s ease; }
-        /* La marca: la W del hero, en un cuadrado de cristal. El punto de estado
-           sigue dentro, asi que no se pierde el LED al cambiar el icono. */
-        .mark { position: relative; flex: none; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; color: var(--acc); background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 13%, rgba(255, 255, 255, .04)), rgba(255, 255, 255, .015)); border: 1px solid var(--line-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 16px -9px var(--acc); }
-        .mark svg { width: 18px; height: 18px; display: block; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 55%, transparent)); }
-        .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px; box-shadow: 0 0 0 2px var(--bg-hi), 0 0 7px color-mix(in srgb, var(--acc) 70%, transparent); }
-        .panel[data-state="running"] .mark .dot { animation: nt-pulse 1.7s ease-in-out infinite; }
-        .panel[data-collapsed="true"] .mark { width: 23px; height: 23px; border-radius: 7px; }
-        .panel[data-state="running"] .dot { background: var(--acc); box-shadow: 0 0 0 3px var(--acc-dim), 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent); animation: nt-pulse 1.7s ease-in-out infinite; }
-        .panel[data-state="paused"] .dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 12px color-mix(in srgb, var(--warn) 60%, transparent); }
-        .panel[data-state="break"] .dot { background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 16%, transparent), 0 0 12px color-mix(in srgb, var(--info) 60%, transparent); }
-        @keyframes nt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
-
-        .brand { flex: 1 1 auto; min-width: 0; }
-        .title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 12.5px/1.15 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .13em; text-transform: uppercase; color: var(--ink); text-shadow: 0 0 14px color-mix(in srgb, var(--acc) 35%, transparent); }
-        .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font: 600 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .13em; text-transform: uppercase; color: var(--dim-2); }
-        .sub b { color: var(--acc); font-weight: 700; }
-
-        .who { display: none; }
-        .ghlink { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 7px; text-decoration: none; font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--acc-2); background: var(--acc-dim); border: 1px solid var(--line-strong); transition: color .15s ease, background .15s ease, border-color .15s ease; }
-        .ghlink:hover { color: var(--ink); background: color-mix(in srgb, var(--acc) 20%, transparent); border-color: var(--acc); }
-        .ghlink:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-        .ghlink[hidden] { display: none !important; }
-        .ghlink svg { width: 10px; height: 10px; display: block; }
-        .who i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
-        .iconbtn { all: unset; flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; cursor: pointer; color: var(--dim); background: rgba(255, 255, 255, .04); border: 1px solid var(--line); transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
-        .iconbtn:hover { color: var(--acc-2); background: var(--acc-dim); border-color: var(--line-strong); }
-        .iconbtn:active { transform: scale(.92); }
-        .iconbtn:focus-visible, .pace:focus-visible, .toggle:focus-visible, .stop:focus-visible, .gear:focus-visible, .rail-btn:focus-visible, .act:focus-visible, .sw:focus-visible, .seg-btn:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-        .iconbtn svg { width: 13px; height: 13px; display: block; }
-
-        /* ---------- tira de chips ------------------------------------------- */
-        .chips-row { display: flex; align-items: center; gap: 6px; padding: 0 11px 9px; }
-        /* Progreso de la carrera visible desde cualquier pestaña. Es una
-           linea compositada: scaleX no toca el layout ni el texto de al lado. */
-        .race-line { height: 2px; margin: 0 11px; border-radius: 99px; background: rgba(255, 255, 255, .05); overflow: hidden; opacity: 0; transition: opacity .2s ease; }
-        .panel[data-state="running"] .race-line, .panel[data-state="paused"] .race-line { opacity: 1; }
-        .race-line i { display: block; height: 100%; transform: scaleX(var(--race-fill, 0)); transform-origin: left center; background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 95%, transparent), color-mix(in srgb, var(--acc-2) 95%, transparent)); box-shadow: 0 0 9px color-mix(in srgb, var(--acc) 55%, transparent); }
-        .panel[data-collapsed="true"] .race-line { display: none; }
-        .pace { all: unset; flex: none; padding: 4px 8px; border-radius: 999px; cursor: pointer; font: 700 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; color: var(--acc-2); background: color-mix(in srgb, var(--acc) 12%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 32%, transparent); transition: filter .15s ease, transform .12s ease, box-shadow .2s ease; }
-        .pace:hover { filter: brightness(1.16); box-shadow: 0 0 14px -4px color-mix(in srgb, var(--acc) 70%, transparent); }
-        .pace:active { transform: scale(.96); }
-        .panel[data-pace-profile="soft"] .pace { color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); border-color: color-mix(in srgb, var(--info) 32%, transparent); }
-        .panel[data-pace-profile="fast"] .pace { color: #ffe3b8; background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
-        /* El chip es un ESTADO, no un interruptor: el bot es siempre AUTO y la
-           cola se arma sola. Para parar esta Stop (o Esc / Alt+N). */
-        .mode { flex: none; padding: 4px 8px; border-radius: 999px; font: 700 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; color: var(--acc-2); background: var(--acc-dim); border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent); cursor: default; }
-        .cap { flex: 1 1 auto; padding: 4px 8px; border-radius: 999px; text-align: center; font: 700 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; color: #ffe0b0; background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); transition: color .2s ease, background .2s ease, border-color .2s ease; }
-        .panel[data-cap-hit="1"] .cap { color: #ffd6d6; background: color-mix(in srgb, var(--bad) 18%, transparent); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-
-
-        /* ---------- cuerpo: rail + vistas ----------------------------------- */
-        .main { display: flex; align-items: stretch; gap: 0; border-top: 1px solid var(--line); }
-        .rail { position: relative; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 9px 6px; border-right: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, .02), transparent); }
-        .rail-btn { all: unset; position: relative; z-index: 1; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; cursor: pointer; color: var(--dim-2); transition: color .18s ease, transform .12s ease; }
-        .rail-btn:hover { color: var(--acc-2); }
-        .rail-btn:active { transform: scale(.9); }
-        .rail-btn svg { width: 15px; height: 15px; display: block; }
-        /* Etiqueta flotante del rail: aparece solo al apuntar o enfocar, con
-           transform y opacity (nada de width ni filtros). */
-        .rail-btn::after { content: attr(data-label); position: absolute; left: calc(100% + 7px); top: 50%; z-index: 6; padding: 4px 7px; border-radius: 6px; white-space: nowrap; pointer-events: none; font: 700 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); background: var(--bg-hi); border: 1px solid var(--line-strong); box-shadow: 0 8px 18px -12px rgba(0, 0, 0, .9); opacity: 0; transform: translate(-3px, -50%); transition: opacity .16s ease, transform .16s ease; }
-        .rail-btn:hover::after, .rail-btn:focus-visible::after { opacity: 1; transform: translate(0, -50%); }
-        /* El deslizador del rail: un cuadrado con glow que viaja con muelle. */
-        .rail-glide { position: absolute; left: 6px; top: 9px; width: 30px; height: 30px; border-radius: 9px; background: var(--acc-dim); border: 1px solid var(--line-strong); box-shadow: 0 0 16px -6px var(--acc), inset 0 0 12px -6px var(--acc); transition: transform .34s cubic-bezier(.34, 1.4, .5, 1); transition: transform .34s linear(0, 0.32 14%, 0.82 28%, 1.06 44%, 1.02 58%, 0.995 72%, 1); pointer-events: none; }
-        .rail[data-index="1"] .rail-glide { transform: translateY(32px); }
-        .rail[data-index="2"] .rail-glide { transform: translateY(64px); }
-        .rail[data-index="3"] .rail-glide { transform: translateY(96px); }
-        .rail[data-index="0"] .rail-btn[data-tab-btn="stats"],
-        .rail[data-index="1"] .rail-btn[data-tab-btn="tune"],
-        .rail[data-index="2"] .rail-btn[data-tab-btn="log"],
-        .rail[data-index="3"] .rail-btn[data-tab-btn="info"] { color: var(--acc); }
-
-        .views { flex: 1 1 auto; min-width: 0; max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; padding: 10px 11px 11px; }
-        .views::-webkit-scrollbar { width: 6px; }
-        .views::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--acc) 22%, transparent); border-radius: 99px; }
-        .views::-webkit-scrollbar-track { background: transparent; }
-        .views { scrollbar-gutter: stable; }
-        .view { display: none; }
-        /* Cabecera corta de cada vista: dice donde estas sin ocupar una tarjeta. */
-        .view-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2px 8px; margin: 0 1px 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-        .view-head span { display: inline-flex; align-items: center; gap: 6px; font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); }
-        .view-head span::before { content: ''; width: 10px; height: 1px; border-radius: 99px; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
-        .view-head b { font: 600 8px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .04em; color: var(--dim-2); text-align: right; }
-        .panel[data-tab="stats"] .v-stats,
-        .panel[data-tab="tune"] .v-tune,
-        .panel[data-tab="log"] .v-log,
-        .panel[data-tab="info"] .v-info { display: block; animation: nt-view .28s cubic-bezier(.2, .9, .25, 1) both; }
-        @keyframes nt-view { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-        /* TUNE se lee en tres bloques: ritmo, limites y automatizacion. La
-           cabecera solo separa; las tarjetas y sus controles siguen igual. */
-        .tune-sec { margin: 0 0 11px; }
-        .tune-sec:last-child { margin-bottom: 0; }
-        /* TUNE tiene muchas filas; el filtro evita recorrerlas todas cuando ya
-           se sabe que ajuste se busca. Vive fuera de los bloques para seguir
-           visible aunque no quede ninguna tarjeta. */
-        .tune-filter { display: flex; align-items: center; gap: 7px; margin: 0 1px 9px; }
-        .tune-search { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, .22); transition: border-color .18s ease, box-shadow .18s ease; }
-        .tune-search:focus-within { border-color: var(--line-strong); box-shadow: 0 0 16px -9px var(--acc); }
-        .tune-search > svg { flex: none; width: 12px; height: 12px; margin-left: 8px; color: var(--dim-2); }
-        .tune-search input { all: unset; flex: 1 1 auto; min-width: 0; padding: 0 5px; font: 600 10px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink); }
-        .tune-search input::placeholder { color: var(--dim-2); }
-        .tune-search input::-webkit-search-cancel-button { display: none; }
-        .tune-clear { all: unset; flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-right: 4px; border-radius: 5px; cursor: pointer; font: 700 14px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim-2); }
-        .tune-clear:hover { color: var(--acc); background: var(--acc-dim); }
-        .tune-clear:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
-        .tune-clear[hidden], .tune-empty[hidden] { display: none; }
-        .tune-count { flex: none; font: 700 7.5px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--dim-2); white-space: nowrap; }
-        .tune-empty { margin: -2px 1px 10px; padding: 11px 8px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; font: 500 9.5px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
-        .tune-sec-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin: 1px 1px 7px; }
-        .tune-sec-h span { display: inline-flex; align-items: center; gap: 6px; font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); }
-        .tune-sec-h span::before { content: ''; width: 12px; height: 1px; border-radius: 99px; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
-        .tune-sec-h b { font: 600 8px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .04em; color: var(--dim-2); }
-        .tune-sec-h::after { content: ''; flex: 1 1 20px; min-width: 12px; height: 1px; align-self: center; background: linear-gradient(90deg, var(--line), transparent); }
-
-        /* ---------- tarjetas ------------------------------------------------- */
-        .card { position: relative; contain: layout style; margin-bottom: 9px; padding: 9px 10px 10px; border-radius: 10px; background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .012)); border: 1px solid var(--line); transition: border-color .2s ease, box-shadow .25s ease, transform .18s ease; }
-        .card:last-child { margin-bottom: 2px; }
-        .card:hover { border-color: var(--line-strong); box-shadow: 0 10px 22px -16px rgba(0, 0, 0, .9), 0 0 22px -14px color-mix(in srgb, var(--acc) 65%, transparent); }
-        .card::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; border-radius: 99px; background: linear-gradient(180deg, var(--acc), color-mix(in srgb, var(--acc) 12%, transparent)); box-shadow: 0 0 10px color-mix(in srgb, var(--acc) 55%, transparent); opacity: .85; transition: opacity .2s ease; }
-        .card:hover::before { opacity: 1; }
-        /* Marca de agua: se ve por detras de las filas de arriba, como el icono
-           fantasma del panel de referencia. Muy tenue a proposito. */
-        .card > .ghost { position: absolute; right: 7px; top: 6px; width: 26px; height: 26px; color: var(--acc); opacity: .07; pointer-events: none; z-index: 0; }
-        .card > .ghost svg { width: 100%; height: 100%; }
-        /* Lo que se lee siempre por delante del adorno. */
-        .card > *:not(.ghost) { position: relative; z-index: 1; }
-        /* El titulo manda y el subtitulo va pegado a el; la esquina derecha queda
-           libre para el icono fantasma, que si no cae debajo del texto. */
-        .card-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 7px; margin-bottom: 7px; }
-        .card-t { font: 800 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .19em; text-transform: uppercase; color: var(--ink-2); }
-        .card-s { font: 600 8.5px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .05em; color: var(--dim-2); }
-        /* Edad del dato vivo: se actualiza cuatro veces por segundo y se pone
-           ambar cuando la carrera lleva un rato sin aceptar una tecla. */
-        .card-age { margin-left: auto; font: 600 8px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--dim-2); }
-        .card-age[data-good="0"] { color: var(--warn); }
-        /* El punto de la etiqueta live dice si la telemetria se esta moviendo. */
-        .v-stats .live-card .card-s[data-field="liveTag"] { display: inline-flex; align-items: center; gap: 5px; }
-        .v-stats .live-card .card-s[data-field="liveTag"]::before { content: ''; width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; opacity: .8; }
-        .panel[data-state="running"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--acc); }
-        .panel[data-state="running"] .v-stats .live-card .card-s[data-field="liveTag"]::before { box-shadow: 0 0 6px var(--acc); animation: nt-pulse 1.7s ease-in-out infinite; }
-        .panel[data-state="paused"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--warn); }
-        .panel[data-state="break"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--info); }
-
-        /* Aparecen una tras otra, como si el panel se montara delante de ti. */
-        .panel[data-fresh="1"] .card { animation: nt-card .40s cubic-bezier(.2, .9, .25, 1) both; }
-        .panel[data-fresh="1"] .card:nth-child(2) { animation-delay: .05s; }
-        .panel[data-fresh="1"] .card:nth-child(3) { animation-delay: .1s; }
-        .panel[data-fresh="1"] .card:nth-child(4) { animation-delay: .15s; }
-        @keyframes nt-card { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-
-        /* ---------- marcador grande ----------------------------------------- */
-        .hero { display: grid; grid-template-columns: 1fr 1px 1fr; align-items: center; padding: 8px 2px 9px; }
-        .stat { text-align: center; }
-        .stat b { display: block; font: 700 26px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--ink); text-shadow: 0 0 18px color-mix(in srgb, var(--acc) 28%, transparent); transition: color .25s ease, text-shadow .25s ease; }
-        .stat b[data-good="1"] { color: var(--acc); text-shadow: 0 0 18px color-mix(in srgb, var(--acc) 50%, transparent); }
-        .stat b[data-good="0"] { color: var(--warn); text-shadow: 0 0 18px color-mix(in srgb, var(--warn) 45%, transparent); }
-        .stat b.bump { animation: nt-bump .32s cubic-bezier(.34, 1.4, .5, 1); }
-        @keyframes nt-bump { 0% { transform: scale(1); } 35% { transform: scale(1.11); } 100% { transform: scale(1); } }
-        .stat span { display: block; margin-top: 5px; font: 700 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .17em; text-transform: uppercase; color: var(--dim); }
-        .sep { display: block; width: 1px; height: 34px; background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--acc) 25%, transparent), transparent); }
-
-        .prog { position: relative; height: 4px; margin: 2px 2px 0; border-radius: 99px; background: rgba(255, 255, 255, .06); overflow: hidden; opacity: 0; transition: opacity .25s ease; }
-        .panel[data-state="running"] .prog, .panel[data-state="paused"] .prog { opacity: 1; }
-        .prog i { display: block; width: 0; height: 100%; border-radius: 99px; background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 95%, transparent), color-mix(in srgb, var(--acc-2) 95%, transparent)); box-shadow: 0 0 10px color-mix(in srgb, var(--acc) 60%, transparent); transition: width .18s linear; }
-        .season-card .season-prog { opacity: 1; margin: 0 2px 2px; }
-        .season-card .season-name { margin: 1px 0 8px; font: 700 13px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); }
-        .season-card.is-empty .season-name { color: var(--dim-2); }
-        .season-card .season-alert { margin: 8px 2px 0; padding: 6px 8px; border-radius: 7px; font: 600 11px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--warn, #ffcf6e); background: rgba(255, 190, 90, .08); border: 1px solid rgba(255, 190, 90, .28); }
-        .season-card .season-actions { display: flex; gap: 6px; margin-top: 8px; }
-        .season-card .season-actions .act { flex: 0 1 auto; padding: 5px 10px; }
-        /* Reflejo que barre la barra mientras escribe: vida sin ruido. */
-        .prog::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent); transform: translateX(-100%); opacity: 0; }
-        .panel[data-state="running"] .prog::after { opacity: 1; animation: nt-sheen 2.1s ease-in-out infinite; }
-        @keyframes nt-sheen { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(100%); } }
-
-        /* ---------- filas ---------------------------------------------------- */
-        .auto-pace {
-          display: flex; align-items: center; justify-content: center; gap: 6px;
-          width: max-content; max-width: 100%; margin: 5px auto 0; padding: 3px 8px;
-          border: 1px solid var(--line); border-radius: 999px;
-          background: color-mix(in srgb, var(--acc) 7%, transparent);
-          color: var(--acc-2); font: 600 8px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-          letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
-        }
-        .auto-pace::before {
-          content: ''; width: 5px; height: 5px; flex: none; border-radius: 50%;
-          background: var(--acc); box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 70%, transparent);
-        }
-        .rows { display: grid; gap: 1px; margin-top: 8px; }
-        /* La vista Live ensena lo que se mira de verdad. El resto sigue en el DOM
-           (y en los tooltips) para no romper el contrato del panel, pero no
-           convierte la tarjeta en una lista de telemetria. */
-        .v-stats .live-card .rows .row.secondary { display: none; }
-        .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 2.5px 0; font: 500 10.5px/1.45 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); border-bottom: 1px solid rgba(255, 255, 255, .03); }
-        .row:last-child { border-bottom: 0; }
-        .row span { letter-spacing: .05em; }
-        .row b { font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink-2); }
-        .row b[data-good="1"] { color: var(--acc); }
-        .row b[data-good="0"] { color: var(--warn); }
-        .recent-pair { display: inline-flex; align-items: baseline; }
-        .recent-pair i { font-style: normal; }
-        .recent-pair .recent-acc::before { content: '·'; margin: 0 5px; color: var(--dim-2); }
-        .recent-pair i[data-good="1"] { color: var(--acc); }
-        .recent-pair i[data-good="0"] { color: var(--warn); }
-        .recent-pair i.bump { animation: nt-bump .32s cubic-bezier(.34, 1.4, .5, 1); }
-        .row .num { width: 58px; flex: none; padding: 2px 5px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0, 0, 0, .24); color: var(--ink-2); font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; text-align: right; color-scheme: dark; }
-        .row .num:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; border-color: var(--acc); }
-        .row .num::placeholder { color: var(--dim-2); }
-        .row .num::-webkit-inner-spin-button, .row .num::-webkit-outer-spin-button { opacity: .35; }
-        .row .cmp-select { flex: 1 1 auto; min-width: 0; max-width: 100%; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); color: var(--acc-2); font: 600 9.5px/1.4 ui-monospace, monospace; letter-spacing: 0; text-transform: none; color-scheme: dark; cursor: pointer; }
-        .row .cmp-select:focus-visible { outline: 2px solid color-mix(in srgb, var(--acc) 70%, transparent); outline-offset: 1px; }
-        .row .cmp-select option { background: #0b0f0d; color: var(--ink); }
-        .cmp-row { gap: 8px; }
-        .break-row { display: flex; }
-        .panel[data-state="break"] .break-row b { color: var(--info); }
-        .dq-row b { color: var(--warn); }
-        .limit-row { cursor: pointer; }
-        .limit-row b { color: var(--acc); }
-        .limit-row:hover b { text-decoration: underline dotted; }
-        .panel[data-limit="on"] .limit-row b { color: var(--acc); }
-        .prev-row { cursor: pointer; }
-        .prev-row b { color: var(--ink-2); }
-        .prev-row:hover b { text-decoration: underline dotted; }
-        .hud-row b, .box-row b { color: var(--acc-2); }
-        .guard-row b { color: var(--warn); }
-        .panel[data-standby="1"] .guard-row b { color: var(--info); }
-        .panel[data-box="ready"] .box-row b { color: var(--acc); }
-        .panel[data-box="waiting"] .box-row b { color: var(--dim); }
-        .today-row b { color: var(--acc); }
-        .today-row b[data-good="0"] { color: var(--warn); }
-
-        /* ---------- historial ------------------------------------------------ */
-        .hist { margin-top: 8px; }
-        .hist-head, .hist-row { display: grid; grid-template-columns: 34px 34px 46px 1fr 42px; gap: 6px; align-items: center; }
-        .hist-head { padding-bottom: 3px; font: 700 8px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--dim-2); }
-        .hist-head span:not(:first-child), .hist-row b { text-align: right; }
-        .hist-row { padding: 3px 0; border-radius: 6px; font-variant-numeric: tabular-nums; transition: background .2s ease, transform .2s ease; }
-        .hist-row:hover { background: rgba(255, 255, 255, .035); transform: translateX(1px); }
-        .hist-row span { font-size: 9.5px; color: var(--dim); }
-        .hist-row b { font-size: 11px; font-weight: 600; color: var(--ink-2); }
-        .hist-row:first-child b { color: var(--ink); text-shadow: 0 0 12px color-mix(in srgb, var(--acc) 30%, transparent); }
-        .hist-row:first-child span { color: var(--acc); }
-        .hist-row .dev { font-size: 10px; color: var(--dim-2); }
-        .hist-row .dev[data-good="1"] { color: var(--acc); }
-        .hist-row .dev[data-good="0"] { color: var(--warn); }
-        /* WPM oficial del paquete de meta, pegado al del modelo. Solo aparece
-           en las carreras que lo traen; las viejas no inventan el dato. */
-        .hist-row .wpm { white-space: nowrap; }
-        .hist-row .wpm .model { margin-left: 5px; font: 700 8px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-2); }
-        .hist-row:first-child .wpm .model { color: var(--acc-2); }
-        .hist-row .nitro-tag { margin-right: 4px; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc); font-style: normal; font-size: 7.5px; letter-spacing: .06em; vertical-align: 1px; }
-        .hist-row .place { color: var(--dim); }
-        .hist-row .place[data-medal="1"] { color: #ffd166; }
-        .hist-row .place[data-medal="2"] { color: #d7dee8; }
-        .hist-row .place[data-medal="3"] { color: #e0a273; }
-        .hist-row .xp { color: var(--acc-2); }
-        .hist-empty { padding-top: 2px; font: italic 500 10px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim-2); }
-        .hist-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--acc) 14%, transparent); font: 700 8.5px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .13em; text-transform: uppercase; color: var(--dim); }
-        .hist-foot b { font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--acc-2); }
-
-        /* ---------- listas del registro -------------------------------------- */
-        .log-list { display: grid; gap: 4px; }
-        .log-item { display: grid; grid-template-columns: 46px 1fr auto; gap: 7px; align-items: baseline; padding: 4px 6px; border-radius: 7px; background: rgba(255, 255, 255, .022); border: 1px solid rgba(255, 255, 255, .045); font-variant-numeric: tabular-nums; transition: border-color .2s ease, transform .18s ease; }
-        .log-item:hover { border-color: var(--line-strong); transform: translateX(1px); }
-        .log-item i { font: 600 9px/1.4 ui-monospace, monospace; color: var(--dim-2); font-style: normal; }
-        .log-item span { font: 500 10px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .log-item b { font: 600 10.5px/1.35 ui-monospace, monospace; color: var(--acc-2); }
-        .log-item b[data-good="0"] { color: var(--warn); }
-        .log-empty { font: italic 500 10px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim-2); }
-        .notice-item { display: grid; grid-template-columns: 44px 1fr; gap: 7px; padding: 3px 0; font: 500 10px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); border-bottom: 1px solid rgba(255, 255, 255, .03); }
-        .notice-item:last-child { border-bottom: 0; }
-        .notice-item i { font: 600 9px/1.4 ui-monospace, monospace; color: var(--dim-2); font-style: normal; }
-        .notice-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-        /* ---------- interruptores y ajustes --------------------------------- */
-        .set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .03); }
-        .set-row:last-child { border-bottom: 0; }
-        .set-lbl { font: 600 10.5px/1.3 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .03em; color: var(--ink-2); }
-        .set-lbl i { display: block; margin-top: 2px; font: 500 8.5px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; font-style: normal; letter-spacing: .04em; color: var(--dim-2); }
-        .set-val { display: inline-flex; align-items: center; gap: 8px; }
-        .set-val b { font: 600 9px/1 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
-        .set-val b[data-on="1"] { color: var(--acc); }
-        .set-val b[data-state="on"] { color: var(--acc); }
-        .set-val b[data-state="blocked"] { color: var(--warn); }
-        .set-val b[data-state="ready"], .set-val b[data-state="waiting"] { color: var(--dim); }
-        .set-val b[data-state="n/a"] { color: var(--warn); }
-        .set-row.afk-health-row .set-val { min-width: 0; max-width: 58%; }
-        .set-row.afk-health-row .set-val b { white-space: normal; text-align: right; line-height: 1.35; }
-        .afk-health-reset { all: unset; flex: none; padding: 2px 5px; border-radius: 5px; cursor: pointer; color: var(--dim); border: 1px solid var(--line); font: 700 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
-        .afk-health-reset:hover, .afk-health-reset:focus-visible { color: var(--acc-2); border-color: var(--line-strong); }
-        .afk-health-reset:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
-        .set-val b[data-field="nitroPreview"] { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; color: var(--ink); }
-        .set-val b[data-field="nitroPreview"][data-good="1"] { color: var(--acc); }
-        .set-val b[data-field="nitroPreview"][data-good="0"] { color: var(--warn); }
-        /* En 320 px el rail deja la fila demasiado estrecha para la etiqueta y
-           la palabra a la vez: el valor baja a la segunda linea y se alinea a
-           la derecha, en vez de empujar el panel fuera del viewport. */
-        .set-row.nitro-target-row { flex-wrap: wrap; }
-        .set-row.nitro-target-row .set-val { min-width: 0; max-width: 100%; margin-left: auto; }
-        .set-row.nitro-strategy-row { flex-wrap: wrap; }
-        .set-row.nitro-strategy-row .set-val { min-width: 0; max-width: 100%; margin-left: auto; }
-        .nitro-strategy { max-width: 100%; padding: 4px 6px; border-radius: 7px; cursor: pointer; color: var(--ink-2); background: rgba(0, 0, 0, .32); border: 1px solid var(--line); font: 700 8.5px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .03em; text-transform: uppercase; }
-        .nitro-strategy:hover { color: var(--acc-2); border-color: var(--line-strong); }
-        .nitro-strategy:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-        .nitro-strategy option { color: #111; background: #fff; }
-        .row.nitro-delta-row b[data-good="1"] { color: var(--acc); }
-        .row.nitro-delta-row b[data-good="0"] { color: var(--warn); }
-
-        /* Interruptor tipo iOS con muelle: el muelle va en linear() y el
-           cubic-bezier queda de repuesto para navegadores viejos. */
-        .sw { all: unset; position: relative; flex: none; width: 34px; height: 18px; border-radius: 999px; cursor: pointer; background: rgba(255, 255, 255, .09); border: 1px solid rgba(255, 255, 255, .12); transition: background .25s ease, border-color .25s ease, box-shadow .25s ease; }
-        .sw::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(180deg, var(--ink), #b9cfc2); box-shadow: 0 1px 3px rgba(0, 0, 0, .5); transition: transform .32s cubic-bezier(.34, 1.4, .5, 1); transition: transform .32s linear(0, 0.3 14%, 0.84 30%, 1.07 46%, 1.02 60%, 0.998 74%, 1); }
-        .sw[data-on="1"] { background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 90%, transparent), rgba(41, 196, 110, .85)); border-color: color-mix(in srgb, var(--acc) 55%, transparent); box-shadow: 0 0 14px -3px color-mix(in srgb, var(--acc) 80%, transparent), inset 0 0 8px -4px rgba(0, 0, 0, .6); }
-        .sw[data-on="1"]::after { transform: translateX(16px); }
-        .sw:hover { border-color: var(--line-strong); }
-        .sw:active::after { width: 17px; }
-
-        .seg { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 3px; border-radius: 9px; background: rgba(0, 0, 0, .32); border: 1px solid var(--line); }
-        .seg-glide { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 7px; background: var(--acc-dim); border: 1px solid var(--line-strong); box-shadow: inset 0 0 12px -6px var(--acc), 0 0 14px -8px var(--acc); transition: transform .32s cubic-bezier(.34, 1.4, .5, 1); transition: transform .32s linear(0, 0.3 14%, 0.84 30%, 1.07 46%, 1.02 60%, .998 74%, 1); }
-        .seg[data-index="1"] .seg-glide { transform: translateX(100%); }
-        .seg[data-index="2"] .seg-glide { transform: translateX(200%); }
-        .seg-btn { all: unset; position: relative; z-index: 1; padding: 5px 0; text-align: center; border-radius: 7px; cursor: pointer; font: 700 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); transition: color .2s ease; }
-        .seg-btn:hover { color: var(--acc-2); }
-        .seg[data-index="0"] .seg-btn[data-pace="soft"], .seg[data-index="1"] .seg-btn[data-pace="balanced"], .seg[data-index="2"] .seg-btn[data-pace="fast"] { color: var(--acc); }
-
-        .sld { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 2px 0 0; background: transparent; cursor: pointer; }
-        .sld::-webkit-slider-runnable-track { height: 4px; border-radius: 99px; background: linear-gradient(90deg, var(--acc) 0 var(--fill, 0%), rgba(255, 255, 255, .1) var(--fill, 0%) 100%); }
-        .sld::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; margin-top: -4.5px; border-radius: 50%; background: linear-gradient(180deg, #ffffff, var(--acc-2)); border: 1px solid color-mix(in srgb, var(--acc) 80%, transparent); box-shadow: 0 0 12px -2px color-mix(in srgb, var(--acc) 90%, transparent); transition: transform .16s cubic-bezier(.34, 1.5, .5, 1); }
-        .sld:active::-webkit-slider-thumb { transform: scale(1.25); }
-        .sld:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 99px; }
-        .sld-ends { display: flex; justify-content: space-between; font: 600 8px/1.2 ui-monospace, monospace; letter-spacing: .08em; color: var(--dim-2); }
-
-        .act { all: unset; flex: 1 1 0; padding: 6px 0; text-align: center; border-radius: 8px; cursor: pointer; font: 700 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); background: rgba(255, 255, 255, .045); border: 1px solid var(--line); transition: color .18s ease, background .18s ease, border-color .18s ease, transform .12s ease; }
-        .act:hover { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); }
-        .act:active { transform: translateY(1px); }
-        .act:disabled { opacity: .38; cursor: default; }
-        .act[data-act="report"] { color: #ffe3b8; border-color: color-mix(in srgb, var(--warn) 26%, transparent); }
-        .act[data-act="report"]:hover { color: #ffcf88; background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-        .cfg-text { display: block; width: 100%; height: 46px; margin-top: 7px; padding: 6px 7px; resize: vertical; color: var(--ink); background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 8px; font: 500 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; transition: border-color .2s ease, box-shadow .2s ease; }
-        .cfg-text:focus-visible { outline: none; border-color: var(--line-strong); box-shadow: 0 0 16px -8px var(--acc); }
-        .cfg-note { margin-top: 6px; font: 500 9px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
-
-        .keys { display: grid; gap: 3px; }
-        .key-row { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; font: 500 10px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); }
-        .key-row kbd { padding: 2px 6px; border-radius: 5px; font: 600 9px/1.2 ui-monospace, monospace; color: var(--acc); background: color-mix(in srgb, var(--acc) 10%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 24%, transparent); white-space: nowrap; }
-        .about { font: 500 10px/1.5 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
-        .about b { color: var(--acc-2); font-weight: 700; }
-
-        /* ---------- barra de estado y acciones ------------------------------ */
-        .foot { padding: 7px 11px 8px; border-top: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, .012), rgba(0, 0, 0, .22)); }
-        .status { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 26px; margin-bottom: 6px; font: 500 9.5px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
-        .foot-bar { display: flex; align-items: center; flex-wrap: nowrap; min-width: 0; gap: 5px; overflow: hidden; white-space: nowrap; font: 600 8.5px/1 ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: .05em; text-transform: uppercase; color: var(--dim-2); }
-        .led { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dim-2); box-shadow: 0 0 8px color-mix(in srgb, var(--dim-2) 50%, transparent); transition: background .25s ease, box-shadow .25s ease; }
-        .panel[data-state="running"] .led { background: var(--acc); box-shadow: 0 0 10px var(--acc); animation: nt-pulse 1.9s ease-in-out infinite; }
-        .panel[data-state="paused"] .led { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
-        .panel[data-state="break"] .led { background: var(--info); box-shadow: 0 0 10px var(--info); }
-        .foot-bar b { color: #cfe6d8; font-weight: 700; }
-        .foot-bar [data-field="footAcc"] { color: var(--acc-2); }
-        .foot-bar .fsep { opacity: .35; }
-        .foot-bar .hint { margin-left: auto; color: var(--dim-2); }
-        .panel[data-foot="compact"] .foot-bar { gap: 7px; }
-        .panel[data-foot="compact"] .foot-bar [data-field="footMode"],
-        .panel[data-foot="compact"] .foot-bar [data-field="footCap"],
-        .panel[data-foot="compact"] .foot-bar .hint,
-        .panel[data-foot="compact"] .foot-bar .fsep { display: none; }
-        .panel[data-foot="hidden"] .foot-bar { display: none; }
-        .panel[data-standby="1"] .foot-bar .led { background: var(--info); box-shadow: 0 0 10px var(--info); }
-        /* Parado (sin modo NORMAL): ambar en la barra y en la etiqueta de la
-           tarjeta live. Es un estado, y se tiene que ver de un vistazo. */
-        .panel[data-stopped="1"][data-mode="auto"] .foot-bar .led { background: var(--warn); box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 75%, transparent); }
-        .panel[data-stopped="1"][data-mode="auto"] .foot-bar b[data-field="footState"] { color: #ffcf7a; }
-        .panel[data-stopped="1"][data-mode="auto"] .card-s[data-field="liveTag"] { color: var(--warn); }
-
-        /* Mini-grafica de model Δ: la linea de puntos es el cero; el area y la
-           linea usan el acento del tema y no necesitan ningun canvas. */
-        .spark { display: block; width: calc(100% - 22px); height: 24px; margin: 0 11px 6px; overflow: visible; }
-        .spark-line { fill: none; stroke: var(--acc); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; transition: opacity .2s ease; }
-        .spark-area { fill: color-mix(in srgb, var(--acc) 16%, transparent); stroke: none; }
-        .spark-zero { stroke: color-mix(in srgb, var(--acc) 22%, transparent); stroke-width: .6; stroke-dasharray: 2 3; }
-        .spark[data-empty="1"] { display: none; }
-
-        .actions { display: flex; gap: 6px; padding: 0 11px 11px; }
-        .toggle { all: unset; flex: 1 1 auto; padding: 9px 0; text-align: center; border-radius: 9px; cursor: pointer; font: 800 9.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--ink); background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 22%, transparent), color-mix(in srgb, var(--acc) 10%, transparent)); border: 1px solid color-mix(in srgb, var(--acc) 34%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1); transition: filter .15s ease, transform .1s ease, box-shadow .25s ease; }
-        .toggle:hover { filter: brightness(1.16); box-shadow: 0 0 20px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .12); }
-        .toggle:active { transform: translateY(1px); }
-        .panel[data-state="paused"] .toggle { color: var(--ink); background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 30%, transparent), color-mix(in srgb, var(--acc) 14%, transparent)); border-color: color-mix(in srgb, var(--acc) 50%, transparent); }
-        .stop { all: unset; flex: none; display: grid; place-items: center; padding: 9px 14px; border-radius: 9px; cursor: pointer; font: 800 9.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #ffd0d0; background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 18%, transparent), color-mix(in srgb, var(--bad) 8%, transparent)); border: 1px solid color-mix(in srgb, var(--bad) 32%, transparent); transition: filter .15s ease, transform .1s ease, color .2s ease, background .2s ease, border-color .2s ease; }
-        .stop:hover { filter: brightness(1.16); box-shadow: 0 0 20px -9px var(--bad); }
-        .stop:active { transform: translateY(1px); }
-        .stop[data-pending="true"] { color: #ffe6b8; background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 24%, transparent), color-mix(in srgb, var(--warn) 12%, transparent)); border-color: color-mix(in srgb, var(--warn) 42%, transparent); }
-        /* Parado no hay nada que parar: el boton se apaga en vez de cerrar una
-           tanda ya cerrada. */
-        .stop:disabled { opacity: .42; cursor: default; }
-        .stop:disabled:hover, .stop:disabled:active { filter: none; box-shadow: none; transform: none; }
-        .gear { all: unset; flex: none; display: grid; place-items: center; width: 32px; border-radius: 9px; cursor: pointer; color: var(--dim); background: rgba(255, 255, 255, .04); border: 1px solid var(--line); transition: filter .15s ease, color .18s ease, background .18s ease, border-color .18s ease, transform .12s ease; }
-        .gear:hover { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); }
-        .gear:active { transform: scale(.94); }
-        .gear[data-open="1"] { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); box-shadow: 0 0 18px -8px var(--acc); }
-        .gear svg { width: 14px; height: 14px; display: block; }
-
-        /* ---------- acabado simple ----------------------------------------- */
-        /* Una segunda pasada, plana y silenciosa: menos adornos, mas aire y una
-           sola jerarquia. Las vistas siguen siendo las mismas; solo cambia la
-           piel que las contiene. */
-        .panel {
-          width: 330px;
-          background: linear-gradient(180deg, var(--bg-hi), var(--bg-lo));
-          border-radius: 12px;
-          box-shadow: 0 18px 42px -22px rgba(0, 0, 0, .95), 0 0 0 1px rgba(0, 0, 0, .65);
-          font-family: ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
-        }
-        .head { gap: 7px; padding: 10px 11px 8px; }
-        .mark { width: 27px; height: 27px; border-radius: 8px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
-        .mark svg { width: 19px; height: 19px; filter: none; }
-        .title { font-size: 13px; letter-spacing: .1em; text-shadow: none; }
-        .sub { margin-top: 3px; font-size: 8px; letter-spacing: .08em; color: var(--dim); }
-        .chips-row { flex-wrap: wrap; row-gap: 5px; padding: 0 11px 9px; }
-        .pace, .mode, .cap { padding: 4px 7px; border-radius: 6px; font-size: 8px; letter-spacing: .08em; }
-        .cap { flex: 0 1 auto; }
-
-        .main { border-top-color: var(--line); }
-        .rail { padding: 8px 5px; background: transparent; }
-        .rail-glide { left: 5px; top: 8px; width: 30px; height: 30px; border-radius: 7px; background: var(--acc-dim); box-shadow: none; }
-        .rail-btn { width: 30px; height: 30px; border-radius: 7px; }
-        .views { padding: 10px 11px 11px; }
-        .view-head { align-items: center; margin-bottom: 9px; padding-bottom: 7px; border-bottom-color: var(--line); }
-        .view-head span { gap: 6px; font-size: 8px; letter-spacing: .13em; color: var(--dim); }
-        .view-head span::before { width: 5px; height: 5px; border-radius: 2px; box-shadow: none; }
-        .view-head b { font-size: 8px; color: var(--dim-2); }
-
-        .card { margin-bottom: 8px; padding: 10px; border-radius: 9px; background: var(--card); border-color: var(--line); transition: none; }
-        .card:hover { border-color: var(--line); box-shadow: none; }
-        .card::before, .card > .ghost { display: none; }
-        .card-h { align-items: center; margin-bottom: 7px; }
-        .card-t { font-size: 9px; letter-spacing: .13em; color: var(--ink-2); }
-        .card-s { font-size: 8px; color: var(--dim); }
-        .hero { padding: 10px 0 9px; }
-        .stat b { font-size: 28px; text-shadow: none; }
-        .stat b[data-good="1"] { text-shadow: none; }
-        .stat b[data-good="0"] { text-shadow: none; }
-        .stat span { margin-top: 5px; font-size: 7.5px; letter-spacing: .13em; color: var(--dim); }
-        .auto-pace { margin-top: 3px; padding: 3px 7px; border-color: var(--line); background: transparent; color: var(--dim); font-size: 7.5px; letter-spacing: .05em; }
-        .auto-pace::before { width: 4px; height: 4px; box-shadow: none; }
-
-        /* Las metricas de Live y Season se leen como una cuadricula, no como
-           una lista larga: dos columnas, etiqueta arriba y valor debajo. */
-        .v-stats .live-card .rows,
-        .v-stats .season-card .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 8px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--line); }
-        .v-stats .season-card .rows { grid-template-columns: .9fr 1.1fr; }
-        .v-stats .live-card .rows .row,
-        .v-stats .season-card .rows .row { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px; min-width: 0; padding: 7px 8px; border: 0; background: rgba(0, 0, 0, .16); }
-        .v-stats .live-card .rows .row > span,
-        .v-stats .season-card .rows .row > span { font-size: 7.5px; letter-spacing: .08em; color: var(--dim-2); }
-        .v-stats .live-card .rows .row b,
-        .v-stats .season-card .rows .row b { width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 10.5px; line-height: 1.3; color: var(--ink-2); }
-        .v-stats .live-card .rows .result-row { grid-column: 1 / -1; }
-        .v-stats .season-card .rows .row b { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .v-stats .live-card .rows .row.secondary { display: none; }
-
-        /* ---------- cuenta ------------------------------------------------- */
-        /* La vista Live ya no solo dice el target: ensena la cuenta que se leyo,
-           el historico usado y cuando fue la ultima lectura. */
-        .account-card .acct-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin: -1px 0 6px; }
-        .account-card .acct-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--acc-2); }
-        .account-card .acct-refresh { flex: 0 0 auto; padding: 4px 8px; font-size: 8px; }
-        .account-card .acct-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
-        .account-card .acct-metrics > div { min-width: 0; padding: 6px 7px; background: rgba(0, 0, 0, .16); }
-        .account-card .acct-metrics b { display: block; font: 700 15px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink); }
-        .account-card .acct-metrics span { display: block; margin-top: 2px; font: 700 7px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--dim-2); }
-        .account-card .rows { margin-top: 7px; }
-        .account-card .acct-state { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-        .account-card .acct-state[data-state="ready"] { color: var(--acc); }
-        .account-card .acct-state[data-state="reading"] { color: var(--info); }
-        .account-card .acct-state[data-state="warn"] { color: var(--warn); }
-        .account-card .acct-state[data-state="idle"] { color: var(--dim-2); }
-        .season-card .season-name { margin: 1px 0 7px; font-size: 13px; }
-        .season-card .season-actions { margin-top: 7px; }
-        .season-card .season-actions .act { font-size: 8px; padding: 5px 9px; }
-        .update-card .season-actions .act { flex: 0 1 auto; }
-
-        .foot { padding: 7px 11px 8px; background: transparent; }
-        .status { min-height: 0; margin-bottom: 6px; font-size: 9px; color: var(--dim); }
-        .foot-bar { font-size: 8px; letter-spacing: .03em; }
-        .actions { padding: 0 11px 11px; }
-        .toggle { padding: 9px 0; border-radius: 8px; background: var(--acc-dim); border-color: var(--line-strong); box-shadow: none; }
-        .toggle:hover { box-shadow: none; }
-        .stop { border-radius: 8px; background: color-mix(in srgb, var(--bad) 12%, transparent); border-color: color-mix(in srgb, var(--bad) 28%, transparent); }
-        .stop:hover { box-shadow: none; }
-        .gear { border-radius: 8px; }
-        .act { border-radius: 7px; text-decoration: none; }
-        .theme { border-radius: 7px; }
-
-        /* ---------- selector de tema ---------------------------------------- */
-        .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 2px; }
-        .theme { all: unset; display: flex; flex-direction: column; gap: 4px; padding: 5px 5px 4px; border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: rgba(255, 255, 255, .022); transition: border-color .18s ease, background .18s ease, box-shadow .22s ease, transform .12s ease; }
-        .theme:hover { border-color: var(--line-strong); transform: translateY(-1px); }
-        .theme:active { transform: translateY(0) scale(.97); }
-        .theme:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-        .theme i { display: block; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18), 0 2px 8px -4px rgba(0, 0, 0, .9); }
-        .theme span { text-align: center; font: 700 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-2); }
-        .theme[aria-pressed="true"] { border-color: var(--line-strong); background: var(--acc-dim); box-shadow: 0 0 18px -9px var(--acc), inset 0 0 0 1px var(--line); }
-        .theme[aria-pressed="true"] span { color: var(--acc); }
-        .theme[aria-pressed="true"] i { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .35), 0 0 12px -3px var(--acc); }
-        /* Las muestras no heredan el tema activo: cada tile ensena el suyo. */
-        .theme i.sw-carbon { background: linear-gradient(135deg, #0c110e, #35ea86 60%, #9bf7c5); }
-        .theme i.sw-aurora { background: linear-gradient(135deg, #071314, #3fe0c5 55%, #a78bfa); }
-        .theme i.sw-sunset { background: linear-gradient(135deg, #180c0b, #ff9a5c 55%, #ff77b0); }
-        .theme i.sw-ice { background: linear-gradient(135deg, #080f18, #66e3ff 55%, #d7f7ff); }
-        .theme i.sw-violet { background: linear-gradient(135deg, #120b1b, #c08bff 55%, #f0a9ff); }
-        .theme i.sw-rgb {
-          background: conic-gradient(from 0deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
-        }
-
-        /* ---------- plegado -------------------------------------------------- */
-        /* Plegado: cabecera con el LED y el nombre, y los tres botones. Todo lo
-           demas fuera, que para eso esta el boton. */
-        .panel[data-collapsed="true"] { width: auto; min-width: 210px; }
-        .panel[data-collapsed="true"] .main,
-        .panel[data-collapsed="true"] .foot,
-        .panel[data-collapsed="true"] .chips-row { display: none; }
-        .panel[data-collapsed="true"] .head { padding-bottom: 9px; }
-        .panel[data-collapsed="true"] .actions { padding-top: 0; }
-
-        /* En una ventana estrecha la cuenta ocupa el sitio del nombre. Se
-           retira antes de que el titulo empiece a cortarse. */
-        @media (max-width: 340px) {
-          .who { display: none; }
-        }
-
-        /* 160 CSS px (320 px fisicos al 200 %): el rail lateral y la columna
-           de botones ya no caben. El panel se vuelve una columna, el rail pasa
-           arriba y las vistas hacen scroll dentro de una altura maxima. */
-        @media (max-width: 200px) {
-          :host { left: 8px !important; }
-          .panel {
-            display: flex;
-            flex-direction: column;
-            width: calc(100vw - 16px);
-            max-width: calc(100vw - 16px);
-            max-height: calc(100vh - 32px);
-          }
-          .panel[data-collapsed="true"] { min-width: 0; }
-          .head { flex: none; gap: 6px; padding: 8px 8px 6px; }
-          .head::after { left: 8px; right: 8px; }
-          .head .dot,
-          .head .who,
-          .head .sub { display: none; }
-          .head .ghlink { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; }
-          .head .ghlink span { display: none; }
-          .title { font-size: 11px; letter-spacing: .08em; }
-          .chips-row { flex: none; flex-wrap: wrap; row-gap: 5px; padding: 0 8px 7px; }
-          .chips-row > * { flex: 0 1 auto; white-space: nowrap; }
-          .set-row { flex-direction: column; align-items: stretch; gap: 4px; }
-          .set-row .set-val { justify-content: flex-end; margin-left: auto; }
-          .main { flex: 1 1 auto; min-height: 0; flex-direction: column; }
-          .rail {
-            flex: none;
-            flex-direction: row;
-            justify-content: space-around;
-            padding: 4px;
-            border-right: 0;
-            border-bottom: 1px solid var(--line);
-          }
-          .rail-glide { display: none; }
-          .rail-btn { width: 24px; height: 24px; border-radius: 7px; }
-          .rail-btn svg { width: 13px; height: 13px; }
-          .rail-btn::after { display: none; }
-          .views { flex: 1 1 auto; min-height: 0; max-height: none; padding: 8px; }
-          .foot { display: none; }
-          .actions { flex: none; gap: 5px; padding: 0 8px 8px; }
-          .actions .gear { display: none; }
-          .actions .stop { padding-left: 10px; padding-right: 10px; }
-        }
-
-        /* Con el sistema pidiendo menos animacion se van las animaciones de
-           entrada (lo grande y decorativo) pero se quedan los cambios de estado
-           cortos: el muelle del interruptor y de los deslizadores es informacion
-           (dice si algo esta encendido), no adorno. */
-        @media (prefers-reduced-motion: reduce) {
-          .panel, .panel[data-fresh="1"] .card, .view, .stat b.bump, .recent-pair i.bump, .prog::after,
-          .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title { animation: none !important; }
-          /* El ciclo de tono no mueve nada: es color, no adorno. Se conserva
-             para que RGB siga cambiando aunque el sistema pida menos animacion;
-             el marco conico y el titulo si se quedan quietos. */
-          .panel[data-theme="rgb"] { animation: nt-rgb-hue 16s linear infinite !important; }
-        }
-      </style>
-      <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
-        <div class="head">
-          <span class="mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
-            <i class="dot"></i>
-          </span>
-          <span class="brand">
-            <b class="title" data-field="title">NITRO WRAITH</b>
-            <span class="sub">human pace · <b data-field="ver">v7.0.0</b></span>
-          </span>
-          <a class="ghlink" href="${UPDATE_GITHUB_URL}" target="_blank" rel="noopener noreferrer" hidden title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
-          </a>
-          <button class="iconbtn collapse" type="button" data-act="expand" aria-label="Collapse panel" aria-expanded="true" title="Collapse / expand the panel">−</button>
-        </div>
-        <div class="chips-row">
-          <button class="pace" type="button">LEGIT · balanced</button>
-          <span class="mode" role="status" aria-live="polite" title="Always AUTO: the bot starts by itself. Stop stops it; it comes back on the next garage visit.">AUTO</span>
-          <span class="cap" data-field="cap" title="Hard ceiling: no race is ever allowed above this WPM">≤ 120 wpm</span>
-        </div>
-        <div class="race-line" aria-hidden="true"><i></i></div>
-        <div class="main">
-          <div class="rail" data-index="0" role="tablist" aria-label="Panel views">
-            <i class="rail-glide"></i>
-            <button class="rail-btn" type="button" role="tab" aria-selected="true" aria-controls="nt-view-stats" aria-label="Live" data-tab-btn="stats" data-label="Live">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/><circle cx="12" cy="13" r="1.4" fill="currentColor" stroke="none"/></svg>
-            </button>
-            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-tune" aria-label="Tune" data-tab-btn="tune" data-label="Tune" tabindex="-1">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M17 6h3M4 18h3M11 18h9M4 12h13M20 12h0"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/><circle cx="18" cy="12" r="2"/></svg>
-            </button>
-            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-log" aria-label="Log" data-tab-btn="log" data-label="Log" tabindex="-1">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h11M8 12h11M8 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>
-            </button>
-            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-info" aria-label="Info" data-tab-btn="info" data-label="Info" tabindex="-1">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="1.1" fill="currentColor" stroke="none"/></svg>
-            </button>
-          </div>
-          <div class="views">
-            <!-- ------------------------------ STATS ------------------------- -->
-            <section class="view v-stats" id="nt-view-stats" role="tabpanel" aria-label="Live">
-              <div class="view-head"><span>Live</span><b>race telemetry</b></div>
-              <div class="card live-card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
-                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
-                <div class="hero">
-                  <div class="stat"><b data-field="live">—</b><span>live wpm</span></div>
-                  <i class="sep"></i>
-                  <div class="stat"><b data-field="acc">—</b><span>accuracy</span></div>
-                </div>
-                <div class="auto-pace" data-field="paceSource">auto · reading account</div>
-                <div class="prog"><i data-field="progfill"></i></div>
-                <svg class="spark" data-field="accSpark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img" aria-label="Accuracy model delta history: no samples yet.">
-                  <line class="spark-zero" x1="0" y1="12" x2="100" y2="12"></line>
-                  <path class="spark-area" data-field="accSparkArea" d=""></path>
-                  <polyline class="spark-line" data-field="accSparkLine" points=""></polyline>
-                </svg>
-                <div class="rows">
-                  <div class="row"><span>target</span><b data-field="target">—</b></div>
-                  <div class="row" title="Recent pace and accuracy: WPM and accuracy over the last 6 seconds of accepted keys, independent of the session averages"><span>recent</span><b class="recent-pair"><i data-field="liveNow">—</i><i class="recent-acc" data-field="liveNowAcc">—</i></b></div>
-                  <div class="row race-row secondary" title="Race progress"><span>race</span><b data-field="progress">—</b></div>
-                  <div class="row"><span>races</span><b data-field="races">0</b></div>
-                  <div class="row day-xp-row" title="XP the game awarded today, read from the same daily summary as the 7-day card"><span>today</span><b data-field="dayXp">—</b></div>
-                  <div class="row tanda-row" title="Average of every measured race in this session, not just the ones in the list"><span>session</span><b data-field="tanda">—</b></div>
-                  <div class="row secondary" title="Which WPM calibration sample is active"><span>set</span><b data-field="session">—</b></div>
-                  <div class="row rate-row secondary" title="XP per hour at the current session pace"><span>rate</span><b data-field="rate">—</b></div>
-                  <div class="row nitro-row secondary" title="Nitro this session: races that used it, characters the game typed for you and the time they would have taken at the planned pace"><span>nitro</span><b data-field="nitro">—</b></div>
-                  <div class="row nitro-delta-row secondary" title="Nitro WPM check: races with nitro minus races without it, over the last 10 measured races. Zero or below means the nitro is not lifting the average; positive is a warning"><span>nitro Δ</span><b data-field="nitroDelta">—</b></div>
-                  <div class="row cycle-row secondary" title="Dead time between races: median and best gap from the end of one race to the first key of the next"><span>cycle</span><b data-field="cycle">—</b></div>
-                  <div class="row xp-break-row secondary" title="Last race XP split into place, speed, accuracy and session or other bonuses"><span>xp/race</span><b data-field="xpBreak">—</b></div>
-                  <div class="row session-row" style="display:none" title="Site session token: time left before it expires. The queue renews it on the garage, between races"><span>login</span><b data-field="sessionLeft">—</b></div>
-                  <div class="row trim-row" style="display:none"><span>trim</span><b data-field="trim">—</b></div>
-                  <div class="row hud-row" style="display:none" title="The WPM Nitro Type itself is printing right now, next to the hard ceiling"><span>game</span><b data-field="hud">—</b></div>
-                  <div class="row result-row" style="display:none" title="Place and prize of the last race, read from the game's own race result"><span>result</span><b data-field="result">—</b></div>
-                  <div class="row clock-row" style="display:none" title="The precise clock could not start (the site's CSP blocked the Worker). In a background tab the browser slows page timers down and typing can stall long enough for a disqualification."><span>clock</span><b data-field="clock">page</b></div>
-                  <div class="row guard-row" style="display:none" title="Why the bot is waiting: a guard break, duplicate copies of the script or a site block"><span>guard</span><b data-field="guard">—</b></div>
-                  <div class="row watch-row" title="Real-time race watchdog: phase, which tab holds the typing lease and how long the game has gone without accepting a key"><span>watch</span><b data-field="watch">—</b></div>
-                  <div class="row box-row" style="display:none" title="Daily Mystery Box in the garage"><span>box</span><b data-field="box">—</b></div>
-                  <div class="row break-row secondary"><span>break</span><b data-field="break">—</b></div>
-                  <div class="row dq-row" style="display:none"><span>dq streak</span><b data-field="dq">×0</b></div>
-                </div>
-              </div>
-              <div class="card account-card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0M4 4h3M4 4v3M20 4h-3M20 4v3"/></svg></span>
-                <div class="card-h"><span class="card-t">Account</span><span class="card-s acct-state" data-field="acctState" data-state="idle" role="status" aria-live="polite">waiting</span></div>
-                <div class="acct-top">
-                  <b class="acct-id" data-field="acctId">—</b>
-                  <button class="act acct-refresh" type="button" data-field="acctRefresh" title="Read the signed-in account now: profile and full monthly history">refresh</button>
-                </div>
-                <div class="acct-metrics">
-                  <div><b data-field="acctAvg">—</b><span>avg</span></div>
-                  <div><b data-field="acctTarget">—</b><span>target</span></div>
-                  <div><b data-field="acctTop">—</b><span>top</span></div>
-                </div>
-                <div class="rows">
-                  <div class="row"><span>history</span><b data-field="acctHistory">—</b></div>
-                  <div class="row"><span>range</span><b data-field="acctRange">—</b></div>
-                  <div class="row"><span>read</span><b data-field="acctRead">never</b></div>
-                </div>
-              </div>
-              <div class="card season-card" data-field="seasonCard">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 4h10v3a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3M12 12v5M8 21h8"/></svg></span>
-                <div class="card-h"><span class="card-t">Season</span><span class="card-s" data-field="seasonTag">no snapshot</span></div>
-                <div class="season-name" data-field="seasonName">Season</div>
-                <div class="prog season-prog"><i data-field="seasonFill"></i></div>
-                <div class="rows">
-                  <div class="row"><span>tier</span><b data-field="seasonTier">—</b></div>
-                  <div class="row"><span>xp</span><b data-field="seasonXp">—</b></div>
-                  <div class="row"><span>to next</span><b data-field="seasonNext">—</b></div>
-                  <div class="row" title="How many races the next reward needs at the XP per race of the last races"><span>races</span><b data-field="seasonRaces">—</b></div>
-                  <div class="row season-pace-row" title="XP per active day over the last week, projected to the season end at that pace"><span>pace</span><b data-field="seasonPace">—</b></div>
-                  <div class="row"><span>ends</span><b data-field="seasonEnds">—</b></div>
-                </div>
-                <div class="season-alert" data-field="seasonAlert" role="status" style="display:none"></div>
-                <div class="season-actions">
-                  <button class="act" type="button" data-act="season" data-field="seasonOpen" title="Open Nitro Type's Season page; the script captures the tier and XP for this card">open season</button>
-                </div>
-                <div class="cfg-note" data-field="seasonNote">Open Season once to capture the tier and XP.</div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
-                <div class="card-h"><span class="card-t">Last 10 races</span><span class="card-s">place · xp · wpm</span></div>
-                <div class="hist">
-                  <div class="hist-head"><span>time</span><span>place</span><span>xp</span><span>wpm</span><span>dev</span></div>
-                  <div data-field="history"></div>
-                  <div class="hist-foot" data-field="foot" style="display:none">
-                    <span>avg <b data-field="avg">—</b></span>
-                    <span>best <b data-field="best">—</b></span>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <!-- Las vistas que no estan activas se montan al abrirlas. Asi el
-                 primer segundo solo cuesta la vista Live, no las cuatro. -->
-            <template data-view="tune">
-            <section class="view v-tune cfg" id="nt-view-tune" role="tabpanel" aria-label="Tune">
-              <div class="view-head"><span>Tune</span><b>rhythm · limits · automation</b></div>
-              <div class="tune-filter">
-                <label class="tune-search" title="Filter settings by name, section or description">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
-                  <input type="search" data-field="tuneSearch" placeholder="Filter settings…" autocomplete="off" spellcheck="false" aria-label="Filter settings by name, section or description">
-                  <button class="tune-clear" type="button" data-field="tuneClear" aria-label="Clear settings filter" title="Clear filter" hidden>×</button>
-                </label>
-                <span class="tune-count" data-field="tuneCount" aria-live="polite">settings</span>
-              </div>
-              <div class="tune-empty" data-field="tuneEmpty" role="status" hidden></div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-health-label">
-                <div class="tune-sec-h"><span id="tune-health-label">Health</span><b>account · AFK · update</b></div>
-                <div class="card">
-                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h4l2-5 4 10 2-5h6"/><path d="M4 20h16"/></svg></span>
-                  <div class="card-h"><span class="card-t">Health center</span><span class="card-s" data-field="healthSummary">checking</span></div>
-                  <div class="rows">
-                    <div class="row" title="Account calibration source and freshness"><span>account</span><b data-field="healthAccount">—</b></div>
-                    <div class="row" title="AFK farming, keep-alive and the strict interlock; the same values as the AFK rows below"><span>AFK gate</span><b data-field="healthAfk">—</b></div>
-                    <div class="row" title="Last update check result and age"><span>update</span><b data-field="healthUpdate">—</b></div>
-                    <div class="row" title="Page Lifecycle freezes recorded in this browser"><span>freezes</span><b data-field="healthFreeze">—</b></div>
-                  </div>
-                  <div class="cfg-note" data-field="healthNote">One place to see what needs attention.</div>
-                  <button class="act" type="button" data-act="report" title="Copy the full diagnostic report, including the recent flight recorder, to paste when something is off">copy report</button>
-                </div>
-              </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
-                <div class="tune-sec-h"><span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b></div>
-                <div class="card">
-                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
-                  <div class="card-h"><span class="card-t">Pace</span><span class="card-s">all under the ceiling</span></div>
-                  <div class="seg" data-index="1">
-                    <i class="seg-glide"></i>
-                    <button class="seg-btn" type="button" data-pace="soft" title="A little below the account average, for an easier session">soft</button>
-                    <button class="seg-btn" type="button" data-pace="balanced" title="The account's own average and calibrated range">balanced</button>
-                    <button class="seg-btn" type="button" data-pace="fast" title="A little above the account average, still under the ceiling">fast</button>
-                  </div>
-                  <div class="rows">
-                    <div class="row"><span>ceiling</span><b data-field="tuneCap">≤ 120 wpm</b></div>
-                    <div class="row"><span>range</span><b data-field="tuneRange">—</b></div>
-                    <div class="row cal-row" data-field="calRow" title="Always automatic: reads the account average from the site profile and the stats API, and centres the balanced range on it. Click to refresh now."><span>auto</span><b data-field="cal">on</b></div>
-                    <div class="row"><span>calibrated</span><b data-field="calWpm">—</b></div>
-                    <div class="row"><span>accuracy</span><b data-field="calAcc">—</b></div>
-                    <div class="row"><span>account</span><b data-field="calAccount">—</b></div>
-                    <div class="row custom-row" title="Manual WPM target. Leave empty or 0 for automatic calibration. A manual value overrides the account average and the top-based recovery floor."><span>custom wpm</span><input class="num" type="number" inputmode="numeric" min="15" max="119" step="1" placeholder="auto" data-field="customWpm" aria-label="Custom WPM target; empty or 0 uses automatic calibration"></div>
-                    <div class="row custom-row" title="Manual accuracy target from 96% to 100%. Leave empty or 0 for automatic calibration. Below 96% the game pays no accuracy bonus."><span>custom acc</span><input class="num" type="number" inputmode="numeric" min="96" max="100" step="1" placeholder="auto" data-field="customAcc" aria-label="Custom accuracy target; empty or 0 uses automatic calibration"></div>
-                    <div class="cfg-note">Custom values override auto. Empty or 0 returns to automatic.</div>
-                  </div>
-                </div>
-              </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-limits-label">
-                <div class="tune-sec-h"><span id="tune-limits-label">Limits</span><b>session, day and hours</b></div>
-                <div class="card">
-                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2"/><circle cx="15" cy="16" r="2"/></svg></span>
-                  <div class="card-h"><span class="card-t">Session limit</span><span class="card-s">the bot stops on its own</span></div>
-                  <div class="limit-row row" data-field="raceLimitRow" title="Click: races per session (free, 25, 50, 100). 25 is where the session bonus reaches its 250 XP per race cap">
-                    <span>races</span><b data-field="limit">free</b>
-                  </div>
-                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="limitSlider" aria-label="Races per session" title="Races per session: free, 25, 50 or 100">
-                  <div class="sld-ends"><span>free</span><span>25</span><span>50</span><span>100</span></div>
-                  <div class="limit-row row time-row" data-field="timeLimitRow" title="Click: minutes per session (free, 15, 30, 60, 120). The clock starts with the first race of the session">
-                    <span>time</span><b data-field="timeLimit">free</b>
-                  </div>
-                  <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="timeSlider" aria-label="Minutes per session" title="Minutes per session: free, 15, 30, 60 or 120">
-                  <div class="sld-ends"><span>free</span><span>15m</span><span>30m</span><span>1h</span><span>2h</span></div>
-                  <div class="limit-row row xp-row" data-field="xpLimitRow" title="Click: XP per session (free, 5k, 10k, 25k, 50k). Counts the XP the game itself awards in each race">
-                    <span>xp</span><b data-field="xpLimit">free</b>
-                  </div>
-                  <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="xpSlider" aria-label="XP per session" title="XP per session: free, 5k, 10k, 25k or 50k">
-                  <div class="sld-ends"><span>free</span><span>5k</span><span>10k</span><span>25k</span><span>50k</span></div>
-                  <div class="rows">
-                    <div class="row"><span>left</span><b data-field="etaLeft">—</b></div>
-                    <div class="row time-left-row" data-field="timeLeftRow" style="display:none"><span>time left</span><b data-field="timeLeft">—</b></div>
-                    <div class="row xp-left-row" data-field="xpRow" style="display:none"><span>xp</span><b data-field="xpTotal">—</b></div>
-                  </div>
-                </div>
-                <div class="card">
-                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 18V6M4 18h16"/><path d="M8 14v-3M12 14V7M16 14v-5"/></svg></span>
-                  <div class="card-h"><span class="card-t">Daily budget</span><span class="card-s">stop before tomorrow</span></div>
-                  <div class="limit-row row" data-field="dailyRaceRow" title="Click: races per day (free, 100, 200, 300). Counts the races the game recorded today">
-                    <span>races/day</span><b data-field="dailyRaces">free</b>
-                  </div>
-                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyRaceSlider" aria-label="Races per day" title="Races per day: free, 100, 200 or 300">
-                  <div class="sld-ends"><span>free</span><span>100</span><span>200</span><span>300</span></div>
-                  <div class="limit-row row xp-row" data-field="dailyXpRow" title="Click: XP per day (free, 50k, 100k, 200k). Counts the XP the game paid today">
-                    <span>xp/day</span><b data-field="dailyXp">free</b>
-                  </div>
-                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyXpSlider" aria-label="XP per day" title="XP per day: free, 50k, 100k or 200k">
-                  <div class="sld-ends"><span>free</span><span>50k</span><span>100k</span><span>200k</span></div>
-                  <div class="rows">
-                    <div class="row" data-field="dailyLeftRow" title="Budget left today; both counters reset at midnight"><span>left</span><b data-field="dailyLeft">—</b></div>
-                  </div>
-                </div>
-                <div class="card">
-                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span>
-                  <div class="card-h"><span class="card-t">Active hours</span><span class="card-s">races only in this window</span></div>
-                  <div class="limit-row row" data-field="activeRow" title="Click: turn the active window on/off. Shift+click resets 08:00–23:00">
-                    <span>window</span><b data-field="activeState">off</b>
-                  </div>
-                  <div class="limit-row row" data-field="activeStartRow" title="Click: start hour +1 (Shift+click: −1). The window can cross midnight">
-                    <span>from</span><b data-field="activeStart">08:00</b>
-                  </div>
-                  <input class="sld" type="range" min="0" max="23" step="1" value="8" data-field="activeStartSlider" aria-label="Active window start hour" title="Start of the active window">
-                  <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
-                  <div class="limit-row row" data-field="activeEndRow" title="Click: end hour +1 (Shift+click: −1). An end before the start crosses midnight">
-                    <span>to</span><b data-field="activeEnd">23:00</b>
-                  </div>
-                  <input class="sld" type="range" min="0" max="23" step="1" value="23" data-field="activeEndSlider" aria-label="Active window end hour" title="End of the active window">
-                  <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
-                  <div class="rows">
-                    <div class="row" data-field="activeNowRow" title="Local time. Races only start while the window is open"><span>now</span><b data-field="activeNow">always</b></div>
-                  </div>
-                </div>
-              </div>
-              <div class="tune-sec" role="group" aria-labelledby="tune-automation-label">
-                <div class="tune-sec-h"><span id="tune-automation-label">Automation</span><b>behavior, panel and tools</b></div>
-                <div class="card">
-                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></span>
-                  <div class="card-h"><span class="card-t">Switches</span><span class="card-s">saved on this browser</span></div>
-                  <div class="set-row">
-                    <span class="set-lbl">Breaks<i>human pauses between races</i></span>
-                    <span class="set-val"><b data-sw-txt="breaks" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="breaks" data-on="1" title="Human pauses between races (9-16 races apart, 20-90 s, 15% of them 3-10 min)"></button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">Mystery Box<i>free garage reward, every ~21 h</i></span>
-                    <span class="set-val"><b data-sw-txt="mysteryBox" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="mysteryBox" data-on="1" title="Claim the free garage reward roughly every 21 h"></button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">Stickers<i>one in every race</i></span>
-                    <span class="set-val"><b data-sw-txt="stickers" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="stickers" data-on="1" title="Send one sticker in every race"></button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">AFK farming<i>race while this tab is hidden</i></span>
-                    <span class="set-val"><b data-sw-txt="backgroundFarm" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="backgroundFarm" data-on="0" title="Off by default. Chrome can freeze a hidden tab, and a race with no keys ends in a disqualification. Turn it on only if you accept that risk."></button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">AFK keep-alive<i>near-silent audio holds the tab</i></span>
-                    <span class="set-val"><b data-sw-txt="keepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="keepAlive" data-on="0" title="Optional and off by default. Near-silent audio makes Chrome treat this tab as active while AFK farming is on. It needs one click to unlock audio and cannot guarantee that the tab will not freeze. Muting the tab can disable it."></button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">AFK interlock<i>hidden races need keep-alive running</i></span>
-                    <span class="set-val"><b data-sw-txt="afkRequireKeepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="afkRequireKeepAlive" data-on="0" title="Recommended with AFK farming: a hidden tab cannot open a race unless the keep-alive reports a running AudioContext. A suspended or blocked keep-alive holds the queue instead of risking a DQ."></button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">AFK safety guard<i>DQ after a freeze turns AFK off</i></span>
-                    <span class="set-val"><b data-sw-txt="afkFreezeGuard" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="afkFreezeGuard" data-on="1" title="On by default. If a disqualification happens within 15 minutes of a recorded freeze while AFK farming is on, AFK is turned off and a notice is kept. It does not undo the DQ."></button></span>
-                  </div>
-                  <div class="set-row afk-health-row" title="Live AFK state, keep-alive state and freeze events recorded by this browser">
-                    <span class="set-lbl">AFK health<i>hidden state · freeze count</i></span>
-                    <span class="set-val"><b data-field="afkHealth" data-state="off" role="status" aria-live="polite">off · visible-only</b><button class="afk-health-reset" type="button" data-act="afkFreezeReset" title="Clear the freeze history recorded in this browser">reset</button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">Auto nitro<i>skips one long word per race</i></span>
-                    <span class="set-val"><b data-sw-txt="useNitro" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="useNitro" data-on="1" title="Auto nitro: press Enter once per race to skip one word chosen by the nitro strategy. It does not raise WPM; the saved time is paid back over the rest of the lesson"></button></span>
-                  </div>
-                  <div class="set-row nitro-strategy-row">
-                    <span class="set-lbl">Nitro strategy<i>which word Enter skips</i></span>
-                    <span class="set-val"><select class="nitro-strategy" data-field="nitroStrategy" aria-label="Nitro strategy"><option value="longest">longest</option><option value="first">first</option><option value="last">last</option></select></span>
-                  </div>
-                  <div class="set-row nitro-target-row" title="The word the nitro strategy would skip on the current lesson. It updates live and clears after the nitro is spent.">
-                    <span class="set-lbl">Nitro target<i>the word Enter would skip</i></span>
-                    <span class="set-val"><b data-field="nitroPreview">—</b></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">Guard<i>stops on an impossible reading</i></span>
-                    <span class="set-val"><b data-sw-txt="guard" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="guard" data-on="1" title="Safety guard: ends the race and opens a long break if the measured WPM goes past the ceiling. Turn it off only if you know what you are doing"></button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">Sound<i>discreet tone when the bot waits</i></span>
-                    <span class="set-val"><b data-sw-txt="sound" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="sound" data-on="0" title="Sound alerts: a short tone on long breaks, duplicate copies and site blocks"></button></span>
-                  </div>
-                  <div class="set-row">
-                    <span class="set-lbl">Desktop alerts<i>DQ and site blocks, with permission</i></span>
-                    <span class="set-val"><b data-sw-txt="notifications" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="notifications" data-on="0" title="Desktop alerts: permission is requested on the first click. Only disqualifications, site blocks and the AFK safety guard use them; the panel and sound settings are unchanged."></button></span>
-                  </div>
-                </div>
-                <div class="card">
-                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 0 18h1.6a1.7 1.7 0 0 0 1.2-2.9l-.5-.5a1.7 1.7 0 0 1 1.2-2.9H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.7Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="8.3" r="1.1" fill="currentColor" stroke="none"/></svg></span>
-                  <div class="card-h"><span class="card-t">Theme</span><span class="card-s" data-field="themeName">Carbon</span></div>
-                  <div class="themes" data-field="themes" role="group" aria-label="Panel theme">
-                    <button class="theme" type="button" data-theme-btn="carbon" aria-pressed="true" title="Carbon: green on carbon, the classic"><i class="sw-carbon"></i><span>Carbon</span></button>
-                    <button class="theme" type="button" data-theme-btn="aurora" aria-pressed="false" title="Aurora: teal fading into violet"><i class="sw-aurora"></i><span>Aurora</span></button>
-                    <button class="theme" type="button" data-theme-btn="sunset" aria-pressed="false" title="Sunset: warm orange and pink"><i class="sw-sunset"></i><span>Sunset</span></button>
-                    <button class="theme" type="button" data-theme-btn="ice" aria-pressed="false" title="Ice: cold cyan on deep blue"><i class="sw-ice"></i><span>Ice</span></button>
-                    <button class="theme" type="button" data-theme-btn="violet" aria-pressed="false" title="Violet: purple neon"><i class="sw-violet"></i><span>Violet</span></button>
-                    <button class="theme" type="button" data-theme-btn="rgb" aria-pressed="false" title="RGB: animated rainbow border and title"><i class="sw-rgb"></i><span>RGB</span></button>
-                  </div>
-                </div>
-                <div class="card">
-                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/></svg></span>
-                  <div class="card-h"><span class="card-t">Config</span><span class="card-s">carry it anywhere</span></div>
-                  <div class="rows" style="display:flex; gap:6px; margin:0 0 2px">
-                    <button class="act" type="button" data-act="export" title="Copy this configuration (profile, limit, sound, switches) so it can be pasted in another browser or account">copy</button>
-                    <button class="act" type="button" data-act="import" title="Apply whatever config is pasted in the box below">apply</button>
-                    <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, flight recorder, environment) to paste when something is off">report</button>
-                    <button class="act" type="button" data-act="csv" title="Download the closed sessions as a CSV (date, races, WPM, target, deviation, accuracy, DQ, reason) for a spreadsheet">csv</button>
-                    <button class="act" type="button" data-act="releases" title="Open the GitHub release history to install a previous version if the newest one misbehaves">versions</button>
-                    <button class="act" type="button" data-act="channel" title="${CHANNEL === 'canary' ? 'Download the stable release and go back to the normal channel' : 'Install the canary test build; it updates itself from the canary release and never changes the stable one'}">${CHANNEL === 'canary' ? 'stable' : 'canary'}</button>
-                  </div>
-                  <div class="rows">
-                    <div class="row up-row" data-field="upRow" title="Auto-update check: the last result, its error and when it will retry"><span>update</span><b data-field="up">—</b></div>
-                    <div class="row ch-row" data-field="chRow" title="Daily Challenge popup: close it automatically. Shift+click sets a CSS selector"><span>challenge</span><b data-field="ch">on</b></div>
-                  </div>
-                  <textarea class="cfg-text" data-field="cfgText" spellcheck="false" placeholder="Paste a copied config here and press apply."></textarea>
-                  <div class="cfg-note" data-field="cfgNote">Pace and switches are saved on this browser and survive reloads.</div>
-                </div>
-              </div>
-            </section>
-            </template>
-
-            <!-- ------------------------------ LOG --------------------------- -->
-            <template data-view="log">
-            <section class="view v-log" id="nt-view-log" role="tabpanel" aria-label="Log">
-              <div class="view-head"><span>Log</span><b>sessions · challenges</b></div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 1.8"/></svg></span>
-                <div class="card-h"><span class="card-t" data-field="prevLabel">prev</span><span class="card-s">click for the table</span></div>
-                <div class="prev-row row" style="display:none" title="The last session that closed: races, average WPM and deviation from target">
-                  <span>session</span><b data-field="prev">—</b>
-                </div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
-                <div class="card-h"><span class="card-t">Closed sessions</span><span class="card-s" data-field="logCount">0</span></div>
-                <div class="log-list" data-field="closedList"></div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V9M10 20V4M16 20v-6M22 20H2"/></svg></span>
-                <div class="card-h"><span class="card-t">Last 7 days</span><span class="card-s" data-field="weekTotal">empty</span></div>
-                <div class="log-list" data-field="weekList"></div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>
-                <div class="card-h"><span class="card-t">Daily Challenges</span><span class="card-s" data-field="chCount">no data</span></div>
-                <div class="log-list" data-field="chList"></div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 1.8"/></svg></span>
-                <div class="card-h"><span class="card-t">Calibration</span><span class="card-s">account average</span></div>
-                <div class="rows">
-                  <div class="row"><span>when</span><b data-field="calLogWhen">never</b></div>
-                  <div class="row"><span>wpm</span><b data-field="calLogWpm">—</b></div>
-                  <div class="row"><span>accuracy</span><b data-field="calLogAcc">—</b></div>
-                  <div class="row" title="Our accuracy model minus the one the game printed, averaged over the last 20 races"><span>model Δ</span><b data-field="calDelta">—</b></div>
-                </div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19V5M4 19h16"/><path d="M8 15l3-4 3 2 4-6"/></svg></span>
-                <div class="card-h"><span class="card-t">Live passes</span><span class="card-s" data-field="liveCount">none</span></div>
-                <div class="rows" style="display:flex; gap:6px; margin:0 0 2px">
-                  <button class="act" type="button" data-field="liveLoad" title="Load tests/live/live-history.csv or live-history.json (the files npm run live writes) to compare the last passes">load file</button>
-                  <button class="act" type="button" data-field="liveClear" title="Forget the loaded passes; the CSV on disk is untouched">clear</button>
-                  <button class="act" type="button" data-field="livePickExport" disabled title="Download the selected A/B comparison as live-compare-*.csv">export A/B</button>
-                </div>
-                <input type="file" accept=".csv,.json,text/csv,application/json" data-field="liveFile" style="display:none" aria-label="Load the live pass CSV or JSON">
-                <div class="today-row row" data-field="liveDriftRow" style="display:none" title="Latest pass mean vs the average of the previous passes"><span>trend</span><b data-field="liveDrift">—</b></div>
-                <div class="today-row row" data-field="liveCompareRow" style="display:none" title="The last two passes, side by side (mean model Δ)"><span>last two</span><b data-field="liveCompare">—</b></div>
-                <div class="rows" data-field="livePickRow" style="display:none">
-                  <div class="row cmp-row" title="First pass; the difference is B minus A"><span>A</span><select class="cmp-select" data-field="livePickA" aria-label="First live pass"></select></div>
-                  <div class="row cmp-row" title="Second pass; the difference is B minus A"><span>B</span><select class="cmp-select" data-field="livePickB" aria-label="Second live pass"></select></div>
-                  <div class="row" title="Mean model Δ of B minus A"><span>diff</span><b data-field="livePickResult">—</b></div>
-                </div>
-                <div class="today-row row" data-field="liveStreakRow" style="display:none" title="Two or more passes in a row drifted past the band"><span>streak</span><b data-field="liveStreak">—</b></div>
-                <div class="today-row row" data-field="liveSpreadRow" style="display:none" title="Latest block of 10+ races: model Δ spread (sd); above 0.10 pts means the block is too scattered"><span>spread</span><b data-field="liveSpread">—</b></div>
-                <div class="log-list" data-field="liveList"></div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8h12M6 12h12M6 16h8"/></svg></span>
-                <div class="card-h"><span class="card-t">Today</span><span class="card-s">resets at midnight</span></div>
-                <div class="today-row row" data-field="todayRow" style="display:none" title="Today: races · average WPM · Mystery Boxes claimed · disqualifications"><span>summary</span><b data-field="today">—</b></div>
-                <div class="log-list" data-field="noticeList"></div>
-              </div>
-            </section>
-            </template>
-
-            <!-- ------------------------------ INFO -------------------------- -->
-            <template data-view="info">
-            <section class="view v-info" id="nt-view-info" role="tabpanel" aria-label="Info">
-              <div class="view-head"><span>Info</span><b>keys · guardrails</b></div>
-              <div class="card update-card">
-                <div class="card-h"><span class="card-t">Updates</span><span class="card-s">GitHub releases</span></div>
-                <div class="rows">
-                  <div class="row" title="Last public update check. A newer build is downloaded from GitHub, never installed without your click."><span>check</span><b data-field="upInfo">—</b></div>
-                </div>
-                <div class="season-actions">
-                  <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
-                  <button class="act" type="button" data-act="updateCheck" title="Check the public Gist for a newer version now">check now</button>
-                </div>
-                <div class="cfg-note">The Gist meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the Gist is down, the latest GitHub release asset is used. The installed copy changes only when you download a release.</div>
-              </div>
-              <div class="card">
-                <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>
-                <p class="about">Human-paced racer for one account: calibrated typing inside the account's own envelope, human breaks, a queue that recovers the garage, reloads, CAPTCHAs and re-logins, and a guard that stops everything on an impossible reading. <b>There is no fast mode.</b></p>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
-                <div class="card-h"><span class="card-t">Keys</span><span class="card-s">any time</span></div>
-                <div class="keys">
-                  <div class="key-row"><kbd>MODE chip</kbd><span>status only: always AUTO, it starts by itself</span></div>
-                  <div class="key-row"><kbd>Alt+A</kbd><span>resume, from anywhere and even while typing</span></div>
-                  <div class="key-row"><kbd>Alt+N / Stop</kbd><span>stop it (the chip never turns it off)</span></div>
-                  <div class="key-row"><kbd>Alt+R</kbd><span>clear the race history</span></div>
-                  <div class="key-row"><kbd>Alt+Shift+C</kbd><span>clear the accuracy trend (model Δ)</span></div>
-                  <div class="key-row"><kbd>Alt+H</kbd><span>closed sessions, table in the console</span></div>
-                  <div class="key-row"><kbd>Alt+T</kbd><span>cycle the panel theme (saved)</span></div>
-                  <div class="key-row"><kbd>Alt+G</kbd><span>fold / unfold the garage panel</span></div>
-                  <div class="key-row"><kbd>Alt+M</kbd><span>footer HUD: full / compact / hidden</span></div>
-                  <div class="key-row"><kbd>Alt+S / Esc</kbd><span>stop (mid-race it waits for the race to end)</span></div>
-                </div>
-              </div>
-              <div class="card">
-                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l8 4v6c0 5-3.4 7.4-8 8-4.6-.6-8-3-8-8V7z"/></svg></span>
-                <div class="card-h"><span class="card-t">Guard</span><span class="card-s">two failures, no excuses</span></div>
-                <div class="keys">
-                  <div class="key-row"><kbd>ceiling</kbd><span>no race may average above <b data-field="infoCap">120</b> WPM</span></div>
-                  <div class="key-row"><kbd>copies</kbd><span>two copies alive: one types, the rest wait</span></div>
-                  <div class="key-row"><kbd>report</kbd><span>TUNE → report copies a full diagnostic</span></div>
-                </div>
-              </div>
-            </section>
-            </template>
-          </div>
-        </div>
-        <div class="foot">
-          <div class="status" data-field="status">waiting…</div>
-          <div class="foot-bar">
-            <span class="led"></span>
-            <b data-field="footState">idle</b>
-            <span class="fsep">|</span>
-            <span data-field="footMode">auto</span>
-            <span class="fsep">|</span>
-            <span data-field="footWpm">— wpm</span>
-            <span class="fsep">|</span>
-            <span data-field="footAcc" title="Live accuracy">— acc</span>
-            <span class="fsep">|</span>
-            <span data-field="footClock" title="Race clock">0:00</span>
-            <span class="fsep">|</span>
-            <span data-field="footCap">cap 120</span>
-            <span class="hint" data-field="footHint">Alt+S stop</span>
-          </div>
-        </div>
-        <div class="actions">
-          <button class="toggle" type="button">Pause</button>
-          <button class="gear" type="button" data-open="0" title="Settings: pace profile, switches, session limit and export/import of the config">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
-          </button>
-          <button class="stop" type="button" title="Stop after the current race · Alt+S">Stop</button>
-        </div>
-      </div>
-    `;
-
-    // Las vistas inactivas viven en <template>: sus nodos se parsean, pero no
-    // entran en el arbol del documento ni en el layout. `pick` las encuentra
-    // para que el codigo que ya las pinta siga funcionando, y `hydrateView`
-    // las mueve a su sitio la primera vez que se abre la pestana.
-    const templates = [...shadow.querySelectorAll('template[data-view]')];
-    const pick = (selector) => {
-      const found = shadow.querySelector(selector);
-      if (found) return found;
-      for (const template of templates) {
-        const node = template.content.querySelector(selector);
-        if (node) return node;
+      if (event.key === 'Home') {
+        event.preventDefault();
+        resetPanelPosition();
+        return;
       }
-      return null;
-    };
 
-    document.body.appendChild(host);
-    perfCounters.panelNodes = shadow.querySelectorAll('*').length;
-    panel.host = host;
-    panel.mountedViews = new Set(['stats']);
+      const step = event.shiftKey ? 32 : 8;
+      const rect = panel.host.getBoundingClientRect();
+      let left = rect.left;
+      let top = rect.top;
+      if (event.key === 'ArrowLeft') left -= step;
+      else if (event.key === 'ArrowRight') left += step;
+      else if (event.key === 'ArrowUp') top -= step;
+      else if (event.key === 'ArrowDown') top += step;
+      else return;
 
-    panel.root = pick('.panel');
-    panel.refs = {
-      mode: pick('.mode'),
-      pace: pick('.pace'),
-      cap: pick('[data-field="cap"]'),
-      hudRow: pick('.hud-row'),
-      hud: pick('[data-field="hud"]'),
-      clockRow: pick('.clock-row'),
-      clock: pick('[data-field="clock"]'),
-      resultRow: pick('.result-row'),
-      result: pick('[data-field="result"]'),
-      guardRow: pick('.guard-row'),
-      guard: pick('[data-field="guard"]'),
-      watchRow: pick('.watch-row'),
-      watch: pick('[data-field="watch"]'),
-      todayRow: pick('[data-field="todayRow"]'),
-      today: pick('[data-field="today"]'),
-      boxRow: pick('.box-row'),
-      box: pick('[data-field="box"]'),
-      target: pick('[data-field="target"]'),
-      live: pick('[data-field="live"]'),
-      acc: pick('[data-field="acc"]'),
-      paceSource: pick('[data-field="paceSource"]'),
-      session: pick('[data-field="session"]'),
-      sessionRow: pick('.session-row'),
-      sessionLeft: pick('[data-field="sessionLeft"]'),
-      breakLeft: pick('[data-field="break"]'),
-      dqRow: pick('.dq-row'),
-      dq: pick('[data-field="dq"]'),
-      status: pick('[data-field="status"]'),
-      trimRow: pick('.trim-row'),
-      trim: pick('[data-field="trim"]'),
-      history: pick('[data-field="history"]'),
-      progress: pick('[data-field="progress"]'),
-      progFill: pick('[data-field="progfill"]'),
-      races: pick('[data-field="races"]'),
-      dayXp: pick('[data-field="dayXp"]'),
-      rate: pick('[data-field="rate"]'),
-      nitro: pick('[data-field="nitro"]'),
-      nitroDelta: pick('[data-field="nitroDelta"]'),
-      cycle: pick('[data-field="cycle"]'),
-      xpBreak: pick('[data-field="xpBreak"]'),
-      tanda: pick('[data-field="tanda"]'),
-      raceLimitRow: pick('[data-field="raceLimitRow"]'),
-      limit: pick('[data-field="limit"]'),
-      prevRow: pick('.prev-row'),
-      prevLabel: pick('[data-field="prevLabel"]'),
-      prev: pick('[data-field="prev"]'),
-      // --- rediseno v7: rail, cabecera, ajustes y barra de estado ---
-      title: pick('[data-field="title"]'),
-      ver: pick('[data-field="ver"]'),
-      update: pick('.ghlink'),
-      rail: pick('.rail'),
-      views: pick('.views'),
-      liveTag: pick('[data-field="liveTag"]'),
-      liveAge: pick('[data-field="liveAge"]'),
-      liveNow: pick('[data-field="liveNow"]'),
-      liveNowAcc: pick('[data-field="liveNowAcc"]'),
-      footState: pick('[data-field="footState"]'),
-      footMode: pick('[data-field="footMode"]'),
-      footWpm: pick('[data-field="footWpm"]'),
-      footAcc: pick('[data-field="footAcc"]'),
-      footClock: pick('[data-field="footClock"]'),
-      footCap: pick('[data-field="footCap"]'),
-      footHint: pick('[data-field="footHint"]'),
-      seg: pick('.seg'),
-      themes: pick('[data-field="themes"]'),
-      themeName: pick('[data-field="themeName"]'),
-      tuneCap: pick('[data-field="tuneCap"]'),
-      tuneRange: pick('[data-field="tuneRange"]'),
-      healthSummary: pick('[data-field="healthSummary"]'),
-      healthAccount: pick('[data-field="healthAccount"]'),
-      healthAfk: pick('[data-field="healthAfk"]'),
-      healthUpdate: pick('[data-field="healthUpdate"]'),
-      healthFreeze: pick('[data-field="healthFreeze"]'),
-      healthNote: pick('[data-field="healthNote"]'),
-      tuneSearch: pick('[data-field="tuneSearch"]'),
-      tuneClear: pick('[data-field="tuneClear"]'),
-      tuneCount: pick('[data-field="tuneCount"]'),
-      tuneEmpty: pick('[data-field="tuneEmpty"]'),
-      limitSlider: pick('[data-field="limitSlider"]'),
-      etaLeft: pick('[data-field="etaLeft"]'),
-      timeLimitRow: pick('[data-field="timeLimitRow"]'),
-      timeLimit: pick('[data-field="timeLimit"]'),
-      timeSlider: pick('[data-field="timeSlider"]'),
-      timeLeftRow: pick('[data-field="timeLeftRow"]'),
-      timeLeft: pick('[data-field="timeLeft"]'),
-      xpLimitRow: pick('[data-field="xpLimitRow"]'),
-      xpLimit: pick('[data-field="xpLimit"]'),
-      xpSlider: pick('[data-field="xpSlider"]'),
-      xpRow: pick('[data-field="xpRow"]'),
-      xpTotal: pick('[data-field="xpTotal"]'),
-      dailyRaceRow: pick('[data-field="dailyRaceRow"]'),
-      dailyRaces: pick('[data-field="dailyRaces"]'),
-      dailyRaceSlider: pick('[data-field="dailyRaceSlider"]'),
-      dailyXpRow: pick('[data-field="dailyXpRow"]'),
-      dailyXp: pick('[data-field="dailyXp"]'),
-      dailyXpSlider: pick('[data-field="dailyXpSlider"]'),
-      dailyLeft: pick('[data-field="dailyLeft"]'),
-      activeRow: pick('[data-field="activeRow"]'),
-      activeState: pick('[data-field="activeState"]'),
-      activeStartRow: pick('[data-field="activeStartRow"]'),
-      activeStart: pick('[data-field="activeStart"]'),
-      activeStartSlider: pick('[data-field="activeStartSlider"]'),
-      activeEndRow: pick('[data-field="activeEndRow"]'),
-      activeEnd: pick('[data-field="activeEnd"]'),
-      activeEndSlider: pick('[data-field="activeEndSlider"]'),
-      activeNow: pick('[data-field="activeNow"]'),
-      calRow: pick('[data-field="calRow"]'),
-      cal: pick('[data-field="cal"]'),
-      calWpm: pick('[data-field="calWpm"]'),
-      calAcc: pick('[data-field="calAcc"]'),
-      calAccount: pick('[data-field="calAccount"]'),
-      acctId: pick('[data-field="acctId"]'),
-      acctState: pick('[data-field="acctState"]'),
-      acctAvg: pick('[data-field="acctAvg"]'),
-      acctTarget: pick('[data-field="acctTarget"]'),
-      acctTop: pick('[data-field="acctTop"]'),
-      acctHistory: pick('[data-field="acctHistory"]'),
-      acctRange: pick('[data-field="acctRange"]'),
-      acctRead: pick('[data-field="acctRead"]'),
-      acctRefresh: pick('[data-field="acctRefresh"]'),
-      customWpm: pick('[data-field="customWpm"]'),
-      customAcc: pick('[data-field="customAcc"]'),
-      calDelta: pick('[data-field="calDelta"]'),
-      accSpark: pick('[data-field="accSpark"]'),
-      accSparkLine: pick('[data-field="accSparkLine"]'),
-      accSparkArea: pick('[data-field="accSparkArea"]'),
-      liveCount: pick('[data-field="liveCount"]'),
-      liveLoad: pick('[data-field="liveLoad"]'),
-      liveFile: pick('[data-field="liveFile"]'),
-      liveList: pick('[data-field="liveList"]'),
-      liveClear: pick('[data-field="liveClear"]'),
-      liveDriftRow: pick('[data-field="liveDriftRow"]'),
-      liveDrift: pick('[data-field="liveDrift"]'),
-      liveCompareRow: pick('[data-field="liveCompareRow"]'),
-      liveCompare: pick('[data-field="liveCompare"]'),
-      livePickRow: pick('[data-field="livePickRow"]'),
-      livePickA: pick('[data-field="livePickA"]'),
-      livePickB: pick('[data-field="livePickB"]'),
-      livePickResult: pick('[data-field="livePickResult"]'),
-      livePickExport: pick('[data-field="livePickExport"]'),
-      liveStreakRow: pick('[data-field="liveStreakRow"]'),
-      liveStreak: pick('[data-field="liveStreak"]'),
-      liveSpreadRow: pick('[data-field="liveSpreadRow"]'),
-      liveSpread: pick('[data-field="liveSpread"]'),
-      chCount: pick('[data-field="chCount"]'),
-      chList: pick('[data-field="chList"]'),
-      calLogWhen: pick('[data-field="calLogWhen"]'),
-      calLogWpm: pick('[data-field="calLogWpm"]'),
-      calLogAcc: pick('[data-field="calLogAcc"]'),
-      chRow: pick('[data-field="chRow"]'),
-      ch: pick('[data-field="ch"]'),
-      weekList: pick('[data-field="weekList"]'),
-      weekTotal: pick('[data-field="weekTotal"]'),
-      closedList: pick('[data-field="closedList"]'),
-      logCount: pick('[data-field="logCount"]'),
-      noticeList: pick('[data-field="noticeList"]'),
-      aboutVer: pick('[data-field="aboutVer"]'),
-      infoCap: pick('[data-field="infoCap"]'),
-      gear: pick('.gear'),
-      cfg: pick('.cfg'),
-      cfgText: pick('[data-field="cfgText"]'),
-      cfgNote: pick('[data-field="cfgNote"]'),
-      up: pick('[data-field="up"]'),
-      upInfo: pick('[data-field="upInfo"]'),
-      updateCheck: pick('[data-act="updateCheck"]'),
-      afkFreezeReset: pick('[data-act="afkFreezeReset"]'),
-      nitroStrategy: pick('[data-field="nitroStrategy"]'),
-      nitroPreview: pick('[data-field="nitroPreview"]'),
-      foot: pick('[data-field="foot"]'),
-      avg: pick('[data-field="avg"]'),
-      best: pick('[data-field="best"]'),
-      toggle: pick('.toggle'),
-      stop: pick('.stop'),
-      collapse: pick('.collapse'),
-      seasonCard: pick('[data-field="seasonCard"]'),
-      seasonTag: pick('[data-field="seasonTag"]'),
-      seasonName: pick('[data-field="seasonName"]'),
-      seasonFill: pick('[data-field="seasonFill"]'),
-      seasonTier: pick('[data-field="seasonTier"]'),
-      seasonXp: pick('[data-field="seasonXp"]'),
-      seasonNext: pick('[data-field="seasonNext"]'),
-      seasonRaces: pick('[data-field="seasonRaces"]'),
-      seasonPace: pick('[data-field="seasonPace"]'),
-      seasonEnds: pick('[data-field="seasonEnds"]'),
-      seasonAlert: pick('[data-field="seasonAlert"]'),
-      seasonNote: pick('[data-field="seasonNote"]'),
-      seasonOpen: pick('[data-field="seasonOpen"]'),
-    };
-
-    // El ultimo aviso importante se pinta aqui desde ya: si el panel se crea
-    // despues de una DQ, la razon no se pierde.
-    statusEl = panel.refs.status;
-    if (statusEl) setText(statusEl, lastStatus || 'waiting…');
-
-    panel.refs.toggle.title = 'Pause or resume sending keys (inside a race the pause resumes by itself after 6 s)';
-    // El chip del ritmo sigue siendo LEGIT (no hay otro tipo de ritmo) y ahora
-    // cicla el perfil: soft, normal, fast, todos con la misma cadencia humana.
-    paintPace();
-    paintTheme();
-
-    // Cabecera: version. No cambia en caliente, se pinta una vez.
-    const versionLabel = `v${VERSION}${CHANNEL === 'canary' ? ' · canary' : ''}`;
-    setText(panel.refs.ver, versionLabel);
-    setText(panel.refs.aboutVer, versionLabel);
-    if (!panel.mountedViews || panel.mountedViews.has('log')) {
-      paintLogLists();
-      paintChallengeList();
-    } else {
-      readChallengeProgress();
-    }
-    if (panel.refs.cap) {
-      const cap = CONFIG.wpm.hardCap;
-      setText(panel.refs.cap, Number.isFinite(cap) ? `≤ ${cap} wpm` : 'no cap');
-    }
-
-    if (panel.refs.raceLimitRow) {
-      panel.refs.raceLimitRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const next = LIMIT_STEPS.find((value) => value > session.raceLimit);
-        setRaceLimit(next === undefined ? 0 : next);
-      });
-    }
-
-    // La fila del tope por tiempo cicla igual que la de carreras, con sus
-    // propios escalones: libre, 15 min, 30 min, 1 h, 2 h.
-    if (panel.refs.timeLimitRow) {
-      panel.refs.timeLimitRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const next = TIME_LIMIT_STEPS.find((value) => value > session.timeLimit);
-        setTimeLimit(next === undefined ? 0 : next);
-      });
-    }
-
-    // Y el tercero, en XP: mismos escalones que se pintan en sld-ends.
-    if (panel.refs.xpLimitRow) {
-      panel.refs.xpLimitRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const next = XP_LIMIT_STEPS.find((value) => value > session.xpLimit);
-        setXpLimit(next === undefined ? 0 : next);
-      });
-    }
-
-    // La tarjeta Season no adivina: abre la pagina oficial y deja que su propia
-    // pestana escriba la foto que este panel leera al volver.
-    if (panel.refs.afkFreezeReset) {
-      panel.refs.afkFreezeReset.addEventListener('click', (event) => {
-        event.stopPropagation();
-        resetAfkFreezeStats();
-        log('AFK freeze history cleared for this browser.');
-        paintConfig();
-        if (typeof paintGaragePanel === 'function') paintGaragePanel();
-      });
-    }
-
-    if (panel.refs.updateCheck) {
-      panel.refs.updateCheck.addEventListener('click', async (event) => {
-        event.stopPropagation();
-        const button = panel.refs.updateCheck;
-        if (button.disabled) return;
-        button.disabled = true;
-        setText(button, 'checking…');
-        const ok = await checkForUpdate(true);
-        setText(button, ok ? 'check now' : 'retry');
-        paintUpdateHealth(true);
-        setTimeout(() => {
-          if (!button.isConnected) return;
-          setText(button, 'check now');
-          button.disabled = false;
-        }, 1400);
-      });
-    }
-
-    if (panel.refs.seasonOpen) {
-      panel.refs.seasonOpen.addEventListener('click', (event) => {
-        event.stopPropagation();
-        try {
-          window.open('https://www.nitrotype.com/season', '_blank', 'noopener');
-          setText(panel.refs.seasonNote, 'Season opened. This card refreshes when that tab finishes loading.');
-        } catch {
-          location.href = '/season';
-        }
-      });
-    }
-
-    // La fila de la ultima tanda cerrada abre la misma tabla que Alt+H: el
-    // detalle de cada sesion, sin tener que recordar el atajo.
-    if (panel.refs.prevRow) {
-      panel.refs.prevRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        showTandaLog();
-      });
-    }
-
-    // Rail: cada icono abre su vista. El cuadrado verde que viaja lo mueve el
-    // data-index del contenedor, con muelle, desde el CSS.
-    if (panel.refs.rail) {
-      panel.refs.rail.addEventListener('click', (event) => {
-        const btn = event.target && event.target.closest ? event.target.closest('[data-tab-btn]') : null;
-        if (!btn) return;
-        event.stopPropagation();
-        showTab(btn.dataset.tabBtn);
-        btn.blur();
-      });
-
-      // Patron tablist: flechas, Home y End mueven la vista y el foco. No toca
-      // el teclado del juego porque solo se activa con el foco dentro del rail.
-      panel.refs.rail.addEventListener('keydown', (event) => {
-        const btn = event.target && event.target.closest ? event.target.closest('[data-tab-btn]') : null;
-        if (!btn) return;
-        const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
-        if (!keys.includes(event.key)) return;
-        const buttons = Array.from(panel.refs.rail.querySelectorAll('[data-tab-btn]'));
-        const current = buttons.indexOf(btn);
-        if (current < 0) return;
-        let next = current;
-        if (event.key === 'Home') next = 0;
-        else if (event.key === 'End') next = buttons.length - 1;
-        else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (current + 1) % buttons.length;
-        else next = (current - 1 + buttons.length) % buttons.length;
-        event.preventDefault();
-        event.stopPropagation();
-        showTab(buttons[next].dataset.tabBtn);
-        buttons[next].focus();
-      });
-    }
-
-    // Tope de tanda con deslizador: los mismos escalones que el clic en la fila
-    // (libre, 10, 20, 50, 100). El relleno verde lo pinta paintLimitSlider.
-    if (panel.refs.limitSlider) {
-      panel.refs.limitSlider.addEventListener('input', (event) => {
-        event.stopPropagation();
-        const index = clamp(parseInt(panel.refs.limitSlider.value, 10) || 0, 0, LIMIT_STEPS.length - 1);
-        setRaceLimit(LIMIT_STEPS[index]);
-      });
-      paintLimitSlider();
-    }
-
-    // Mismo deslizador, otro reloj: el relleno verde lo pinta paintTimeSlider.
-    if (panel.refs.timeSlider) {
-      panel.refs.timeSlider.addEventListener('input', (event) => {
-        event.stopPropagation();
-        const index = clamp(parseInt(panel.refs.timeSlider.value, 10) || 0, 0, TIME_LIMIT_STEPS.length - 1);
-        setTimeLimit(TIME_LIMIT_STEPS[index]);
-      });
-      paintTimeSlider();
-    }
-
-    if (panel.refs.xpSlider) {
-      panel.refs.xpSlider.addEventListener('input', (event) => {
-        event.stopPropagation();
-        const index = clamp(parseInt(panel.refs.xpSlider.value, 10) || 0, 0, XP_LIMIT_STEPS.length - 1);
-        setXpLimit(XP_LIMIT_STEPS[index]);
-      });
-      paintXpSlider();
-    }
-
-    // Presupuesto diario: mismos dos controles (fila + deslizador) que los
-    // topes de tanda, pero guardados en sus propias claves.
-    if (panel.refs.dailyRaceRow) {
-      panel.refs.dailyRaceRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const next = DAILY_RACE_STEPS.find((value) => value > session.dailyRaceLimit);
-        setDailyRaceLimit(next === undefined ? 0 : next);
-      });
-    }
-    if (panel.refs.dailyRaceSlider) {
-      panel.refs.dailyRaceSlider.addEventListener('input', (event) => {
-        event.stopPropagation();
-        const index = clamp(parseInt(panel.refs.dailyRaceSlider.value, 10) || 0, 0, DAILY_RACE_STEPS.length - 1);
-        setDailyRaceLimit(DAILY_RACE_STEPS[index]);
-      });
-      paintDailyRaceSlider();
-    }
-    if (panel.refs.dailyXpRow) {
-      panel.refs.dailyXpRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const next = DAILY_XP_STEPS.find((value) => value > session.dailyXpLimit);
-        setDailyXpLimit(next === undefined ? 0 : next);
-      });
-    }
-    if (panel.refs.dailyXpSlider) {
-      panel.refs.dailyXpSlider.addEventListener('input', (event) => {
-        event.stopPropagation();
-        const index = clamp(parseInt(panel.refs.dailyXpSlider.value, 10) || 0, 0, DAILY_XP_STEPS.length - 1);
-        setDailyXpLimit(DAILY_XP_STEPS[index]);
-      });
-      paintDailyXpSlider();
-    }
-
-    // Horas activas: la fila enciende/apaga y los dos deslizadores eligen la
-    // hora exacta. Shift en las filas mueve al reves (o resetea el rango).
-    if (panel.refs.activeRow) {
-      panel.refs.activeRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (event.shiftKey) {
-          setActiveHour('start', 8, true);
-          setActiveHour('end', 23, true);
-          setActiveOn(true);
-          return;
-        }
-        setActiveOn(!session.activeOn);
-      });
-    }
-    if (panel.refs.activeStartRow) {
-      panel.refs.activeStartRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        setActiveHour('start', (session.activeStart + (event.shiftKey ? 23 : 1)) % 24);
-      });
-    }
-    if (panel.refs.activeEndRow) {
-      panel.refs.activeEndRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        setActiveHour('end', (session.activeEnd + (event.shiftKey ? 23 : 1)) % 24);
-      });
-    }
-    if (panel.refs.activeStartSlider) {
-      panel.refs.activeStartSlider.addEventListener('input', (event) => {
-        event.stopPropagation();
-        setActiveHour('start', parseInt(panel.refs.activeStartSlider.value, 10) || 0, true);
-        paintActiveSlider('start');
-      });
-      paintActiveSlider('start');
-    }
-    if (panel.refs.activeEndSlider) {
-      panel.refs.activeEndSlider.addEventListener('input', (event) => {
-        event.stopPropagation();
-        setActiveHour('end', parseInt(panel.refs.activeEndSlider.value, 10) || 0, true);
-        paintActiveSlider('end');
-      });
-      paintActiveSlider('end');
-    }
-
-    // Buscador de TUNE: filtra por texto de la tarjeta y por el titulo del
-    // bloque. Los ajustes ocultos siguen existiendo; solo dejan de ocupar sitio.
-    if (panel.refs.tuneSearch) {
-      panel.refs.tuneSearch.addEventListener('input', () => filterTune());
-      panel.refs.tuneSearch.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter') return;
-        event.preventDefault();
-        event.stopPropagation();
-      });
-    }
-    if (panel.refs.tuneClear) {
-      panel.refs.tuneClear.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (panel.refs.tuneSearch) panel.refs.tuneSearch.value = '';
-        filterTune();
-        if (panel.refs.tuneSearch) panel.refs.tuneSearch.focus();
-      });
-    }
-    filterTune();
-
-    // Fila de auto-calibracion: no hay apagado; el clic solo fuerza una lectura
-    // nueva para que el rango se mueva ya con la media mas reciente.
-    if (panel.refs.calRow) {
-      panel.refs.calRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        refreshCalibration();
-      });
-    }
-
-    if (panel.refs.acctRefresh) {
-      panel.refs.acctRefresh.addEventListener('click', (event) => {
-        event.stopPropagation();
-        refreshCalibration();
-        panel.refs.acctRefresh.blur();
-      });
-    }
-
-    // Overrides manuales de WPM y precision. `change` evita aplicar cada tecla
-    // a medias; Enter confirma sin tener que pulsar fuera del campo.
-    if (panel.refs.customWpm) {
-      panel.refs.customWpm.addEventListener('change', (event) => {
-        event.stopPropagation();
-        setCustomWpm(panel.refs.customWpm.value);
-      });
-      panel.refs.customWpm.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter') return;
-        event.preventDefault();
-        panel.refs.customWpm.blur();
-      });
-    }
-    if (panel.refs.customAcc) {
-      panel.refs.customAcc.addEventListener('change', (event) => {
-        event.stopPropagation();
-        setCustomAccuracy(panel.refs.customAcc.value);
-      });
-      panel.refs.customAcc.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter') return;
-        event.preventDefault();
-        panel.refs.customAcc.blur();
-      });
-    }
-
-    // Fila del popup de challenges: clic normal enciende/apaga; Mayus+clic pide
-    // el selector CSS para cuando el barrido por texto no baste.
-    if (panel.refs.chRow) {
-      panel.refs.chRow.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (event.shiftKey) {
-          const next = prompt('CSS selector for the Daily Challenge popup (empty = detect by text):', CONFIG.challenges.selector || '');
-          if (next !== null) {
-            CONFIG.challenges.selector = next.trim();
-            disk.set(KEYS.challengeSelector, CONFIG.challenges.selector);
-            log(CONFIG.challenges.selector ? `Challenge selector set: ${CONFIG.challenges.selector}` : 'Challenge selector cleared: text detection.');
-            paintChallenges();
-          }
-          return;
-        }
-        CONFIG.challenges.enabled = !CONFIG.challenges.enabled;
-        savePrefs();
-        log(CONFIG.challenges.enabled ? 'Daily Challenge popups: auto-close on.' : 'Daily Challenge popups: auto-close off.');
-        paintChallenges();
-      });
-    }
-
-    // El panel es nuevo: hay que repintar el historial y la temporada aunque
-    // los datos no hayan cambiado (si no, quedan vacios hasta el proximo cambio).
-    panel.historySig = '';
-    panel.seasonSig = '';
-    panel.seasonBaseSig = '';
-    seasonPaintAt = 0;
-
-    applyCollapsed(disk.get(KEYS.panelCollapsed) === '1');
-    applyFootMode();
-    restorePosition();
-    makeDraggable(shadow);
-
-    panel.refs.toggle.addEventListener('click', (event) => {
-      event.stopPropagation();
-      setPaused(!session.paused);
-      panel.refs.toggle.blur();
+      event.preventDefault();
+      placeHost(left, top);
+      savePosition();
+    });
+    handle.addEventListener('dblclick', (event) => {
+      if (event.target.closest && event.target.closest('button')) return;
+      resetPanelPosition();
     });
 
-    panel.refs.stop.addEventListener('click', (event) => {
-      event.stopPropagation();
-      // Parado no hay nada que parar: el mismo boton vuelve a arrancar. Hace
-      // lo mismo que Alt+A, con las mismas puertas (tope diario y horas).
-      if (session.stopped) resumeAuto();
-      else requestStop();
-      panel.refs.stop.blur();
-    });
-
-    panel.refs.collapse.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const collapsed = panel.root.dataset.collapsed !== 'true';
-      applyCollapsed(collapsed);
-      restorePosition();
-      if (!collapsed) updatePanel(true);
-      panel.refs.collapse.blur();
-    });
-
-    // El chip del modo no es un interruptor: dice AUTO y nada mas. Parar es
-    // cosa de Stop / Esc, y la cola se rearma sola.
-
-    // El chip LEGIT cambia de perfil al pulsarlo: soft -> balanced -> fast.
-    if (panel.refs.pace) {
-      panel.refs.pace.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const index = PACE_ORDER.indexOf(paceProfile);
-        setPaceProfile(PACE_ORDER[(index + 1) % PACE_ORDER.length]);
-        panel.refs.pace.blur();
+    if (!panelResizeBound) {
+      panelResizeBound = true;
+      window.addEventListener('resize', () => {
+        const left = parseFloat(panel.host && panel.host.style.left);
+        const top = parseFloat(panel.host && panel.host.style.top);
+        if (Number.isFinite(left) && Number.isFinite(top)) placeHost(left, top);
       });
     }
-
-    // Tema: un solo escuchador para las seis muestras. El CSS hace el resto.
-    if (panel.refs.themes) {
-      panel.refs.themes.addEventListener('click', (event) => {
-        const chip = event.target && event.target.closest ? event.target.closest('[data-theme-btn]') : null;
-        if (!chip) return;
-        event.stopPropagation();
-        setTheme(chip.dataset.themeBtn);
-        chip.blur();
-      });
-    }
-
-    // ⚙ lleva a la vista de ajustes (y vuelve): es el mismo cajon de siempre,
-    // ahora como una pestaña mas del rail.
-    if (panel.refs.gear) {
-      panel.refs.gear.addEventListener('click', (event) => {
-        event.stopPropagation();
-        showTab(panel.root.dataset.tab === 'tune' ? 'stats' : 'tune');
-        panel.refs.gear.blur();
-      });
-    }
-
-    // Los chips del cajon: perfil, interruptores y exportar/importar. Un solo
-    // escuchador para todos, que el cajon se repinta entero y no hay que
-    // reenganchar nada al cambiar de perfil.
-    if (panel.refs.cfg) {
-      panel.refs.cfg.addEventListener('click', (event) => {
-        const target = event.target;
-        const chip = target && target.closest ? target.closest('button') : null;
-        if (!chip) return;
-        event.stopPropagation();
-
-        if (chip.dataset.pace) {
-          setPaceProfile(chip.dataset.pace);
-        } else if (chip.dataset.toggle === 'useNitro') {
-          setUseNitro(CONFIG.useNitro === false);
-        } else if (chip.dataset.toggle === 'backgroundFarm') {
-          setBackgroundFarm(CONFIG.queue.backgroundFarm !== true);
-        } else if (chip.dataset.toggle === 'keepAlive') {
-          setKeepAlive(CONFIG.queue.keepAlive !== true);
-        } else if (chip.dataset.toggle === 'afkRequireKeepAlive') {
-          setAfkRequireKeepAlive(CONFIG.queue.afkRequireKeepAlive !== true);
-        } else if (chip.dataset.toggle === 'afkFreezeGuard') {
-          setAfkFreezeGuard(CONFIG.queue.afkFreezeGuard === false);
-        } else if (chip.dataset.toggle === 'notifications') {
-          setNotifications(CONFIG.notifications.enabled !== true);
-        } else if (chip.dataset.toggle === 'sound') {
-          // El click ya es gesto valido para el audio: al encenderlo suena.
-          setSfx(!sfxOn);
-        } else if (chip.dataset.toggle && CONFIG[chip.dataset.toggle]) {
-          const key = chip.dataset.toggle;
-          CONFIG[key].enabled = CONFIG[key].enabled === false;
-          savePrefs();
-          paintConfig();
-          log(`${key} ${CONFIG[key].enabled === false ? 'off' : 'on'}.`);
-        } else if (chip.dataset.act === 'export') {
-          exportConfig();
-        } else if (chip.dataset.act === 'import') {
-          importConfig();
-        } else if (chip.dataset.act === 'report') {
-          exportDiagnostics();
-        } else if (chip.dataset.act === 'csv') {
-          exportSessionsCsv();
-        } else if (chip.dataset.act === 'releases') {
-          try { window.open(UPDATE_RELEASES_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
-        } else if (chip.dataset.act === 'channel') {
-          // En canary el boton vuelve al Gist estable; en estable abre el build
-          // de prueba. Ninguno de los dos cambia la release estable por si solo.
-          const url = CHANNEL === 'canary' ? UPDATE_STABLE_URL : UPDATE_CANARY_URL;
-          try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
-        }
-
-        chip.blur();
-      });
-    }
-
-    if (panel.refs.nitroStrategy) {
-      panel.refs.nitroStrategy.addEventListener('change', (event) => {
-        event.stopPropagation();
-        setNitroStrategy(panel.refs.nitroStrategy.value);
-      });
-    }
-
-    // Pasadas del banco live: el boton abre el selector y el CSV se queda
-    // guardado. La tarjeta vive en LOG y no depende de la consola.
-    if (panel.refs.liveLoad && panel.refs.liveFile) {
-      panel.refs.liveLoad.addEventListener('click', (event) => {
-        event.stopPropagation();
-        panel.refs.liveFile.click();
-        panel.refs.liveLoad.blur();
-      });
-      panel.refs.liveFile.addEventListener('change', () => {
-        const file = panel.refs.liveFile.files && panel.refs.liveFile.files[0];
-        if (file) loadLiveCsv(file);
-        panel.refs.liveFile.value = '';
-      });
-    }
-
-    if (panel.refs.liveClear) {
-      panel.refs.liveClear.addEventListener('click', (event) => {
-        event.stopPropagation();
-        clearLivePasses();
-        panel.refs.liveClear.blur();
-      });
-    }
-    for (const select of [panel.refs.livePickA, panel.refs.livePickB]) {
-      if (select) select.addEventListener('change', paintLivePick);
-    }
-    if (panel.refs.livePickExport) {
-      panel.refs.livePickExport.addEventListener('click', (event) => {
-        event.stopPropagation();
-        downloadLiveCompareCsv();
-        panel.refs.livePickExport.blur();
-      });
-    }
-    renderLivePasses();
-
-    paintConfig();
-    updatePanel();
   }
 
   function applyCollapsed(collapsed) {
@@ -13195,603 +12399,6 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
-  /* --------------------------------------------------------------------------
-   * Season tracker
-   *
-   * La pagina /season renderiza el tier activo en React. El estado no viaja en
-   * el HTML (es un shell), asi que la foto se toma ALLI, donde el DOM ya esta
-   * hidratado, y se guarda para que el panel de la carrera la lea despues. El
-   * XP exacto sale de las props del componente; si React cambia de forma, el
-   * parser se queda con el tier y el porcentaje visibles en vez de inventar.
-   * ------------------------------------------------------------------------ */
-  function seasonClean(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
-  }
-
-  function seasonFiberProps(node) {
-    if (!node) return null;
-    let fiber = null;
-    try {
-      const key = Object.keys(node).find((name) => name.startsWith('__reactFiber$'));
-      fiber = key ? node[key] : null;
-    } catch {
-      return null;
-    }
-    for (let depth = 0; depth < 30 && fiber; depth++) {
-      const props = fiber.memoizedProps;
-      if (props && typeof props === 'object'
-        && props.userSeasonExperience !== null && props.userSeasonExperience !== undefined
-        && Number.isFinite(Number(props.userSeasonExperience))) {
-        return props;
-      }
-      fiber = fiber.return;
-    }
-    return null;
-  }
-
-  function seasonDateRange(text, now = Date.now()) {
-    const match = String(text || '').match(/([A-Z][a-z]{2})\s+(\d{1,2})\s*[-–]\s*([A-Z][a-z]{2})\s+(\d{1,2})/);
-    if (!match) return { endsAt: null, endsText: '' };
-    const year = new Date(now).getFullYear();
-    const start = Date.parse(`${match[1]} ${match[2]}, ${year} 00:00:00`);
-    let endsAt = Date.parse(`${match[3]} ${match[4]}, ${year} 23:59:59`);
-    if (!Number.isFinite(start) || !Number.isFinite(endsAt)) return { endsAt: null, endsText: '' };
-    if (endsAt < start) endsAt = Date.parse(`${match[3]} ${match[4]}, ${year + 1} 23:59:59`);
-    return {
-      endsAt: Number.isFinite(endsAt) ? endsAt : null,
-      endsText: `${match[3]} ${match[4]}`,
-    };
-  }
-
-  function parseSeasonPage(root = document) {
-    const scope = root && typeof root.querySelector === 'function' ? root : document;
-    const card = scope.querySelector('.seasonReward.is-selected, .seasonReward--free.is-selected');
-    if (!card) return null;
-
-    const tier = Number(seasonClean((card.querySelector('.seasonReward-tier') || {}).textContent));
-    if (!Number.isFinite(tier) || tier <= 0) return null;
-
-    const fill = card.querySelector('.prog-barFill') || card.querySelector('.prog-points');
-    const rawProgress = fill ? (fill.style.width || fill.style.left || '') : '';
-    const progress = Number.parseFloat(rawProgress);
-    const props = seasonFiberProps(card.querySelector('.prog-points') || card) || {};
-
-    const rawXp = props.userSeasonExperience;
-    const xp = rawXp !== null && rawXp !== undefined && Number.isFinite(Number(rawXp))
-      ? Math.max(0, Math.round(Number(rawXp)))
-      : null;
-    const rawNext = props.experience;
-    const nextXp = rawNext !== null && rawNext !== undefined && Number.isFinite(Number(rawNext))
-      ? Math.max(0, Math.round(Number(rawNext)))
-      : null;
-    const season = props.season && typeof props.season === 'object' ? props.season : {};
-    const seasonID = season.seasonID !== null && season.seasonID !== undefined && Number.isFinite(Number(season.seasonID))
-      ? Number(season.seasonID)
-      : null;
-
-    const nameNode = scope.querySelector('.season-header h1, .season-head h1, h1');
-    const seasonName = seasonClean(nameNode && nameNode.textContent)
-      || seasonClean((scope.querySelector('.seasonTeaser') || {}).textContent)
-      || 'Season';
-    const teaser = scope.querySelector('.seasonTeaser');
-    const dates = seasonDateRange(teaser && teaser.textContent);
-
-    const boot = seasonBoot();
-    const levels = boot.levels || SEASON_LEVELS_DEFAULT;
-    const totalRewards = Math.max(1, Math.floor(Number(boot.active && boot.active.totalRewards) || 35));
-    const computed = xp !== null ? seasonTierForXp(xp, levels, totalRewards) : null;
-    return {
-      v: 2,
-      at: Date.now(),
-      auto: false,
-      source: 'page',
-      seasonID,
-      seasonName,
-      // El premio seleccionado es el SIGUIENTE, no el tier actual: con 76.701
-      // XP la pagina marca T7 a 90.000 y el nivel actual es T6 (70.000).
-      tier: computed ? computed.tier : Math.max(1, tier - 1),
-      nextTier: computed ? computed.nextTier : tier,
-      progress: computed
-        ? Math.round(computed.progress)
-        : (Number.isFinite(progress)
-          ? Math.max(0, Math.min(100, progress))
-          : Math.max(0, Math.min(100, Number(props.progress) || 0))),
-      xp,
-      currentXp: computed ? computed.currentXp : null,
-      nextXp: computed ? computed.nextXp : nextXp,
-      levels,
-      totalRewards,
-      endsAt: dates.endsAt,
-      endsText: dates.endsText,
-    };
-  }
-
-  const SEASON_LEVELS_DEFAULT = {
-    startingLevels: 3,
-    experiencePerStartingLevel: 10000,
-    experiencePerAchievementLevel: 20000,
-    experiencePerExtraLevels: 40000,
-    extraLevelReward: 100000,
-  };
-  let seasonUserAt = 0;
-
-  // La config de niveles y la temporada activa ya vienen en el bootstrap de
-  // cualquier pagina de Nitro Type. El marco de la carrera tambien lo tiene,
-  // asi que no hace falta abrir /season para conocer los umbrales.
-  function seasonBoot() {
-    try {
-      if (typeof window.NTBOOTSTRAP !== 'function') return {};
-      const data = window.NTBOOTSTRAP();
-      if (!data || typeof data !== 'object') return {};
-      const list = Array.isArray(data.ACTIVE_SEASONS) ? data.ACTIVE_SEASONS : [];
-      const now = Date.now() / 1000;
-      const active = list.find((item) => item
-        && Number(item.startStamp) <= now && Number(item.endStamp) > now) || list[0] || null;
-      return {
-        active,
-        levels: data.SEASON_LEVELS && typeof data.SEASON_LEVELS === 'object' ? data.SEASON_LEVELS : null,
-      };
-    } catch {
-      return {};
-    }
-  }
-
-  // XP del umbral de un nivel. Con la config real: 1=0, 2=10k, 3=20k, 4=30k,
-  // 5=50k, 6=70k, 7=90k... que es exactamente lo que pinta la pagina.
-  function seasonLevelXp(level, levels = SEASON_LEVELS_DEFAULT) {
-    const start = Math.max(1, Math.floor(Number(levels.startingLevels) || 3));
-    const startCost = Math.max(0, Number(levels.experiencePerStartingLevel) || 10000);
-    const achCost = Math.max(0, Number(levels.experiencePerAchievementLevel) || 20000);
-    const n = Math.max(1, Math.floor(Number(level) || 1));
-    if (n <= start) return (n - 1) * startCost;
-    return start * startCost + (n - start - 1) * achCost;
-  }
-
-  function seasonTierForXp(xp, levels = SEASON_LEVELS_DEFAULT, totalRewards = 35) {
-    const value = Math.max(0, Math.floor(Number(xp) || 0));
-    const max = Math.max(1, Math.floor(Number(totalRewards) || 35));
-    let tier = 1;
-    while (tier < max && value >= seasonLevelXp(tier + 1, levels)) tier += 1;
-
-    const currentXp = seasonLevelXp(tier, levels);
-    const nextXp = tier < max ? seasonLevelXp(tier + 1, levels) : null;
-    const span = nextXp === null ? 0 : nextXp - currentXp;
-    const progress = span > 0
-      ? Math.max(0, Math.min(100, ((value - currentXp) / span) * 100))
-      : 100;
-    return { tier, nextTier: nextXp === null ? null : tier + 1, currentXp, nextXp, progress };
-  }
-
-  function seasonEndText(stamp) {
-    const value = Number(stamp);
-    if (!Number.isFinite(value) || value <= 0) return '';
-    try {
-      return new Date(value * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    } catch {
-      return '';
-    }
-  }
-
-  // El XP de temporada que el juego persiste en `persist:nt`. No es
-  // playerExperience (de por vida): es el `experience` que el servidor usa
-  // para el premio activo. Puede venir como objeto o como JSON anidado en
-  // `user`.
-  // `persist:nt` es el estado entero del sitio (decenas o cientos de KB). Un
-  // JSON.parse cada 5 s se nota en el hilo principal y el panel solo necesita
-  // saber si el XP cambio. Se cachea por el texto crudo, igual que la foto de
-  // temporada: si el juego escribe otra vez, el texto cambia y se relee.
-  let userCacheRaw = null;
-  let userCacheXp = null;
-
-  function parseNtUserXp(raw) {
-    let root;
-    try { root = JSON.parse(raw); } catch { return null; }
-
-    const seen = new Set();
-    const queue = [root];
-    while (queue.length) {
-      const value = queue.shift();
-      if (!value) continue;
-      if (typeof value === 'string') {
-        if (!/^[\[{]/.test(value.trim())) continue;
-        try { queue.push(JSON.parse(value)); } catch { /* no era JSON */ }
-        continue;
-      }
-      if (typeof value !== 'object' || seen.has(value)) continue;
-      seen.add(value);
-
-      if (Number.isFinite(Number(value.experience))
-        && value.experience !== null && value.experience !== '') {
-        return Math.max(0, Math.round(Number(value.experience)));
-      }
-      for (const child of Object.values(value)) {
-        if (child && typeof child === 'object') queue.push(child);
-        else if (typeof child === 'string' && /^[\[{]/.test(child.trim())) queue.push(child);
-      }
-    }
-    return null;
-  }
-
-  function seasonUserXp() {
-    const raw = disk.get(KEYS.ntUser, '');
-    if (raw === userCacheRaw) return userCacheXp;
-    userCacheRaw = raw;
-    perfCounters.userParses += raw ? 1 : 0;
-    userCacheXp = raw ? parseNtUserXp(raw) : null;
-    return userCacheXp;
-  }
-
-  // La tarjeta se repinta cada 500 ms y esto hacia JSON.parse en cada tick. Se
-  // cachea por el texto crudo de localStorage: si la foto cambia (otra pestana,
-  // seasonRefreshFromUser) el texto cambia y se vuelve a leer sola.
-  let seasonCacheRaw = null;
-  let seasonCacheSnap = null;
-
-  function seasonRead() {
-    try {
-      const raw = disk.get(KEYS.season, '');
-      if (raw === seasonCacheRaw) return seasonCacheSnap;
-      seasonCacheRaw = raw;
-      if (!raw) {
-        seasonCacheSnap = null;
-        return null;
-      }
-      const snap = JSON.parse(raw);
-      if (!snap || typeof snap !== 'object' || !Number.isFinite(Number(snap.tier))) {
-        seasonCacheSnap = null;
-        return null;
-      }
-
-      // Las fotos de 7.51.0 guardaban el tier del premio seleccionado (el
-      // siguiente). Se normalizan al nivel actual sin pedir otra visita, y la
-      // migracion se guarda para no repetir el calculo en cada tick.
-      let migrated = false;
-      if (!Number.isFinite(Number(snap.nextTier)) && Number.isFinite(Number(snap.xp))) {
-        const levels = snap.levels && typeof snap.levels === 'object'
-          ? snap.levels : SEASON_LEVELS_DEFAULT;
-        const total = Math.max(1, Math.floor(Number(snap.totalRewards) || 35));
-        const computed = seasonTierForXp(snap.xp, levels, total);
-        snap.tier = computed.tier;
-        snap.nextTier = computed.nextTier;
-        snap.progress = Math.round(computed.progress);
-        snap.currentXp = computed.currentXp;
-        if (computed.nextXp !== null) snap.nextXp = computed.nextXp;
-        migrated = true;
-      }
-      if (migrated) {
-        const text = JSON.stringify(snap);
-        disk.set(KEYS.season, text);
-        seasonCacheRaw = text;
-      }
-      seasonCacheSnap = snap;
-      return snap;
-    } catch {
-      seasonCacheRaw = null;
-      seasonCacheSnap = null;
-      return null;
-    }
-  }
-
-  // Actualiza la tarjeta con el XP que el juego ya guarda tras cada carrera,
-  // sin iframe, sin pestaña y sin esperar a que alguien abra Season.
-  function seasonRefreshFromUser(force = false) {
-    const now = Date.now();
-    if (!force && now - seasonUserAt < 5000) return seasonRead();
-    seasonUserAt = now;
-
-    const xp = seasonUserXp();
-    if (xp === null) return seasonRead();
-
-    const boot = seasonBoot();
-    const active = boot.active;
-    let snap = seasonRead();
-
-    // Una temporada nueva resetea el XP: la foto vieja no puede mandar.
-    if (snap && active && snap.seasonID && Number(snap.seasonID) !== Number(active.seasonID)) snap = null;
-    // Si el almacenamiento va por detras de la foto, no se retrocede el XP.
-    if (!force && snap && Number.isFinite(Number(snap.xp)) && xp < Number(snap.xp)) return snap;
-
-    const levels = boot.levels || (snap && snap.levels) || SEASON_LEVELS_DEFAULT;
-    const totalRewards = Math.max(1, Math.floor(
-      Number(active && active.totalRewards) || Number(snap && snap.totalRewards) || 35,
-    ));
-    const computed = seasonTierForXp(xp, levels, totalRewards);
-    const seasonID = Number(active && active.seasonID) || Number(snap && snap.seasonID) || null;
-    const seasonName = (active && active.name) || (snap && snap.seasonName) || 'Season';
-    const endsAt = Number(active && active.endStamp)
-      ? Number(active.endStamp) * 1000
-      : (snap && snap.endsAt) || null;
-    const endsText = (active && seasonEndText(active.endStamp)) || (snap && snap.endsText) || '';
-
-    const next = {
-      v: 2,
-      at: now,
-      auto: true,
-      source: 'user',
-      seasonID,
-      seasonName,
-      tier: computed.tier,
-      nextTier: computed.nextTier,
-      progress: Math.round(computed.progress),
-      xp,
-      currentXp: computed.currentXp,
-      nextXp: computed.nextXp,
-      levels,
-      totalRewards,
-      endsAt,
-      endsText,
-    };
-
-    if (snap && snap.auto && snap.tier === next.tier && snap.nextTier === next.nextTier
-      && snap.xp === next.xp && snap.seasonName === next.seasonName
-      && snap.endsAt === next.endsAt) {
-      return snap;
-    }
-
-    if (!disk.set(KEYS.season, JSON.stringify(next))) return snap || next;
-    if (panel && panel.refs) panel.seasonSig = '';
-    return next;
-  }
-
-  function seasonXpText(value) {
-    return Number.isFinite(Number(value)) ? Math.max(0, Math.round(Number(value))).toLocaleString() : '—';
-  }
-
-  // "1.2k" / "950": el ritmo y la proyeccion caben en una fila del panel.
-  function seasonXpShort(value) {
-    const n = Math.max(0, Math.round(Number(value) || 0));
-    if (n < 1000) return String(n);
-    const k = n / 1000;
-    return `${k >= 10 ? Math.round(k) : k.toFixed(1).replace(/\.0$/, '')}k`;
-  }
-
-  // XP por dia activo de la ultima semana. El dia en curso no cuenta: a media
-  // tarde su XP esta a medias y hundiria la media. Solo si no hay ningun dia
-  // cerrado se usa el de hoy. Sin XP devuelve null y la fila no inventa nada.
-  function seasonDailyXp(days = 7) {
-    const cutoff = Date.now() - Math.max(1, days) * 86400000;
-    const todayDate = todayKey();
-    const byDate = new Map();
-    for (const day of dayHistoryRead()) {
-      const at = Date.parse(`${day.date}T12:00:00`);
-      if (!Number.isFinite(at) || at < cutoff || !(Number(day.xp) > 0)) continue;
-      if (day.date === todayDate) continue;
-      byDate.set(day.date, Number(day.xp));
-    }
-    if (!byDate.size) {
-      const today = todayRead();
-      // El dia en curso solo vale como dia completo si lleva al menos 4 h: con
-      // 10 minutos de carrera sobreestimaria el ritmo y diria que el premio
-      // esta mas cerca de lo que esta.
-      const first = Number(today.firstAt) || 0;
-      const age = first > 0 ? Date.now() - first : 0;
-      if (Number(today.xp) > 0 && age >= 4 * 3600000) byDate.set(today.date, Number(today.xp));
-    }
-    if (!byDate.size) return null;
-    const total = [...byDate.values()].reduce((sum, value) => sum + value, 0);
-    return { days: byDate.size, xp: total, perDay: Math.round(total / byDate.size) };
-  }
-
-  // Proyeccion al cierre de temporada con el ritmo real. `needed` es el XP
-  // diario minimo para llegar al siguiente premio antes de que acabe.
-  function seasonPace(snap, now = Date.now()) {
-    if (!snap || !Number.isFinite(Number(snap.xp)) || !Number.isFinite(Number(snap.nextXp))) return null;
-    const left = Math.max(0, Number(snap.nextXp) - Number(snap.xp));
-    if (left <= 0) {
-      return { status: 'done', left: 0, daysLeft: null, perDay: null, projected: null, needed: 0, short: 0 };
-    }
-    if (!Number.isFinite(Number(snap.endsAt)) || Number(snap.endsAt) <= 0) {
-      return { status: 'unknown', left, daysLeft: null, perDay: null, projected: null, needed: 0, short: 0 };
-    }
-
-    const daysLeft = Math.max(0, Math.ceil((Number(snap.endsAt) - now) / 86400000));
-    if (daysLeft <= 0) {
-      return { status: 'over', left, daysLeft: 0, perDay: null, projected: 0, needed: 0, short: left };
-    }
-
-    const daily = seasonDailyXp();
-    if (!daily) {
-      return {
-        status: 'unknown', left, daysLeft, perDay: null, projected: null,
-        needed: Math.ceil(left / daysLeft), short: 0,
-      };
-    }
-
-    const projected = Math.round(daily.perDay * daysLeft);
-    return {
-      status: projected >= left ? 'ontrack' : 'short',
-      left,
-      daysLeft,
-      perDay: daily.perDay,
-      projected,
-      needed: Math.ceil(left / daysLeft),
-      short: Math.max(0, left - projected),
-    };
-  }
-
-  // XP medio por carrera de las ultimas diez: la unica base honesta para decir
-  // cuantas carreras faltan. Sin historial cae al resumen de hoy.
-  function seasonXpPerRace() {
-    let list = [];
-    try { list = JSON.parse(disk.get(KEYS.history, '[]')); } catch { list = []; }
-    const xp = (Array.isArray(list) ? list : [])
-      .map((race) => Number(race && race.xp))
-      .filter((value) => Number.isFinite(value) && value > 0);
-    if (xp.length) return Math.max(1, Math.round(xp.reduce((sum, value) => sum + value, 0) / xp.length));
-    const today = todayRead();
-    if (today.races > 0 && today.xp > 0) return Math.max(1, Math.round(today.xp / today.races));
-    return null;
-  }
-
-  // Las mismas frases para la tarjeta y para el garaje: un solo sitio decide
-  // cuando hay prisa (tres dias o menos, menos de 5k XP o ritmo corto).
-  function seasonAlertText(snap) {
-    if (!snap) return [];
-    const alerts = [];
-    const xp = Number(snap.xp);
-    const nextXp = Number(snap.nextXp);
-    const left = Number.isFinite(xp) && Number.isFinite(nextXp) ? Math.max(0, nextXp - xp) : null;
-    let daysLeft = null;
-    if (Number.isFinite(Number(snap.endsAt)) && Number(snap.endsAt) > 0) {
-      daysLeft = Math.ceil((Number(snap.endsAt) - Date.now()) / 86400000);
-    }
-    if (daysLeft !== null && daysLeft >= 0 && daysLeft <= 3) {
-      alerts.push(daysLeft === 0 ? 'Season ends today' : `Season ends in ${daysLeft}d`);
-    }
-    if (left !== null && left > 0 && left < 5000) {
-      alerts.push(`${left.toLocaleString()} XP to next reward`);
-    }
-    const pace = seasonPace(snap);
-    if (pace && pace.status === 'short' && pace.daysLeft >= 1 && pace.needed > 0) {
-      alerts.push(`≈ ${seasonXpShort(pace.needed)} XP/day to reach T${Number(snap.nextTier) || 'next'}`);
-    }
-    return alerts;
-  }
-
-  let seasonPaintAt = 0;
-
-  function paintSeason(force = false) {
-    if (!panel.refs || !panel.refs.seasonName) return;
-    const snap = seasonRead();
-    // La firma barata evita calcular el ritmo y leer el historial en cada tick
-    // del panel. Con datos iguales basta con refrescar cada 15 s (el ritmo
-    // diario no cambia de un tick a otro); si llega XP nuevo, `snap.at` cambia
-    // y la tarjeta se repinta en el acto.
-    const baseSig = snap
-      ? `${snap.at}|${snap.tier}|${snap.nextTier}|${snap.progress}|${snap.xp}|${snap.nextXp}|${snap.endsAt}`
-      : 'empty';
-    const now = Date.now();
-    if (!force && panel.seasonBaseSig === baseSig && now - seasonPaintAt < 15000) return;
-    panel.seasonBaseSig = baseSig;
-    seasonPaintAt = now;
-
-    const pace = seasonPace(snap);
-    const perRace = seasonXpPerRace();
-    const leftToNext = snap && Number.isFinite(Number(snap.xp)) && Number.isFinite(Number(snap.nextXp))
-      ? Math.max(0, Number(snap.nextXp) - Number(snap.xp))
-      : null;
-    const racesLeft = leftToNext !== null && perRace ? Math.ceil(leftToNext / perRace) : null;
-    const sig = snap
-      ? `${snap.at}|${snap.tier}|${snap.nextTier}|${snap.progress}|${snap.xp}|${snap.nextXp}|${snap.endsAt}|${pace ? `${pace.status}:${pace.perDay}` : '-'}|${racesLeft}`
-      : 'empty';
-    if (panel.seasonSig === sig) return;
-    panel.seasonSig = sig;
-
-    if (panel.refs.seasonAlert) {
-      panel.refs.seasonAlert.style.display = 'none';
-      panel.refs.seasonAlert.textContent = '';
-    }
-
-    const empty = !snap;
-    if (panel.refs.seasonCard) panel.refs.seasonCard.classList.toggle('is-empty', empty);
-    if (empty) {
-      setText(panel.refs.seasonTag, 'no snapshot');
-      setText(panel.refs.seasonName, 'Season');
-      setText(panel.refs.seasonTier, '—');
-      setText(panel.refs.seasonXp, '—');
-      setText(panel.refs.seasonNext, '—');
-      setText(panel.refs.seasonRaces, '—');
-      setText(panel.refs.seasonPace, '—');
-      setText(panel.refs.seasonEnds, '—');
-      setText(panel.refs.seasonNote, 'Waiting for your account XP...');
-      if (panel.refs.seasonFill) panel.refs.seasonFill.style.width = '0%';
-      return;
-    }
-
-    const progress = Math.max(0, Math.min(100, Number(snap.progress) || 0));
-    const xp = snap.xp !== null && snap.xp !== undefined && Number.isFinite(Number(snap.xp)) ? Number(snap.xp) : null;
-    const nextXp = snap.nextXp !== null && snap.nextXp !== undefined && Number.isFinite(Number(snap.nextXp)) ? Number(snap.nextXp) : null;
-    const tier = Number(snap.tier);
-
-    setText(panel.refs.seasonTag, `T${tier} · ${Math.round(progress)}%`);
-    setText(panel.refs.seasonName, snap.seasonName || 'Season');
-    setText(panel.refs.seasonTier, `T${tier}`);
-    setText(panel.refs.seasonXp, xp !== null && nextXp !== null
-      ? `${seasonXpText(xp)} / ${seasonXpText(nextXp)} XP`
-      : (xp !== null ? `${seasonXpText(xp)} XP` : '—'));
-
-    const left = xp !== null && nextXp !== null ? Math.max(0, nextXp - xp) : null;
-    setText(panel.refs.seasonNext, left !== null
-      ? `${seasonXpText(left)} XP to go`
-      : (nextXp !== null ? `at ${seasonXpText(nextXp)} XP` : '—'));
-
-    // Cuantas carreras caen a ese ritmo de XP, con la media de las ultimas
-    // diez. Sin historial no se inventa: deja un guion.
-    setText(panel.refs.seasonRaces, racesLeft !== null ? `≈ ${racesLeft} races` : '—');
-    if (panel.refs.seasonRaces) {
-      panel.refs.seasonRaces.title = racesLeft !== null
-        ? `${seasonXpText(left)} XP left at about ${seasonXpText(perRace)} XP per race in the last races.`
-        : 'Run a race to estimate how many races the next reward needs.';
-    }
-
-    // El ritmo real de la semana, proyectado a los dias que quedan: dice si el
-    // siguiente premio esta al alcance y cuanto falta por dia si no lo esta.
-    let paceText = '—';
-    let paceTitle = 'No daily XP yet: run a few races to project the season.';
-    if (pace && pace.status === 'done') {
-      paceText = 'max tier';
-      paceTitle = 'Every reward of this season is already unlocked.';
-    } else if (pace && pace.status === 'over') {
-      paceText = 'season over';
-      paceTitle = 'The season already ended; this card keeps the last snapshot.';
-    } else if (pace && pace.status === 'ontrack') {
-      paceText = `${seasonXpShort(pace.perDay)}/day · on pace`;
-      paceTitle = `${seasonXpShort(pace.perDay)} XP/day over ${pace.daysLeft}d projects ${seasonXpShort(pace.projected)} XP: the next reward is in reach.`;
-    } else if (pace && pace.status === 'short') {
-      paceText = `${seasonXpShort(pace.perDay)}/day · ${seasonXpShort(pace.short)} short`;
-      paceTitle = `${seasonXpShort(pace.left)} XP left in ${pace.daysLeft}d: ${seasonXpShort(pace.perDay)}/day projects ${seasonXpShort(pace.projected)}, ${seasonXpShort(pace.short)} short of the next reward.`;
-    }
-    setText(panel.refs.seasonPace, paceText);
-    if (panel.refs.seasonPace) panel.refs.seasonPace.title = paceTitle;
-
-    let ends = snap.endsText ? `ends ${snap.endsText}` : '—';
-    let daysLeft = null;
-    if (snap.endsAt !== null && snap.endsAt !== undefined && Number.isFinite(Number(snap.endsAt))) {
-      daysLeft = Math.ceil((Number(snap.endsAt) - Date.now()) / 86400000);
-      if (daysLeft <= 0) ends = 'ended';
-      else if (daysLeft <= 30) ends += ` · ${daysLeft}d`;
-    }
-    setText(panel.refs.seasonEnds, ends);
-    setText(panel.refs.seasonNote, snap.auto
-      ? 'auto · account XP'
-      : `snapshot ${elapsedText(snap.at, true)} · open Season to refresh`);
-    if (panel.refs.seasonFill) panel.refs.seasonFill.style.width = `${progress}%`;
-
-    // Solo avisa cuando de verdad hay prisa: tres dias o menos de temporada,
-    // menos de 5.000 XP para el siguiente premio o un ritmo que no alcanza.
-    const alerts = seasonAlertText(snap);
-    if (panel.refs.seasonAlert) {
-      panel.refs.seasonAlert.textContent = alerts.join(' · ');
-      panel.refs.seasonAlert.style.display = alerts.length ? '' : 'none';
-    }
-  }
-
-  function captureSeasonPage() {
-    let saved = false;
-    const take = () => {
-      const snap = parseSeasonPage(document);
-      if (!snap) return false;
-      try {
-        disk.set(KEYS.season, JSON.stringify(snap));
-      } catch {
-        return false;
-      }
-      if (!saved) {
-        saved = true;
-        log(`Season captured: ${snap.seasonName}, T${snap.tier}${snap.nextTier ? ` (next T${snap.nextTier})` : ''}, ${snap.xp === null ? 'XP unknown' : `${snap.xp.toLocaleString()} XP`}.`);
-      }
-      return true;
-    };
-
-    if (take()) return;
-    let tries = 0;
-    const timer = setInterval(() => {
-      tries += 1;
-      if (take() || tries >= 20) clearInterval(timer);
-    }, 500);
-    setTimeout(() => clearInterval(timer), 12000);
-  }
-
   // Lo unico visible con el panel plegado. El resto del panel se queda tal
   // cual y se repinta entero al desplegarlo, no en cada latido.
   function paintPanelActions() {
@@ -13826,6 +12433,182 @@ All of this only aims at believable statistics. It is your call and your risk.
   function panelPaintEveryMs() {
     return session.typing ? 1000 : 2000;
   }
+
+  // Tablas de recompensa de Nitro Type. El puesto paga 480/460/440/420 (400
+  // desde el quinto), la velocidad paga 2 x WPM y la precision va por tramos.
+  const XP_BASE_BY_PLACE = { 1: 480, 2: 460, 3: 440, 4: 420 };
+
+  function xpBaseForPlace(place) {
+    return XP_BASE_BY_PLACE[place] || 400;
+  }
+
+  function xpAccuracyTier(acc) {
+    const rounded = Math.round(Number(acc) || 0);
+    if (rounded >= 100) return 100;
+    if (rounded === 99) return 75;
+    if (rounded === 98) return 50;
+    if (rounded === 97) return 25;
+    if (rounded === 96) return 15;
+    return 0;
+  }
+
+  function xpNextAccuracyTier(acc) {
+    const rounded = Math.round(Number(acc) || 0);
+    if (rounded < 96) return { pct: 96, xp: 15 };
+    if (rounded < 97) return { pct: 97, xp: 25 };
+    if (rounded < 98) return { pct: 98, xp: 50 };
+    if (rounded < 99) return { pct: 99, xp: 75 };
+    if (rounded < 100) return { pct: 100, xp: 100 };
+    return null;
+  }
+
+  // Desglose del premio real. `session` es el resto: bonus de sesion, retos,
+  // cajas o cualquier extra que el paquete de la carrera incluya.
+  // Las tablas base/velocidad/precision son las del parche actual: si el juego
+  // las cambia (evento, temporada o bonus), hay que revisar XP_BASE_BY_PLACE y
+  // xpAccuracyTier antes de fiarse de esta fila.
+  function xpBreakdown(row) {
+    if (!row) return null;
+    const total = Number(row.xp);
+    if (!Number.isFinite(total) || total <= 0) return null;
+
+    const place = Number(row.place);
+    const wpm = Number(row.wpm);
+    const acc = Number(row.acc);
+    const base = xpBaseForPlace(place);
+    const speed = Number.isFinite(wpm) && wpm > 0 ? Math.round(wpm) * 2 : 0;
+    const accuracy = xpAccuracyTier(acc);
+    const rounded = Math.round(total);
+
+    return {
+      total: rounded,
+      base,
+      speed,
+      accuracy,
+      session: Math.max(0, rounded - base - speed - accuracy),
+      place: Number.isFinite(place) && place > 0 ? place : null,
+      acc: Number.isFinite(acc) ? acc : 0,
+    };
+  }
+
+  function renderHistory() {
+    const box = panel.refs && panel.refs.history;
+    if (!box) return;
+
+    if (!raceHistory.length) {
+      // Nodo, no innerHTML: el historial es dato de localStorage y no debe
+      // tener un parser de HTML en el camino.
+      const empty = document.createElement('div');
+      empty.className = 'hist-empty';
+      empty.textContent = 'no races yet';
+      box.replaceChildren(empty);
+
+      // Al vaciar el historial el pie no puede quedarse con la media de antes.
+      if (panel.refs.foot) {
+        panel.refs.foot.style.display = 'none';
+        setText(panel.refs.avg, '—');
+        setText(panel.refs.best, '—');
+      }
+      return;
+    }
+
+    // La mas reciente arriba. La hora y el puesto son lo que se mira al volver:
+    // el indice de antiguedad no decia nada y el XP se perdia en el reporte.
+    const frag = document.createDocumentFragment();
+    for (const item of raceHistory.slice().reverse()) {
+      // Desvio frente al objetivo de esa carrera. Verde si cae dentro de +-2%,
+      // que es donde el autocalibrado deberia mantenerlo.
+      const dev = Number.isFinite(item.target) && item.target > 0
+        ? ((item.wpm - item.target) / item.target) * 100
+        : null;
+
+      const row = document.createElement('div');
+      row.className = 'hist-row';
+
+      const time = document.createElement('span');
+      time.textContent = clockText(item.at) || '—';
+      row.appendChild(time);
+
+      const place = Number(item.place);
+      const placeEl = document.createElement('b');
+      placeEl.className = 'place';
+      placeEl.textContent = Number.isFinite(place) && place > 0 ? '#' + place : '—';
+      if (Number.isFinite(place) && place >= 1 && place <= 3) {
+        placeEl.dataset.medal = String(place);
+      }
+      row.appendChild(placeEl);
+
+      const xp = Number(item.xp);
+      const xpEl = document.createElement('b');
+      xpEl.className = 'xp';
+      xpEl.textContent = Number.isFinite(xp) && xp > 0 ? '+' + Math.round(xp) : '—';
+      row.appendChild(xpEl);
+
+      // WPM oficial del paquete de meta (reloj del servidor). Se pinta junto
+      // al del modelo solo cuando el update lo trajo: si no, la fila queda
+      // como siempre en vez de mostrar un cero o una raya.
+      const wpm = document.createElement('b');
+      wpm.className = 'wpm';
+      const nitroChars = Number(item.nitroChars);
+      const nitroWords = Number(item.nitroWords);
+      if (nitroChars > 0) {
+        const tag = document.createElement('i');
+        tag.className = 'nitro-tag';
+        tag.setAttribute('aria-label', 'nitro');
+        tag.textContent = 'N';
+        wpm.appendChild(tag);
+      }
+      wpm.appendChild(document.createTextNode(item.wpm.toFixed(1)));
+      const model = Number(item.modelWpm);
+      if (Number.isFinite(model) && model > 0) {
+        const modelEl = document.createElement('span');
+        modelEl.className = 'model';
+        modelEl.textContent = 'model ' + model.toFixed(1);
+        wpm.appendChild(modelEl);
+      }
+      row.appendChild(wpm);
+
+      const devEl = document.createElement('b');
+      devEl.className = 'dev';
+      if (dev !== null) {
+        devEl.dataset.good = Math.abs(dev) <= 2 ? '1' : '0';
+        devEl.textContent = (dev >= 0 ? '+' : '-') + Math.abs(dev).toFixed(1) + '%';
+      }
+      row.appendChild(devEl);
+
+      const cash = Number(item.cash);
+      const server = Number(item.serverWpm);
+      const title = [
+        clockText(item.at) || '—',
+        Number.isFinite(place) && place > 0 ? '#' + place : null,
+        Number.isFinite(xp) && xp > 0 ? '+' + Math.round(xp) + ' xp' : null,
+        Number.isFinite(cash) && cash > 0 ? '+$' + Math.round(cash).toLocaleString('en-US') : null,
+        Number(item.acc).toFixed(1) + '% acc',
+        'model ' + (Number.isFinite(model) && model > 0 ? model : item.wpm).toFixed(1) + ' wpm',
+        Number.isFinite(server) && server > 0 ? 'server ' + server.toFixed(1) + ' wpm (packet clock)' : null,
+        nitroChars > 0 ? 'nitro ' + (nitroWords || 1) + ' word · ' + nitroChars + ' ch' : null,
+        Number.isFinite(item.target) ? 'target ' + item.target + ' wpm' : null,
+      ].filter(Boolean).join(' · ');
+      row.title = title;
+      frag.appendChild(row);
+    }
+    box.replaceChildren(frag);
+
+    // Media y mejor de las que se estan viendo: dice de un vistazo si va en
+    // tendencia o si la ultima fue un pico suelto.
+    const stats = historyStats(raceHistory);
+    if (panel.refs.foot) {
+      panel.refs.foot.style.display = stats ? 'flex' : 'none';
+      if (stats) {
+        setText(panel.refs.avg, `${stats.avgWpm.toFixed(1)} · ${stats.avgAcc.toFixed(1)}%`);
+        setText(panel.refs.best, stats.bestWpm.toFixed(1));
+      }
+    }
+  }
+
+  /* ==========================================================================
+   * 12.1 LIVE READOUT
+   * ========================================================================== */
 
   // -------------------------------------------------------------------------
   // Lectura viva: lo que se mira durante la carrera, a 4 Hz.
@@ -14616,23 +13399,32 @@ All of this only aims at believable statistics. It is your call and your risk.
     const terminalStop = Boolean(activeStop && !activeStop.clearedAt && activeStop.terminal);
     const stoppedNow = terminalStop || Boolean(activeStop && !activeStop.clearedAt && stopLeft > 0);
     const stopKind = stoppedNow ? stopReasonKind(activeStop.reason) : null;
-    const stateText = off ? 'waiting' : breaking ? 'break' : session.paused ? 'paused' : (session.typing ? 'racing' : 'idle');
+    const stateText = safeMode
+      ? 'safe mode'
+      : off ? 'waiting' : breaking ? 'break' : session.paused ? 'paused' : (session.typing ? 'racing' : 'idle');
     setText(panel.refs.footState, stateText);
+    if (safeMode) {
+      setText(panel.refs.status, `safe mode · ${safeModeReason || 'automation stopped'}`);
+    }
     setText(panel.refs.footMode, MODE);
     setText(panel.refs.footCap, Number.isFinite(CONFIG.wpm.hardCap) ? `cap ${CONFIG.wpm.hardCap}` : 'no cap');
     // El reloj tiene su propio hueco: en compacto se quedan WPM, precision y
     // reloj, y el modo, el techo y la pista desaparecen. Alt+M lo recorre.
     paintLiveClock(measured, wpm, acc);
-    setText(panel.refs.footHint, off
-      ? (terminalStop ? 'ban · until cleared'
-        : stoppedNow ? `${stopKind.label} · ${stopWaitText(stopLeft)} left` : 'Alt+A resume')
-      : session.paused ? 'resume' : 'Alt+S stop');
+    setText(panel.refs.footHint, safeMode
+      ? 'internal error · report'
+      : off
+        ? (terminalStop ? 'ban · until cleared'
+          : stoppedNow ? `${stopKind.label} · ${stopWaitText(stopLeft)} left` : 'Alt+A resume')
+        : session.paused ? 'resume' : 'Alt+S stop');
     // `off` ya ES session.stopped, asi que la rama que volvia a mirarlo nunca
     // se alcanzaba: el descanso se pintaba como "waiting" y no como "break".
-    setText(panel.refs.liveTag, off
-      ? (terminalStop ? 'stopped · ban'
-        : stoppedNow ? `stopped · ${stopKind.label}` : 'stopped · Alt+A resume')
-      : session.typing ? 'racing' : breaking ? 'break' : 'waiting');
+    setText(panel.refs.liveTag, safeMode
+      ? 'safe mode'
+      : off
+        ? (terminalStop ? 'stopped · ban'
+          : stoppedNow ? `stopped · ${stopKind.label}` : 'stopped · Alt+A resume')
+        : session.typing ? 'racing' : breaking ? 'break' : 'waiting');
 
     // El registro ocupa una vista entera y solo se ve al abrir LOG. Mientras
     // tanto basta con leer los retos para contarlos; las listas se pintan al
@@ -14653,152 +13445,3437 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
   }
 
-  // Tablas de recompensa de Nitro Type. El puesto paga 480/460/440/420 (400
-  // desde el quinto), la velocidad paga 2 x WPM y la precision va por tramos.
-  const XP_BASE_BY_PLACE = { 1: 480, 2: 460, 3: 440, 4: 420 };
+  /* ==========================================================================
+   * 12.2 SEASON TRACKER
+   * ========================================================================== */
 
-  function xpBaseForPlace(place) {
-    return XP_BASE_BY_PLACE[place] || 400;
+  /* --------------------------------------------------------------------------
+   * Season tracker
+   *
+   * La pagina /season renderiza el tier activo en React. El estado no viaja en
+   * el HTML (es un shell), asi que la foto se toma ALLI, donde el DOM ya esta
+   * hidratado, y se guarda para que el panel de la carrera la lea despues. El
+   * XP exacto sale de las props del componente; si React cambia de forma, el
+   * parser se queda con el tier y el porcentaje visibles en vez de inventar.
+   * ------------------------------------------------------------------------ */
+  function seasonClean(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
-  function xpAccuracyTier(acc) {
-    const rounded = Math.round(Number(acc) || 0);
-    if (rounded >= 100) return 100;
-    if (rounded === 99) return 75;
-    if (rounded === 98) return 50;
-    if (rounded === 97) return 25;
-    if (rounded === 96) return 15;
-    return 0;
-  }
-
-  function xpNextAccuracyTier(acc) {
-    const rounded = Math.round(Number(acc) || 0);
-    if (rounded < 96) return { pct: 96, xp: 15 };
-    if (rounded < 97) return { pct: 97, xp: 25 };
-    if (rounded < 98) return { pct: 98, xp: 50 };
-    if (rounded < 99) return { pct: 99, xp: 75 };
-    if (rounded < 100) return { pct: 100, xp: 100 };
+  function seasonFiberProps(node) {
+    if (!node) return null;
+    let fiber = null;
+    try {
+      const key = Object.keys(node).find((name) => name.startsWith('__reactFiber$'));
+      fiber = key ? node[key] : null;
+    } catch {
+      return null;
+    }
+    for (let depth = 0; depth < 30 && fiber; depth++) {
+      const props = fiber.memoizedProps;
+      if (props && typeof props === 'object'
+        && props.userSeasonExperience !== null && props.userSeasonExperience !== undefined
+        && Number.isFinite(Number(props.userSeasonExperience))) {
+        return props;
+      }
+      fiber = fiber.return;
+    }
     return null;
   }
 
-  // Desglose del premio real. `session` es el resto: bonus de sesion, retos,
-  // cajas o cualquier extra que el paquete de la carrera incluya.
-  // Las tablas base/velocidad/precision son las del parche actual: si el juego
-  // las cambia (evento, temporada o bonus), hay que revisar XP_BASE_BY_PLACE y
-  // xpAccuracyTier antes de fiarse de esta fila.
-  function xpBreakdown(row) {
-    if (!row) return null;
-    const total = Number(row.xp);
-    if (!Number.isFinite(total) || total <= 0) return null;
-
-    const place = Number(row.place);
-    const wpm = Number(row.wpm);
-    const acc = Number(row.acc);
-    const base = xpBaseForPlace(place);
-    const speed = Number.isFinite(wpm) && wpm > 0 ? Math.round(wpm) * 2 : 0;
-    const accuracy = xpAccuracyTier(acc);
-    const rounded = Math.round(total);
-
+  function seasonDateRange(text, now = Date.now()) {
+    const match = String(text || '').match(/([A-Z][a-z]{2})\s+(\d{1,2})\s*[-–]\s*([A-Z][a-z]{2})\s+(\d{1,2})/);
+    if (!match) return { endsAt: null, endsText: '' };
+    const year = new Date(now).getFullYear();
+    const start = Date.parse(`${match[1]} ${match[2]}, ${year} 00:00:00`);
+    let endsAt = Date.parse(`${match[3]} ${match[4]}, ${year} 23:59:59`);
+    if (!Number.isFinite(start) || !Number.isFinite(endsAt)) return { endsAt: null, endsText: '' };
+    if (endsAt < start) endsAt = Date.parse(`${match[3]} ${match[4]}, ${year + 1} 23:59:59`);
     return {
-      total: rounded,
-      base,
-      speed,
-      accuracy,
-      session: Math.max(0, rounded - base - speed - accuracy),
-      place: Number.isFinite(place) && place > 0 ? place : null,
-      acc: Number.isFinite(acc) ? acc : 0,
+      endsAt: Number.isFinite(endsAt) ? endsAt : null,
+      endsText: `${match[3]} ${match[4]}`,
     };
   }
 
-  function renderHistory() {
-    const box = panel.refs && panel.refs.history;
-    if (!box) return;
+  function parseSeasonPage(root = document) {
+    const scope = root && typeof root.querySelector === 'function' ? root : document;
+    const card = scope.querySelector('.seasonReward.is-selected, .seasonReward--free.is-selected');
+    if (!card) return null;
 
-    if (!raceHistory.length) {
-      box.innerHTML = '<div class="hist-empty">no races yet</div>';
+    const tier = Number(seasonClean((card.querySelector('.seasonReward-tier') || {}).textContent));
+    if (!Number.isFinite(tier) || tier <= 0) return null;
 
-      // Al vaciar el historial el pie no puede quedarse con la media de antes.
-      if (panel.refs.foot) {
-        panel.refs.foot.style.display = 'none';
-        setText(panel.refs.avg, '—');
-        setText(panel.refs.best, '—');
-      }
-      return;
-    }
+    const fill = card.querySelector('.prog-barFill') || card.querySelector('.prog-points');
+    const rawProgress = fill ? (fill.style.width || fill.style.left || '') : '';
+    const progress = Number.parseFloat(rawProgress);
+    const props = seasonFiberProps(card.querySelector('.prog-points') || card) || {};
 
-    // La mas reciente arriba. La hora y el puesto son lo que se mira al volver:
-    // el indice de antiguedad no decia nada y el XP se perdia en el reporte.
-    box.innerHTML = raceHistory
-      .slice()
-      .reverse()
-      .map((item) => {
-        // Desvio frente al objetivo de esa carrera. Verde si cae dentro de +-2%,
-        // que es donde el autocalibrado deberia mantenerlo.
-        const dev = Number.isFinite(item.target) && item.target > 0
-          ? ((item.wpm - item.target) / item.target) * 100
-          : null;
-        const cell = dev === null
-          ? '<b class="dev"></b>'
-          : '<b class="dev" data-good="' + (Math.abs(dev) <= 2 ? '1' : '0') + '">'
-            + (dev >= 0 ? '+' : '-') + Math.abs(dev).toFixed(1) + '%</b>';
+    const rawXp = props.userSeasonExperience;
+    const xp = rawXp !== null && rawXp !== undefined && Number.isFinite(Number(rawXp))
+      ? Math.max(0, Math.round(Number(rawXp)))
+      : null;
+    const rawNext = props.experience;
+    const nextXp = rawNext !== null && rawNext !== undefined && Number.isFinite(Number(rawNext))
+      ? Math.max(0, Math.round(Number(rawNext)))
+      : null;
+    const season = props.season && typeof props.season === 'object' ? props.season : {};
+    const seasonID = season.seasonID !== null && season.seasonID !== undefined && Number.isFinite(Number(season.seasonID))
+      ? Number(season.seasonID)
+      : null;
 
-        const place = Number(item.place);
-        const placeText = Number.isFinite(place) && place > 0 ? '#' + place : '—';
-        const placeAttr = Number.isFinite(place) && place >= 1 && place <= 3
-          ? ' data-medal="' + place + '"'
-          : '';
-        const xp = Number(item.xp);
-        const xpText = Number.isFinite(xp) && xp > 0 ? '+' + Math.round(xp) : '—';
-        const cash = Number(item.cash);
-        // WPM oficial del paquete de meta (reloj del servidor). Se pinta junto
-        // al del modelo solo cuando el update lo trajo: si no, la fila queda
-        // como siempre en vez de mostrar un cero o una raya.
-        // `wpm` ya es el oficial cuando el paquete lo trajo; el del modelo se
-        // queda como etiqueta pequena al lado. Las carreras sin paquete no
-        // muestran etiqueta y conservan su unico numero.
-        const model = Number(item.modelWpm);
-        const modelText = Number.isFinite(model) && model > 0 ? 'model ' + model.toFixed(1) : '';
-        const server = Number(item.serverWpm);
-        const nitroChars = Number(item.nitroChars);
-        const nitroWords = Number(item.nitroWords);
-        const nitroTag = nitroChars > 0
-          ? '<i class="nitro-tag" aria-label="nitro">N</i>'
-          : '';
-        const title = [
-          clockText(item.at) || '—',
-          Number.isFinite(place) && place > 0 ? '#' + place : null,
-          Number.isFinite(xp) && xp > 0 ? '+' + Math.round(xp) + ' xp' : null,
-          Number.isFinite(cash) && cash > 0 ? '+$' + Math.round(cash).toLocaleString('en-US') : null,
-          item.acc.toFixed(1) + '% acc',
-          'model ' + (Number.isFinite(model) && model > 0 ? model : item.wpm).toFixed(1) + ' wpm',
-          Number.isFinite(server) && server > 0 ? 'server ' + server.toFixed(1) + ' wpm (packet clock)' : null,
-          nitroChars > 0 ? 'nitro ' + (nitroWords || 1) + ' word · ' + nitroChars + ' ch' : null,
-          Number.isFinite(item.target) ? 'target ' + item.target + ' wpm' : null,
-        ].filter(Boolean).join(' · ');
+    const nameNode = scope.querySelector('.season-header h1, .season-head h1, h1');
+    const seasonName = seasonClean(nameNode && nameNode.textContent)
+      || seasonClean((scope.querySelector('.seasonTeaser') || {}).textContent)
+      || 'Season';
+    const teaser = scope.querySelector('.seasonTeaser');
+    const dates = seasonDateRange(teaser && teaser.textContent);
 
-        return '<div class="hist-row" title="' + title.replace(/"/g, '&quot;') + '">'
-          + '<span>' + (clockText(item.at) || '—') + '</span>'
-          + '<b class="place"' + placeAttr + '>' + placeText + '</b>'
-          + '<b class="xp">' + xpText + '</b>'
-          + '<b class="wpm">' + nitroTag + item.wpm.toFixed(1)
-          + (modelText ? '<span class="model">' + modelText + '</span>' : '')
-          + '</b>'
-          + cell + '</div>';
-      })
-      .join('');
+    const boot = seasonBoot();
+    const levels = boot.levels || SEASON_LEVELS_DEFAULT;
+    const totalRewards = Math.max(1, Math.floor(Number(boot.active && boot.active.totalRewards) || 35));
+    const computed = xp !== null ? seasonTierForXp(xp, levels, totalRewards) : null;
+    return {
+      v: 2,
+      at: Date.now(),
+      auto: false,
+      source: 'page',
+      seasonID,
+      seasonName,
+      // El premio seleccionado es el SIGUIENTE, no el tier actual: con 76.701
+      // XP la pagina marca T7 a 90.000 y el nivel actual es T6 (70.000).
+      tier: computed ? computed.tier : Math.max(1, tier - 1),
+      nextTier: computed ? computed.nextTier : tier,
+      progress: computed
+        ? Math.round(computed.progress)
+        : (Number.isFinite(progress)
+          ? Math.max(0, Math.min(100, progress))
+          : Math.max(0, Math.min(100, Number(props.progress) || 0))),
+      xp,
+      currentXp: computed ? computed.currentXp : null,
+      nextXp: computed ? computed.nextXp : nextXp,
+      levels,
+      totalRewards,
+      endsAt: dates.endsAt,
+      endsText: dates.endsText,
+    };
+  }
 
-    // Media y mejor de las que se estan viendo: dice de un vistazo si va en
-    // tendencia o si la ultima fue un pico suelto.
-    const stats = historyStats(raceHistory);
-    if (panel.refs.foot) {
-      panel.refs.foot.style.display = stats ? 'flex' : 'none';
-      if (stats) {
-        setText(panel.refs.avg, `${stats.avgWpm.toFixed(1)} · ${stats.avgAcc.toFixed(1)}%`);
-        setText(panel.refs.best, stats.bestWpm.toFixed(1));
-      }
+  const SEASON_LEVELS_DEFAULT = {
+    startingLevels: 3,
+    experiencePerStartingLevel: 10000,
+    experiencePerAchievementLevel: 20000,
+    experiencePerExtraLevels: 40000,
+    extraLevelReward: 100000,
+  };
+  let seasonUserAt = 0;
+
+  // La config de niveles y la temporada activa ya vienen en el bootstrap de
+  // cualquier pagina de Nitro Type. El marco de la carrera tambien lo tiene,
+  // asi que no hace falta abrir /season para conocer los umbrales.
+  function seasonBoot() {
+    try {
+      if (typeof window.NTBOOTSTRAP !== 'function') return {};
+      const data = window.NTBOOTSTRAP();
+      if (!data || typeof data !== 'object') return {};
+      const list = Array.isArray(data.ACTIVE_SEASONS) ? data.ACTIVE_SEASONS : [];
+      const now = Date.now() / 1000;
+      const active = list.find((item) => item
+        && Number(item.startStamp) <= now && Number(item.endStamp) > now) || list[0] || null;
+      return {
+        active,
+        levels: data.SEASON_LEVELS && typeof data.SEASON_LEVELS === 'object' ? data.SEASON_LEVELS : null,
+      };
+    } catch {
+      return {};
     }
   }
 
+  // XP del umbral de un nivel. Con la config real: 1=0, 2=10k, 3=20k, 4=30k,
+  // 5=50k, 6=70k, 7=90k... que es exactamente lo que pinta la pagina.
+  function seasonLevelXp(level, levels = SEASON_LEVELS_DEFAULT) {
+    const start = Math.max(1, Math.floor(Number(levels.startingLevels) || 3));
+    const startCost = Math.max(0, Number(levels.experiencePerStartingLevel) || 10000);
+    const achCost = Math.max(0, Number(levels.experiencePerAchievementLevel) || 20000);
+    const n = Math.max(1, Math.floor(Number(level) || 1));
+    if (n <= start) return (n - 1) * startCost;
+    return start * startCost + (n - start - 1) * achCost;
+  }
+
+  function seasonTierForXp(xp, levels = SEASON_LEVELS_DEFAULT, totalRewards = 35) {
+    const value = Math.max(0, Math.floor(Number(xp) || 0));
+    const max = Math.max(1, Math.floor(Number(totalRewards) || 35));
+    let tier = 1;
+    while (tier < max && value >= seasonLevelXp(tier + 1, levels)) tier += 1;
+
+    const currentXp = seasonLevelXp(tier, levels);
+    const nextXp = tier < max ? seasonLevelXp(tier + 1, levels) : null;
+    const span = nextXp === null ? 0 : nextXp - currentXp;
+    const progress = span > 0
+      ? Math.max(0, Math.min(100, ((value - currentXp) / span) * 100))
+      : 100;
+    return { tier, nextTier: nextXp === null ? null : tier + 1, currentXp, nextXp, progress };
+  }
+
+  function seasonEndText(stamp) {
+    const value = Number(stamp);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    try {
+      return new Date(value * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch {
+      return '';
+    }
+  }
+
+  // El XP de temporada que el juego persiste en `persist:nt`. No es
+  // playerExperience (de por vida): es el `experience` que el servidor usa
+  // para el premio activo. Puede venir como objeto o como JSON anidado en
+  // `user`.
+  // `persist:nt` es el estado entero del sitio (decenas o cientos de KB). Un
+  // JSON.parse cada 5 s se nota en el hilo principal y el panel solo necesita
+  // saber si el XP cambio. Se cachea por el texto crudo, igual que la foto de
+  // temporada: si el juego escribe otra vez, el texto cambia y se relee.
+  let userCacheRaw = null;
+  let userCacheXp = null;
+
+  function parseNtUserXp(raw) {
+    let root;
+    try { root = JSON.parse(raw); } catch { return null; }
+
+    const seen = new Set();
+    const queue = [root];
+    while (queue.length) {
+      const value = queue.shift();
+      if (!value) continue;
+      if (typeof value === 'string') {
+        if (!/^[\[{]/.test(value.trim())) continue;
+        try { queue.push(JSON.parse(value)); } catch { /* no era JSON */ }
+        continue;
+      }
+      if (typeof value !== 'object' || seen.has(value)) continue;
+      seen.add(value);
+
+      if (Number.isFinite(Number(value.experience))
+        && value.experience !== null && value.experience !== '') {
+        return Math.max(0, Math.round(Number(value.experience)));
+      }
+      for (const child of Object.values(value)) {
+        if (child && typeof child === 'object') queue.push(child);
+        else if (typeof child === 'string' && /^[\[{]/.test(child.trim())) queue.push(child);
+      }
+    }
+    return null;
+  }
+
+  function seasonUserXp() {
+    const raw = disk.get(KEYS.ntUser, '');
+    if (raw === userCacheRaw) return userCacheXp;
+    userCacheRaw = raw;
+    perfCounters.userParses += raw ? 1 : 0;
+    userCacheXp = raw ? parseNtUserXp(raw) : null;
+    return userCacheXp;
+  }
+
+  // La tarjeta se repinta cada 500 ms y esto hacia JSON.parse en cada tick. Se
+  // cachea por el texto crudo de localStorage: si la foto cambia (otra pestana,
+  // seasonRefreshFromUser) el texto cambia y se vuelve a leer sola.
+  let seasonCacheRaw = null;
+  let seasonCacheSnap = null;
+
+  function seasonRead() {
+    try {
+      const raw = disk.get(KEYS.season, '');
+      if (raw === seasonCacheRaw) return seasonCacheSnap;
+      seasonCacheRaw = raw;
+      if (!raw) {
+        seasonCacheSnap = null;
+        return null;
+      }
+      const snap = JSON.parse(raw);
+      if (!snap || typeof snap !== 'object' || !Number.isFinite(Number(snap.tier))) {
+        seasonCacheSnap = null;
+        return null;
+      }
+
+      // Las fotos de 7.51.0 guardaban el tier del premio seleccionado (el
+      // siguiente). Se normalizan al nivel actual sin pedir otra visita, y la
+      // migracion se guarda para no repetir el calculo en cada tick.
+      let migrated = false;
+      if (!Number.isFinite(Number(snap.nextTier)) && Number.isFinite(Number(snap.xp))) {
+        const levels = snap.levels && typeof snap.levels === 'object'
+          ? snap.levels : SEASON_LEVELS_DEFAULT;
+        const total = Math.max(1, Math.floor(Number(snap.totalRewards) || 35));
+        const computed = seasonTierForXp(snap.xp, levels, total);
+        snap.tier = computed.tier;
+        snap.nextTier = computed.nextTier;
+        snap.progress = Math.round(computed.progress);
+        snap.currentXp = computed.currentXp;
+        if (computed.nextXp !== null) snap.nextXp = computed.nextXp;
+        migrated = true;
+      }
+      if (migrated) {
+        const text = JSON.stringify(snap);
+        disk.set(KEYS.season, text);
+        seasonCacheRaw = text;
+      }
+      seasonCacheSnap = snap;
+      return snap;
+    } catch {
+      seasonCacheRaw = null;
+      seasonCacheSnap = null;
+      return null;
+    }
+  }
+
+  // Actualiza la tarjeta con el XP que el juego ya guarda tras cada carrera,
+  // sin iframe, sin pestaña y sin esperar a que alguien abra Season.
+  function seasonRefreshFromUser(force = false) {
+    const now = Date.now();
+    if (!force && now - seasonUserAt < 5000) return seasonRead();
+    seasonUserAt = now;
+
+    const xp = seasonUserXp();
+    if (xp === null) return seasonRead();
+
+    const boot = seasonBoot();
+    const active = boot.active;
+    let snap = seasonRead();
+
+    // Una temporada nueva resetea el XP: la foto vieja no puede mandar.
+    if (snap && active && snap.seasonID && Number(snap.seasonID) !== Number(active.seasonID)) snap = null;
+    // Si el almacenamiento va por detras de la foto, no se retrocede el XP.
+    if (!force && snap && Number.isFinite(Number(snap.xp)) && xp < Number(snap.xp)) return snap;
+
+    const levels = boot.levels || (snap && snap.levels) || SEASON_LEVELS_DEFAULT;
+    const totalRewards = Math.max(1, Math.floor(
+      Number(active && active.totalRewards) || Number(snap && snap.totalRewards) || 35,
+    ));
+    const computed = seasonTierForXp(xp, levels, totalRewards);
+    const seasonID = Number(active && active.seasonID) || Number(snap && snap.seasonID) || null;
+    const seasonName = (active && active.name) || (snap && snap.seasonName) || 'Season';
+    const endsAt = Number(active && active.endStamp)
+      ? Number(active.endStamp) * 1000
+      : (snap && snap.endsAt) || null;
+    const endsText = (active && seasonEndText(active.endStamp)) || (snap && snap.endsText) || '';
+
+    const next = {
+      v: 2,
+      at: now,
+      auto: true,
+      source: 'user',
+      seasonID,
+      seasonName,
+      tier: computed.tier,
+      nextTier: computed.nextTier,
+      progress: Math.round(computed.progress),
+      xp,
+      currentXp: computed.currentXp,
+      nextXp: computed.nextXp,
+      levels,
+      totalRewards,
+      endsAt,
+      endsText,
+    };
+
+    if (snap && snap.auto && snap.tier === next.tier && snap.nextTier === next.nextTier
+      && snap.xp === next.xp && snap.seasonName === next.seasonName
+      && snap.endsAt === next.endsAt) {
+      return snap;
+    }
+
+    if (!disk.set(KEYS.season, JSON.stringify(next))) return snap || next;
+    if (panel && panel.refs) panel.seasonSig = '';
+    return next;
+  }
+
+  function seasonXpText(value) {
+    return Number.isFinite(Number(value)) ? Math.max(0, Math.round(Number(value))).toLocaleString() : '—';
+  }
+
+  // "1.2k" / "950": el ritmo y la proyeccion caben en una fila del panel.
+  function seasonXpShort(value) {
+    const n = Math.max(0, Math.round(Number(value) || 0));
+    if (n < 1000) return String(n);
+    const k = n / 1000;
+    return `${k >= 10 ? Math.round(k) : k.toFixed(1).replace(/\.0$/, '')}k`;
+  }
+
+  // XP por dia activo de la ultima semana. El dia en curso no cuenta: a media
+  // tarde su XP esta a medias y hundiria la media. Solo si no hay ningun dia
+  // cerrado se usa el de hoy. Sin XP devuelve null y la fila no inventa nada.
+  function seasonDailyXp(days = 7) {
+    const cutoff = Date.now() - Math.max(1, days) * 86400000;
+    const todayDate = todayKey();
+    const byDate = new Map();
+    for (const day of dayHistoryRead()) {
+      const at = Date.parse(`${day.date}T12:00:00`);
+      if (!Number.isFinite(at) || at < cutoff || !(Number(day.xp) > 0)) continue;
+      if (day.date === todayDate) continue;
+      byDate.set(day.date, Number(day.xp));
+    }
+    if (!byDate.size) {
+      const today = todayRead();
+      // El dia en curso solo vale como dia completo si lleva al menos 4 h: con
+      // 10 minutos de carrera sobreestimaria el ritmo y diria que el premio
+      // esta mas cerca de lo que esta.
+      const first = Number(today.firstAt) || 0;
+      const age = first > 0 ? Date.now() - first : 0;
+      if (Number(today.xp) > 0 && age >= 4 * 3600000) byDate.set(today.date, Number(today.xp));
+    }
+    if (!byDate.size) return null;
+    const total = [...byDate.values()].reduce((sum, value) => sum + value, 0);
+    return { days: byDate.size, xp: total, perDay: Math.round(total / byDate.size) };
+  }
+
+  // Proyeccion al cierre de temporada con el ritmo real. `needed` es el XP
+  // diario minimo para llegar al siguiente premio antes de que acabe.
+  function seasonPace(snap, now = Date.now()) {
+    if (!snap || !Number.isFinite(Number(snap.xp)) || !Number.isFinite(Number(snap.nextXp))) return null;
+    const left = Math.max(0, Number(snap.nextXp) - Number(snap.xp));
+    if (left <= 0) {
+      return { status: 'done', left: 0, daysLeft: null, perDay: null, projected: null, needed: 0, short: 0 };
+    }
+    if (!Number.isFinite(Number(snap.endsAt)) || Number(snap.endsAt) <= 0) {
+      return { status: 'unknown', left, daysLeft: null, perDay: null, projected: null, needed: 0, short: 0 };
+    }
+
+    const daysLeft = Math.max(0, Math.ceil((Number(snap.endsAt) - now) / 86400000));
+    if (daysLeft <= 0) {
+      return { status: 'over', left, daysLeft: 0, perDay: null, projected: 0, needed: 0, short: left };
+    }
+
+    const daily = seasonDailyXp();
+    if (!daily) {
+      return {
+        status: 'unknown', left, daysLeft, perDay: null, projected: null,
+        needed: Math.ceil(left / daysLeft), short: 0,
+      };
+    }
+
+    const projected = Math.round(daily.perDay * daysLeft);
+    return {
+      status: projected >= left ? 'ontrack' : 'short',
+      left,
+      daysLeft,
+      perDay: daily.perDay,
+      projected,
+      needed: Math.ceil(left / daysLeft),
+      short: Math.max(0, left - projected),
+    };
+  }
+
+  // XP medio por carrera de las ultimas diez: la unica base honesta para decir
+  // cuantas carreras faltan. Sin historial cae al resumen de hoy.
+  function seasonXpPerRace() {
+    let list = [];
+    try { list = JSON.parse(disk.get(KEYS.history, '[]')); } catch { list = []; }
+    const xp = (Array.isArray(list) ? list : [])
+      .map((race) => Number(race && race.xp))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    if (xp.length) return Math.max(1, Math.round(xp.reduce((sum, value) => sum + value, 0) / xp.length));
+    const today = todayRead();
+    if (today.races > 0 && today.xp > 0) return Math.max(1, Math.round(today.xp / today.races));
+    return null;
+  }
+
+  // Las mismas frases para la tarjeta y para el garaje: un solo sitio decide
+  // cuando hay prisa (tres dias o menos, menos de 5k XP o ritmo corto).
+  function seasonAlertText(snap) {
+    if (!snap) return [];
+    const alerts = [];
+    const xp = Number(snap.xp);
+    const nextXp = Number(snap.nextXp);
+    const left = Number.isFinite(xp) && Number.isFinite(nextXp) ? Math.max(0, nextXp - xp) : null;
+    let daysLeft = null;
+    if (Number.isFinite(Number(snap.endsAt)) && Number(snap.endsAt) > 0) {
+      daysLeft = Math.ceil((Number(snap.endsAt) - Date.now()) / 86400000);
+    }
+    if (daysLeft !== null && daysLeft >= 0 && daysLeft <= 3) {
+      alerts.push(daysLeft === 0 ? 'Season ends today' : `Season ends in ${daysLeft}d`);
+    }
+    if (left !== null && left > 0 && left < 5000) {
+      alerts.push(`${left.toLocaleString()} XP to next reward`);
+    }
+    const pace = seasonPace(snap);
+    if (pace && pace.status === 'short' && pace.daysLeft >= 1 && pace.needed > 0) {
+      alerts.push(`≈ ${seasonXpShort(pace.needed)} XP/day to reach T${Number(snap.nextTier) || 'next'}`);
+    }
+    return alerts;
+  }
+
+  let seasonPaintAt = 0;
+
+  function paintSeason(force = false) {
+    if (!panel.refs || !panel.refs.seasonName) return;
+    const snap = seasonRead();
+    // La firma barata evita calcular el ritmo y leer el historial en cada tick
+    // del panel. Con datos iguales basta con refrescar cada 15 s (el ritmo
+    // diario no cambia de un tick a otro); si llega XP nuevo, `snap.at` cambia
+    // y la tarjeta se repinta en el acto.
+    const baseSig = snap
+      ? `${snap.at}|${snap.tier}|${snap.nextTier}|${snap.progress}|${snap.xp}|${snap.nextXp}|${snap.endsAt}`
+      : 'empty';
+    const now = Date.now();
+    if (!force && panel.seasonBaseSig === baseSig && now - seasonPaintAt < 15000) return;
+    panel.seasonBaseSig = baseSig;
+    seasonPaintAt = now;
+
+    const pace = seasonPace(snap);
+    const perRace = seasonXpPerRace();
+    const leftToNext = snap && Number.isFinite(Number(snap.xp)) && Number.isFinite(Number(snap.nextXp))
+      ? Math.max(0, Number(snap.nextXp) - Number(snap.xp))
+      : null;
+    const racesLeft = leftToNext !== null && perRace ? Math.ceil(leftToNext / perRace) : null;
+    const sig = snap
+      ? `${snap.at}|${snap.tier}|${snap.nextTier}|${snap.progress}|${snap.xp}|${snap.nextXp}|${snap.endsAt}|${pace ? `${pace.status}:${pace.perDay}` : '-'}|${racesLeft}`
+      : 'empty';
+    if (panel.seasonSig === sig) return;
+    panel.seasonSig = sig;
+
+    if (panel.refs.seasonAlert) {
+      panel.refs.seasonAlert.style.display = 'none';
+      panel.refs.seasonAlert.textContent = '';
+    }
+
+    const empty = !snap;
+    if (panel.refs.seasonCard) panel.refs.seasonCard.classList.toggle('is-empty', empty);
+    if (empty) {
+      setText(panel.refs.seasonTag, 'no snapshot');
+      setText(panel.refs.seasonName, 'Season');
+      setText(panel.refs.seasonTier, '—');
+      setText(panel.refs.seasonXp, '—');
+      setText(panel.refs.seasonNext, '—');
+      setText(panel.refs.seasonRaces, '—');
+      setText(panel.refs.seasonPace, '—');
+      setText(panel.refs.seasonEnds, '—');
+      setText(panel.refs.seasonNote, 'Waiting for your account XP...');
+      if (panel.refs.seasonFill) panel.refs.seasonFill.style.width = '0%';
+      return;
+    }
+
+    const progress = Math.max(0, Math.min(100, Number(snap.progress) || 0));
+    const xp = snap.xp !== null && snap.xp !== undefined && Number.isFinite(Number(snap.xp)) ? Number(snap.xp) : null;
+    const nextXp = snap.nextXp !== null && snap.nextXp !== undefined && Number.isFinite(Number(snap.nextXp)) ? Number(snap.nextXp) : null;
+    const tier = Number(snap.tier);
+
+    setText(panel.refs.seasonTag, `T${tier} · ${Math.round(progress)}%`);
+    setText(panel.refs.seasonName, snap.seasonName || 'Season');
+    setText(panel.refs.seasonTier, `T${tier}`);
+    setText(panel.refs.seasonXp, xp !== null && nextXp !== null
+      ? `${seasonXpText(xp)} / ${seasonXpText(nextXp)} XP`
+      : (xp !== null ? `${seasonXpText(xp)} XP` : '—'));
+
+    const left = xp !== null && nextXp !== null ? Math.max(0, nextXp - xp) : null;
+    setText(panel.refs.seasonNext, left !== null
+      ? `${seasonXpText(left)} XP to go`
+      : (nextXp !== null ? `at ${seasonXpText(nextXp)} XP` : '—'));
+
+    // Cuantas carreras caen a ese ritmo de XP, con la media de las ultimas
+    // diez. Sin historial no se inventa: deja un guion.
+    setText(panel.refs.seasonRaces, racesLeft !== null ? `≈ ${racesLeft} races` : '—');
+    if (panel.refs.seasonRaces) {
+      panel.refs.seasonRaces.title = racesLeft !== null
+        ? `${seasonXpText(left)} XP left at about ${seasonXpText(perRace)} XP per race in the last races.`
+        : 'Run a race to estimate how many races the next reward needs.';
+    }
+
+    // El ritmo real de la semana, proyectado a los dias que quedan: dice si el
+    // siguiente premio esta al alcance y cuanto falta por dia si no lo esta.
+    let paceText = '—';
+    let paceTitle = 'No daily XP yet: run a few races to project the season.';
+    if (pace && pace.status === 'done') {
+      paceText = 'max tier';
+      paceTitle = 'Every reward of this season is already unlocked.';
+    } else if (pace && pace.status === 'over') {
+      paceText = 'season over';
+      paceTitle = 'The season already ended; this card keeps the last snapshot.';
+    } else if (pace && pace.status === 'ontrack') {
+      paceText = `${seasonXpShort(pace.perDay)}/day · on pace`;
+      paceTitle = `${seasonXpShort(pace.perDay)} XP/day over ${pace.daysLeft}d projects ${seasonXpShort(pace.projected)} XP: the next reward is in reach.`;
+    } else if (pace && pace.status === 'short') {
+      paceText = `${seasonXpShort(pace.perDay)}/day · ${seasonXpShort(pace.short)} short`;
+      paceTitle = `${seasonXpShort(pace.left)} XP left in ${pace.daysLeft}d: ${seasonXpShort(pace.perDay)}/day projects ${seasonXpShort(pace.projected)}, ${seasonXpShort(pace.short)} short of the next reward.`;
+    }
+    setText(panel.refs.seasonPace, paceText);
+    if (panel.refs.seasonPace) panel.refs.seasonPace.title = paceTitle;
+
+    let ends = snap.endsText ? `ends ${snap.endsText}` : '—';
+    let daysLeft = null;
+    if (snap.endsAt !== null && snap.endsAt !== undefined && Number.isFinite(Number(snap.endsAt))) {
+      daysLeft = Math.ceil((Number(snap.endsAt) - Date.now()) / 86400000);
+      if (daysLeft <= 0) ends = 'ended';
+      else if (daysLeft <= 30) ends += ` · ${daysLeft}d`;
+    }
+    setText(panel.refs.seasonEnds, ends);
+    setText(panel.refs.seasonNote, snap.auto
+      ? 'auto · account XP'
+      : `snapshot ${elapsedText(snap.at, true)} · open Season to refresh`);
+    if (panel.refs.seasonFill) panel.refs.seasonFill.style.width = `${progress}%`;
+
+    // Solo avisa cuando de verdad hay prisa: tres dias o menos de temporada,
+    // menos de 5.000 XP para el siguiente premio o un ritmo que no alcanza.
+    const alerts = seasonAlertText(snap);
+    if (panel.refs.seasonAlert) {
+      panel.refs.seasonAlert.textContent = alerts.join(' · ');
+      panel.refs.seasonAlert.style.display = alerts.length ? '' : 'none';
+    }
+  }
+
+  function captureSeasonPage() {
+    let saved = false;
+    const take = () => {
+      const snap = parseSeasonPage(document);
+      if (!snap) return false;
+      try {
+        disk.set(KEYS.season, JSON.stringify(snap));
+      } catch {
+        return false;
+      }
+      if (!saved) {
+        saved = true;
+        log(`Season captured: ${snap.seasonName}, T${snap.tier}${snap.nextTier ? ` (next T${snap.nextTier})` : ''}, ${snap.xp === null ? 'XP unknown' : `${snap.xp.toLocaleString()} XP`}.`);
+      }
+      return true;
+    };
+
+    if (take()) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      if (take() || tries >= 20) clearInterval(timer);
+    }, 500);
+    setTimeout(() => clearInterval(timer), 12000);
+  }
+
+// Panel shell: the shadow root, its markup and the bindings for every
+// control. It is separated from the TUNE/support logic so 80-panel.js stays a
+// readable size; the fragments share one scope, so this is still createPanel().
+
+  function createPanel() {
+    if (document.getElementById(PANEL_ID) || !document.body) return;
+
+    // Un panel nuevo trae nodos nuevos: las firmas del anterior ya no valen.
+    panel.calSig = '';
+    panel.accSig = null;
+    panel.updateHealthAt = 0;
+
+    registerThemeProperties();
+
+    const host = document.createElement('div');
+    host.id = PANEL_ID;
+    host.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:2147483000;';
+
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `
+      <style>
+        /* ====================================================================
+           Panel: una sola pieza de shadow DOM. Paleta de overlay de juego
+           (carbon casi negro + verde neon), tipografia pequena y animaciones
+           cortas: entrada, tarjetas escalonadas, rail con deslizador, muelle en
+           los interruptores y un parpadeo cuando un numero cambia.
+           Regla de oro de aqui abajo: el calcado de datos (filas, chips, cajon)
+           no cambia, solo la piel. Todo lo que el JS busca sigue existiendo.
+           ==================================================================== */
+        * { box-sizing: border-box; }
+
+        /* Foco visible en todos los controles, no solo en las tabs del rail. */
+        :focus-visible { outline: 2px solid var(--acc, #35ea86); outline-offset: 2px; }
+
+        /* Respetar la preferencia del sistema: sin entrada, sin escalonado y sin
+           RGB animado; el panel sigue siendo el mismo. */
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: .001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: .001ms !important;
+            scroll-behavior: auto !important;
+          }
+        }
+
+        .panel {
+          /* Una sola piel se cambia con data-theme: todo lo de abajo es el
+             contrato que comparten los seis temas. El borde, el halo y los
+             rellenos se derivan del acento con color-mix, asi que un tema nuevo
+             solo declara su acento, su segundo color y su fondo. */
+          --acc: #35ea86;
+          --acc-2: #9bf7c5;
+          --acc-dim: color-mix(in srgb, var(--acc) 14%, transparent);
+          --line: color-mix(in srgb, var(--acc) 12%, transparent);
+          --line-strong: color-mix(in srgb, var(--acc) 26%, transparent);
+          --ink: #e9f7ef;
+          --ink-2: #cfe9db;
+          --dim: #7d9188;
+          --dim-2: #7f9389;
+          --warn: #ffb340;
+          --bad: #ff6f6f;
+          --info: #63c8ff;
+          --card: rgba(255, 255, 255, .028);
+          --bg-hi: rgba(12, 17, 14, .985);
+          --bg-lo: rgba(5, 8, 6, .995);
+          position: relative;
+          isolation: isolate;
+          width: 322px;
+          max-width: calc(100vw - 32px);
+          color: var(--ink);
+          background:
+            repeating-linear-gradient(0deg, rgba(255, 255, 255, .014) 0 1px, transparent 1px 3px),
+            radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--acc) 10%, transparent), transparent 58%),
+            radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--acc-2) 8%, transparent), transparent 62%),
+            linear-gradient(168deg, var(--bg-hi), var(--bg-lo));
+          border: 1px solid var(--line-strong);
+          border-radius: 13px;
+          box-shadow:
+            0 22px 44px -18px rgba(0, 0, 0, .85),
+            0 0 0 1px rgba(0, 0, 0, .6),
+            0 0 34px -14px color-mix(in srgb, var(--acc) 50%, transparent),
+            inset 0 1px 0 rgba(255, 255, 255, .05);
+          font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          -webkit-font-smoothing: antialiased;
+          user-select: none;
+          animation: nt-boot .42s cubic-bezier(.2, .9, .25, 1) both;
+        }
+        @keyframes nt-boot {
+          from { opacity: 0; transform: translateY(10px) scale(.97); }
+          to   { opacity: 1; transform: none; }
+        }
+
+        /* ---------- temas --------------------------------------------------- */
+        /* Carbon es la piel de siempre. Las demas solo mueven el acento y el
+           fondo: bordes, halos, rellenos y barras salen de --acc con color-mix,
+           asi que un tema nuevo no toca ni una regla mas. Los avisos (ambar) y
+           los errores (rojo) no cambian: el color sigue significando lo mismo
+           en cualquier tema. */
+        .panel, .panel[data-theme="carbon"] { color-scheme: dark; }
+        .panel[data-theme="aurora"] {
+          --acc: #3fe0c5;
+          --acc-2: #a78bfa;
+          --ink: #e8fbf7;
+          --ink-2: #c3ece5;
+          --dim: #7c9a98;
+          --dim-2: #789693;
+          --bg-hi: rgba(7, 19, 20, .985);
+          --bg-lo: rgba(4, 10, 13, .995);
+        }
+        .panel[data-theme="sunset"] {
+          --acc: #ff9a5c;
+          --acc-2: #ff77b0;
+          --ink: #fff3ea;
+          --ink-2: #f6d8c7;
+          --dim: #a08a80;
+          --dim-2: #9c877d;
+          --bg-hi: rgba(24, 12, 11, .985);
+          --bg-lo: rgba(12, 6, 8, .995);
+        }
+        .panel[data-theme="ice"] {
+          --acc: #66e3ff;
+          --acc-2: #d7f7ff;
+          --ink: #eefaff;
+          --ink-2: #c9e9f6;
+          --dim: #7e97a4;
+          --dim-2: #7a93a0;
+          --bg-hi: rgba(8, 16, 24, .985);
+          --bg-lo: rgba(4, 8, 14, .995);
+        }
+        .panel[data-theme="violet"] {
+          --acc: #c08bff;
+          --acc-2: #f0a9ff;
+          --ink: #f7f0ff;
+          --ink-2: #ddcbf2;
+          --dim: #93849f;
+          --dim-2: #8f809b;
+          --bg-hi: rgba(18, 11, 27, .985);
+          --bg-lo: rgba(8, 5, 14, .995);
+        }
+        /* RGB: el acento es un tono HSL registrado con @property, asi que el
+           navegador puede interpolarlo. El borde conico y el titulo giran con
+           el; sin @property se queda en rojo fijo, que sigue siendo legible. */
+        .panel[data-theme="rgb"] {
+          --nt-hue: 0;
+          --nt-angle: 0deg;
+          --acc: hsl(var(--nt-hue) 92% 63%);
+          --acc-2: hsl(calc(var(--nt-hue) + 70) 94% 76%);
+          --ink: #f6f7ff;
+          --ink-2: #d9dcf0;
+          --dim: #8d90a6;
+          --dim-2: #8a8da3;
+          --bg-hi: rgba(11, 11, 19, .985);
+          --bg-lo: rgba(5, 5, 10, .995);
+          animation:
+            nt-boot .42s cubic-bezier(.2, .9, .25, 1) both,
+            nt-rgb-hue 16s linear infinite,
+            nt-rgb-angle 8s linear infinite;
+        }
+        @keyframes nt-rgb-hue { to { --nt-hue: 360; } }
+        @keyframes nt-rgb-angle { to { --nt-angle: 360deg; } }
+
+        /* Con una carrera viva no se animan propiedades registradas del panel:
+           cada frame obligaria a recalcular todos los color-mix y el borde
+           conico, y el juego necesita ese tiempo. Al terminar la carrera los
+           colores vuelven a girar solos. */
+        .panel[data-theme="rgb"][data-state="running"] {
+          animation-play-state: paused;
+        }
+        .panel[data-theme="rgb"][data-state="running"] .title,
+        .panel[data-theme="rgb"][data-collapsed="true"],
+        .panel[data-theme="rgb"][data-collapsed="true"] .title {
+          animation-play-state: paused;
+        }
+
+        /* El marco arcoiris: una capa conica recortada a 1 px con mask. Solo se
+           enciende en RGB; en el resto queda transparente y no cuesta nada. */
+        .panel::after {
+          content: '';
+          position: absolute;
+          inset: -1px;
+          z-index: 3;
+          padding: 1px;
+          border-radius: 14px;
+          background: conic-gradient(from var(--nt-angle, 0deg),
+            #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+          display: none;
+          opacity: .9;
+          pointer-events: none;
+        }
+        .panel[data-theme="rgb"]::after { display: block; }
+        .panel[data-theme="rgb"] .title {
+          background: linear-gradient(90deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+          background-size: 300% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          text-shadow: none;
+          animation: nt-rgb-title 6s linear infinite;
+        }
+        @keyframes nt-rgb-title { to { background-position: 300% 0; } }
+
+        /* ---------- cabecera ------------------------------------------------- */
+        .head { position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; cursor: grab; touch-action: none; }
+        .head::after {
+          content: '';
+          position: absolute;
+          left: 11px; right: 11px; bottom: 0; height: 1px;
+          background: var(--line);
+          pointer-events: none;
+        }
+        .head:active { cursor: grabbing; }
+        .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim-2) 14%, transparent); transition: background .25s ease, box-shadow .25s ease; }
+        /* La marca: la W del hero, en un cuadrado de cristal. El punto de estado
+           sigue dentro, asi que no se pierde el LED al cambiar el icono. */
+        .mark { position: relative; flex: none; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; color: var(--acc); background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 13%, rgba(255, 255, 255, .04)), rgba(255, 255, 255, .015)); border: 1px solid var(--line-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 16px -9px var(--acc); }
+        .mark svg { width: 18px; height: 18px; display: block; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 55%, transparent)); }
+        .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px; box-shadow: 0 0 0 2px var(--bg-hi), 0 0 7px color-mix(in srgb, var(--acc) 70%, transparent); }
+        .panel[data-state="running"] .mark .dot { animation: nt-pulse 1.7s ease-in-out infinite; }
+        .panel[data-collapsed="true"] .mark { width: 23px; height: 23px; border-radius: 7px; }
+        .panel[data-state="running"] .dot { background: var(--acc); box-shadow: 0 0 0 3px var(--acc-dim), 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent); animation: nt-pulse 1.7s ease-in-out infinite; }
+        .panel[data-state="paused"] .dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 12px color-mix(in srgb, var(--warn) 60%, transparent); }
+        .panel[data-state="break"] .dot { background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 16%, transparent), 0 0 12px color-mix(in srgb, var(--info) 60%, transparent); }
+        @keyframes nt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+        .brand { flex: 1 1 auto; min-width: 0; }
+        .title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 12.5px/1.15 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .13em; text-transform: uppercase; color: var(--ink); text-shadow: 0 0 14px color-mix(in srgb, var(--acc) 35%, transparent); }
+        .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font: 600 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .13em; text-transform: uppercase; color: var(--dim-2); }
+        .sub b { color: var(--acc); font-weight: 700; }
+
+        .who { display: none; }
+        .ghlink { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 7px; text-decoration: none; font: 800 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--acc-2); background: var(--acc-dim); border: 1px solid var(--line-strong); transition: color .15s ease, background .15s ease, border-color .15s ease; }
+        .ghlink:hover { color: var(--ink); background: color-mix(in srgb, var(--acc) 20%, transparent); border-color: var(--acc); }
+        .ghlink:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+        .ghlink[hidden] { display: none !important; }
+        .ghlink svg { width: 10px; height: 10px; display: block; }
+        .who i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
+        .iconbtn { all: unset; flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; cursor: pointer; color: var(--dim); background: rgba(255, 255, 255, .04); border: 1px solid var(--line); transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
+        .iconbtn:hover { color: var(--acc-2); background: var(--acc-dim); border-color: var(--line-strong); }
+        .iconbtn:active { transform: scale(.92); }
+        .iconbtn:focus-visible, .pace:focus-visible, .toggle:focus-visible, .stop:focus-visible, .gear:focus-visible, .rail-btn:focus-visible, .act:focus-visible, .sw:focus-visible, .seg-btn:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+        .iconbtn svg { width: 13px; height: 13px; display: block; }
+
+        /* ---------- tira de chips ------------------------------------------- */
+        .chips-row { display: flex; align-items: center; gap: 6px; padding: 0 11px 9px; }
+        /* Progreso de la carrera visible desde cualquier pestaña. Es una
+           linea compositada: scaleX no toca el layout ni el texto de al lado. */
+        .race-line { height: 2px; margin: 0 11px; border-radius: 99px; background: rgba(255, 255, 255, .05); overflow: hidden; opacity: 0; transition: opacity .2s ease; }
+        .panel[data-state="running"] .race-line, .panel[data-state="paused"] .race-line { opacity: 1; }
+        .race-line i { display: block; height: 100%; transform: scaleX(var(--race-fill, 0)); transform-origin: left center; background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 95%, transparent), color-mix(in srgb, var(--acc-2) 95%, transparent)); box-shadow: 0 0 9px color-mix(in srgb, var(--acc) 55%, transparent); }
+        .panel[data-collapsed="true"] .race-line { display: none; }
+        .pace { all: unset; flex: none; padding: 4px 8px; border-radius: 999px; cursor: pointer; font: 700 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; color: var(--acc-2); background: color-mix(in srgb, var(--acc) 12%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 32%, transparent); transition: filter .15s ease, transform .12s ease, box-shadow .2s ease; }
+        .pace:hover { filter: brightness(1.16); box-shadow: 0 0 14px -4px color-mix(in srgb, var(--acc) 70%, transparent); }
+        .pace:active { transform: scale(.96); }
+        .panel[data-pace-profile="soft"] .pace { color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); border-color: color-mix(in srgb, var(--info) 32%, transparent); }
+        .panel[data-pace-profile="fast"] .pace { color: #ffe3b8; background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+        /* El chip es un ESTADO, no un interruptor: el bot es siempre AUTO y la
+           cola se arma sola. Para parar esta Stop (o Esc / Alt+N). */
+        .mode { flex: none; padding: 4px 8px; border-radius: 999px; font: 700 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; color: var(--acc-2); background: var(--acc-dim); border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent); cursor: default; }
+        .cap { flex: 1 1 auto; padding: 4px 8px; border-radius: 999px; text-align: center; font: 700 8.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; color: #ffe0b0; background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); transition: color .2s ease, background .2s ease, border-color .2s ease; }
+        .panel[data-cap-hit="1"] .cap { color: #ffd6d6; background: color-mix(in srgb, var(--bad) 18%, transparent); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+
+
+        /* ---------- cuerpo: rail + vistas ----------------------------------- */
+        .main { display: flex; align-items: stretch; gap: 0; border-top: 1px solid var(--line); }
+        .rail { position: relative; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 9px 6px; border-right: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, .02), transparent); }
+        .rail-btn { all: unset; position: relative; z-index: 1; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; cursor: pointer; color: var(--dim-2); transition: color .18s ease, transform .12s ease; }
+        .rail-btn:hover { color: var(--acc-2); }
+        .rail-btn:active { transform: scale(.9); }
+        .rail-btn svg { width: 15px; height: 15px; display: block; }
+        /* Etiqueta flotante del rail: aparece solo al apuntar o enfocar, con
+           transform y opacity (nada de width ni filtros). */
+        .rail-btn::after { content: attr(data-label); position: absolute; left: calc(100% + 7px); top: 50%; z-index: 6; padding: 4px 7px; border-radius: 6px; white-space: nowrap; pointer-events: none; font: 700 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); background: var(--bg-hi); border: 1px solid var(--line-strong); box-shadow: 0 8px 18px -12px rgba(0, 0, 0, .9); opacity: 0; transform: translate(-3px, -50%); transition: opacity .16s ease, transform .16s ease; }
+        .rail-btn:hover::after, .rail-btn:focus-visible::after { opacity: 1; transform: translate(0, -50%); }
+        /* El deslizador del rail: un cuadrado con glow que viaja con muelle. */
+        .rail-glide { position: absolute; left: 6px; top: 9px; width: 30px; height: 30px; border-radius: 9px; background: var(--acc-dim); border: 1px solid var(--line-strong); box-shadow: 0 0 16px -6px var(--acc), inset 0 0 12px -6px var(--acc); transition: transform .34s cubic-bezier(.34, 1.4, .5, 1); transition: transform .34s linear(0, 0.32 14%, 0.82 28%, 1.06 44%, 1.02 58%, 0.995 72%, 1); pointer-events: none; }
+        .rail[data-index="1"] .rail-glide { transform: translateY(32px); }
+        .rail[data-index="2"] .rail-glide { transform: translateY(64px); }
+        .rail[data-index="3"] .rail-glide { transform: translateY(96px); }
+        .rail[data-index="0"] .rail-btn[data-tab-btn="stats"],
+        .rail[data-index="1"] .rail-btn[data-tab-btn="tune"],
+        .rail[data-index="2"] .rail-btn[data-tab-btn="log"],
+        .rail[data-index="3"] .rail-btn[data-tab-btn="info"] { color: var(--acc); }
+
+        .views { flex: 1 1 auto; min-width: 0; max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; padding: 10px 11px 11px; }
+        .views::-webkit-scrollbar { width: 6px; }
+        .views::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--acc) 22%, transparent); border-radius: 99px; }
+        .views::-webkit-scrollbar-track { background: transparent; }
+        .views { scrollbar-gutter: stable; }
+        .view { display: none; }
+        /* Cabecera corta de cada vista: dice donde estas sin ocupar una tarjeta. */
+        .view-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2px 8px; margin: 0 1px 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+        .view-head span { display: inline-flex; align-items: center; gap: 6px; font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); }
+        .view-head span::before { content: ''; width: 10px; height: 1px; border-radius: 99px; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
+        .view-head b { font: 600 8px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .04em; color: var(--dim-2); text-align: right; }
+        .panel[data-tab="stats"] .v-stats,
+        .panel[data-tab="tune"] .v-tune,
+        .panel[data-tab="log"] .v-log,
+        .panel[data-tab="info"] .v-info { display: block; animation: nt-view .28s cubic-bezier(.2, .9, .25, 1) both; }
+        @keyframes nt-view { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+        /* TUNE se lee en tres bloques: ritmo, limites y automatizacion. La
+           cabecera solo separa; las tarjetas y sus controles siguen igual. */
+        .tune-sec { margin: 0 0 11px; }
+        .tune-sec:last-child { margin-bottom: 0; }
+        /* TUNE tiene muchas filas; el filtro evita recorrerlas todas cuando ya
+           se sabe que ajuste se busca. Vive fuera de los bloques para seguir
+           visible aunque no quede ninguna tarjeta. */
+        .tune-filter { display: flex; align-items: center; gap: 7px; margin: 0 1px 9px; }
+        .tune-search { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, .22); transition: border-color .18s ease, box-shadow .18s ease; }
+        .tune-search:focus-within { border-color: var(--line-strong); box-shadow: 0 0 16px -9px var(--acc); }
+        .tune-search > svg { flex: none; width: 12px; height: 12px; margin-left: 8px; color: var(--dim-2); }
+        .tune-search input { all: unset; flex: 1 1 auto; min-width: 0; padding: 0 5px; font: 600 10px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink); }
+        .tune-search input::placeholder { color: var(--dim-2); }
+        .tune-search input::-webkit-search-cancel-button { display: none; }
+        .tune-clear { all: unset; flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-right: 4px; border-radius: 5px; cursor: pointer; font: 700 14px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim-2); }
+        .tune-clear:hover { color: var(--acc); background: var(--acc-dim); }
+        .tune-clear:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+        .tune-clear[hidden], .tune-empty[hidden] { display: none; }
+        .tune-count { flex: none; font: 700 7.5px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--dim-2); white-space: nowrap; }
+        .tune-empty { margin: -2px 1px 10px; padding: 11px 8px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; font: 500 9.5px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
+        .tune-sec-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin: 1px 1px 7px; }
+        .tune-sec-h span { display: inline-flex; align-items: center; gap: 6px; font: 800 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--acc); }
+        .tune-sec-h span::before { content: ''; width: 12px; height: 1px; border-radius: 99px; background: var(--acc); box-shadow: 0 0 7px var(--acc); }
+        .tune-sec-h b { font: 600 8px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .04em; color: var(--dim-2); }
+        .tune-sec-h::after { content: ''; flex: 1 1 20px; min-width: 12px; height: 1px; align-self: center; background: linear-gradient(90deg, var(--line), transparent); }
+
+        /* ---------- tarjetas ------------------------------------------------- */
+        .card { position: relative; contain: layout style; margin-bottom: 9px; padding: 9px 10px 10px; border-radius: 10px; background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .012)); border: 1px solid var(--line); transition: border-color .2s ease, box-shadow .25s ease, transform .18s ease; }
+        .card:last-child { margin-bottom: 2px; }
+        .card:hover { border-color: var(--line-strong); box-shadow: 0 10px 22px -16px rgba(0, 0, 0, .9), 0 0 22px -14px color-mix(in srgb, var(--acc) 65%, transparent); }
+        .card::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; border-radius: 99px; background: linear-gradient(180deg, var(--acc), color-mix(in srgb, var(--acc) 12%, transparent)); box-shadow: 0 0 10px color-mix(in srgb, var(--acc) 55%, transparent); opacity: .85; transition: opacity .2s ease; }
+        .card:hover::before { opacity: 1; }
+        /* Marca de agua: se ve por detras de las filas de arriba, como el icono
+           fantasma del panel de referencia. Muy tenue a proposito. */
+        .card > .ghost { position: absolute; right: 7px; top: 6px; width: 26px; height: 26px; color: var(--acc); opacity: .07; pointer-events: none; z-index: 0; }
+        .card > .ghost svg { width: 100%; height: 100%; }
+        /* Lo que se lee siempre por delante del adorno. */
+        .card > *:not(.ghost) { position: relative; z-index: 1; }
+        /* El titulo manda y el subtitulo va pegado a el; la esquina derecha queda
+           libre para el icono fantasma, que si no cae debajo del texto. */
+        .card-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 7px; margin-bottom: 7px; }
+        .card-t { font: 800 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .19em; text-transform: uppercase; color: var(--ink-2); }
+        .card-s { font: 600 8.5px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .05em; color: var(--dim-2); }
+        /* Edad del dato vivo: se actualiza cuatro veces por segundo y se pone
+           ambar cuando la carrera lleva un rato sin aceptar una tecla. */
+        .card-age { margin-left: auto; font: 600 8px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--dim-2); }
+        .card-age[data-good="0"] { color: var(--warn); }
+        /* El punto de la etiqueta live dice si la telemetria se esta moviendo. */
+        .v-stats .live-card .card-s[data-field="liveTag"] { display: inline-flex; align-items: center; gap: 5px; }
+        .v-stats .live-card .card-s[data-field="liveTag"]::before { content: ''; width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; opacity: .8; }
+        .panel[data-state="running"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--acc); }
+        .panel[data-state="running"] .v-stats .live-card .card-s[data-field="liveTag"]::before { box-shadow: 0 0 6px var(--acc); animation: nt-pulse 1.7s ease-in-out infinite; }
+        .panel[data-state="paused"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--warn); }
+        .panel[data-state="break"] .v-stats .live-card .card-s[data-field="liveTag"] { color: var(--info); }
+
+        /* Aparecen una tras otra, como si el panel se montara delante de ti. */
+        .panel[data-fresh="1"] .card { animation: nt-card .40s cubic-bezier(.2, .9, .25, 1) both; }
+        .panel[data-fresh="1"] .card:nth-child(2) { animation-delay: .05s; }
+        .panel[data-fresh="1"] .card:nth-child(3) { animation-delay: .1s; }
+        .panel[data-fresh="1"] .card:nth-child(4) { animation-delay: .15s; }
+        @keyframes nt-card { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+        /* ---------- marcador grande ----------------------------------------- */
+        .hero { display: grid; grid-template-columns: 1fr 1px 1fr; align-items: center; padding: 8px 2px 9px; }
+        .stat { text-align: center; }
+        .stat b { display: block; font: 700 26px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--ink); text-shadow: 0 0 18px color-mix(in srgb, var(--acc) 28%, transparent); transition: color .25s ease, text-shadow .25s ease; }
+        .stat b[data-good="1"] { color: var(--acc); text-shadow: 0 0 18px color-mix(in srgb, var(--acc) 50%, transparent); }
+        .stat b[data-good="0"] { color: var(--warn); text-shadow: 0 0 18px color-mix(in srgb, var(--warn) 45%, transparent); }
+        .stat b.bump { animation: nt-bump .32s cubic-bezier(.34, 1.4, .5, 1); }
+        @keyframes nt-bump { 0% { transform: scale(1); } 35% { transform: scale(1.11); } 100% { transform: scale(1); } }
+        .stat span { display: block; margin-top: 5px; font: 700 8px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .17em; text-transform: uppercase; color: var(--dim); }
+        .sep { display: block; width: 1px; height: 34px; background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--acc) 25%, transparent), transparent); }
+
+        .prog { position: relative; height: 4px; margin: 2px 2px 0; border-radius: 99px; background: rgba(255, 255, 255, .06); overflow: hidden; opacity: 0; transition: opacity .25s ease; }
+        .panel[data-state="running"] .prog, .panel[data-state="paused"] .prog { opacity: 1; }
+        .prog i { display: block; width: 0; height: 100%; border-radius: 99px; background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 95%, transparent), color-mix(in srgb, var(--acc-2) 95%, transparent)); box-shadow: 0 0 10px color-mix(in srgb, var(--acc) 60%, transparent); transition: width .18s linear; }
+        .season-card .season-prog { opacity: 1; margin: 0 2px 2px; }
+        .season-card .season-name { margin: 1px 0 8px; font: 700 13px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); }
+        .season-card.is-empty .season-name { color: var(--dim-2); }
+        .season-card .season-alert { margin: 8px 2px 0; padding: 6px 8px; border-radius: 7px; font: 600 11px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--warn, #ffcf6e); background: rgba(255, 190, 90, .08); border: 1px solid rgba(255, 190, 90, .28); }
+        .season-card .season-actions { display: flex; gap: 6px; margin-top: 8px; }
+        .season-card .season-actions .act { flex: 0 1 auto; padding: 5px 10px; }
+        /* Reflejo que barre la barra mientras escribe: vida sin ruido. */
+        .prog::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent); transform: translateX(-100%); opacity: 0; }
+        .panel[data-state="running"] .prog::after { opacity: 1; animation: nt-sheen 2.1s ease-in-out infinite; }
+        @keyframes nt-sheen { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(100%); } }
+
+        /* ---------- filas ---------------------------------------------------- */
+        .auto-pace {
+          display: flex; align-items: center; justify-content: center; gap: 6px;
+          width: max-content; max-width: 100%; margin: 5px auto 0; padding: 3px 8px;
+          border: 1px solid var(--line); border-radius: 999px;
+          background: color-mix(in srgb, var(--acc) 7%, transparent);
+          color: var(--acc-2); font: 600 8px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+        }
+        .auto-pace::before {
+          content: ''; width: 5px; height: 5px; flex: none; border-radius: 50%;
+          background: var(--acc); box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 70%, transparent);
+        }
+        .rows { display: grid; gap: 1px; margin-top: 8px; }
+        /* La vista Live ensena lo que se mira de verdad. El resto sigue en el DOM
+           (y en los tooltips) para no romper el contrato del panel, pero no
+           convierte la tarjeta en una lista de telemetria. */
+        .v-stats .live-card .rows .row.secondary { display: none; }
+        .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 2.5px 0; font: 500 10.5px/1.45 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); border-bottom: 1px solid rgba(255, 255, 255, .03); }
+        .row:last-child { border-bottom: 0; }
+        .row span { letter-spacing: .05em; }
+        .row b { font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+        .row b[data-good="1"] { color: var(--acc); }
+        .row b[data-good="0"] { color: var(--warn); }
+        .recent-pair { display: inline-flex; align-items: baseline; }
+        .recent-pair i { font-style: normal; }
+        .recent-pair .recent-acc::before { content: '·'; margin: 0 5px; color: var(--dim-2); }
+        .recent-pair i[data-good="1"] { color: var(--acc); }
+        .recent-pair i[data-good="0"] { color: var(--warn); }
+        .recent-pair i.bump { animation: nt-bump .32s cubic-bezier(.34, 1.4, .5, 1); }
+        .row .num { width: 58px; flex: none; padding: 2px 5px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0, 0, 0, .24); color: var(--ink-2); font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; text-align: right; color-scheme: dark; }
+        .row .num:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; border-color: var(--acc); }
+        .row .num::placeholder { color: var(--dim-2); }
+        .row .num::-webkit-inner-spin-button, .row .num::-webkit-outer-spin-button { opacity: .35; }
+        .row .cmp-select { flex: 1 1 auto; min-width: 0; max-width: 100%; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); color: var(--acc-2); font: 600 9.5px/1.4 ui-monospace, monospace; letter-spacing: 0; text-transform: none; color-scheme: dark; cursor: pointer; }
+        .row .cmp-select:focus-visible { outline: 2px solid color-mix(in srgb, var(--acc) 70%, transparent); outline-offset: 1px; }
+        .row .cmp-select option { background: #0b0f0d; color: var(--ink); }
+        .cmp-row { gap: 8px; }
+        .break-row { display: flex; }
+        .panel[data-state="break"] .break-row b { color: var(--info); }
+        .dq-row b { color: var(--warn); }
+        .limit-row { cursor: pointer; }
+        .limit-row b { color: var(--acc); }
+        .limit-row:hover b { text-decoration: underline dotted; }
+        .panel[data-limit="on"] .limit-row b { color: var(--acc); }
+        .prev-row { cursor: pointer; }
+        .prev-row b { color: var(--ink-2); }
+        .prev-row:hover b { text-decoration: underline dotted; }
+        .hud-row b, .box-row b { color: var(--acc-2); }
+        .guard-row b { color: var(--warn); }
+        .panel[data-standby="1"] .guard-row b { color: var(--info); }
+        .panel[data-box="ready"] .box-row b { color: var(--acc); }
+        .panel[data-box="waiting"] .box-row b { color: var(--dim); }
+        .today-row b { color: var(--acc); }
+        .today-row b[data-good="0"] { color: var(--warn); }
+
+        /* ---------- historial ------------------------------------------------ */
+        .hist { margin-top: 8px; }
+        .hist-head, .hist-row { display: grid; grid-template-columns: 34px 34px 46px 1fr 42px; gap: 6px; align-items: center; }
+        .hist-head { padding-bottom: 3px; font: 700 8px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--dim-2); }
+        .hist-head span:not(:first-child), .hist-row b { text-align: right; }
+        .hist-row { padding: 3px 0; border-radius: 6px; font-variant-numeric: tabular-nums; transition: background .2s ease, transform .2s ease; }
+        .hist-row:hover { background: rgba(255, 255, 255, .035); transform: translateX(1px); }
+        .hist-row span { font-size: 9.5px; color: var(--dim); }
+        .hist-row b { font-size: 11px; font-weight: 600; color: var(--ink-2); }
+        .hist-row:first-child b { color: var(--ink); text-shadow: 0 0 12px color-mix(in srgb, var(--acc) 30%, transparent); }
+        .hist-row:first-child span { color: var(--acc); }
+        .hist-row .dev { font-size: 10px; color: var(--dim-2); }
+        .hist-row .dev[data-good="1"] { color: var(--acc); }
+        .hist-row .dev[data-good="0"] { color: var(--warn); }
+        /* WPM oficial del paquete de meta, pegado al del modelo. Solo aparece
+           en las carreras que lo traen; las viejas no inventan el dato. */
+        .hist-row .wpm { white-space: nowrap; }
+        .hist-row .wpm .model { margin-left: 5px; font: 700 8px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-2); }
+        .hist-row:first-child .wpm .model { color: var(--acc-2); }
+        .hist-row .nitro-tag { margin-right: 4px; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc); font-style: normal; font-size: 7.5px; letter-spacing: .06em; vertical-align: 1px; }
+        .hist-row .place { color: var(--dim); }
+        .hist-row .place[data-medal="1"] { color: #ffd166; }
+        .hist-row .place[data-medal="2"] { color: #d7dee8; }
+        .hist-row .place[data-medal="3"] { color: #e0a273; }
+        .hist-row .xp { color: var(--acc-2); }
+        .hist-empty { padding-top: 2px; font: italic 500 10px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim-2); }
+        .hist-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--acc) 14%, transparent); font: 700 8.5px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .13em; text-transform: uppercase; color: var(--dim); }
+        .hist-foot b { font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--acc-2); }
+
+        /* ---------- listas del registro -------------------------------------- */
+        .log-list { display: grid; gap: 4px; }
+        .log-item { display: grid; grid-template-columns: 46px 1fr auto; gap: 7px; align-items: baseline; padding: 4px 6px; border-radius: 7px; background: rgba(255, 255, 255, .022); border: 1px solid rgba(255, 255, 255, .045); font-variant-numeric: tabular-nums; transition: border-color .2s ease, transform .18s ease; }
+        .log-item:hover { border-color: var(--line-strong); transform: translateX(1px); }
+        .log-item i { font: 600 9px/1.4 ui-monospace, monospace; color: var(--dim-2); font-style: normal; }
+        .log-item span { font: 500 10px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .log-item b { font: 600 10.5px/1.35 ui-monospace, monospace; color: var(--acc-2); }
+        .log-item b[data-good="0"] { color: var(--warn); }
+        .log-empty { font: italic 500 10px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim-2); }
+        .notice-item { display: grid; grid-template-columns: 44px 1fr; gap: 7px; padding: 3px 0; font: 500 10px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); border-bottom: 1px solid rgba(255, 255, 255, .03); }
+        .notice-item:last-child { border-bottom: 0; }
+        .notice-item i { font: 600 9px/1.4 ui-monospace, monospace; color: var(--dim-2); font-style: normal; }
+        .notice-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* ---------- interruptores y ajustes --------------------------------- */
+        .set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .03); }
+        .set-row:last-child { border-bottom: 0; }
+        .set-lbl { font: 600 10.5px/1.3 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .03em; color: var(--ink-2); }
+        .set-lbl i { display: block; margin-top: 2px; font: 500 8.5px/1.25 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; font-style: normal; letter-spacing: .04em; color: var(--dim-2); }
+        .set-val { display: inline-flex; align-items: center; gap: 8px; }
+        .set-val b { font: 600 9px/1 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+        .set-val b[data-on="1"] { color: var(--acc); }
+        .set-val b[data-state="on"] { color: var(--acc); }
+        .set-val b[data-state="blocked"] { color: var(--warn); }
+        .set-val b[data-state="ready"], .set-val b[data-state="waiting"] { color: var(--dim); }
+        .set-val b[data-state="n/a"] { color: var(--warn); }
+        .set-row.afk-health-row .set-val { min-width: 0; max-width: 58%; }
+        .set-row.afk-health-row .set-val b { white-space: normal; text-align: right; line-height: 1.35; }
+        .afk-health-reset { all: unset; flex: none; padding: 2px 5px; border-radius: 5px; cursor: pointer; color: var(--dim); border: 1px solid var(--line); font: 700 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+        .afk-health-reset:hover, .afk-health-reset:focus-visible { color: var(--acc-2); border-color: var(--line-strong); }
+        .afk-health-reset:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+        .set-val b[data-field="nitroPreview"] { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; color: var(--ink); }
+        .set-val b[data-field="nitroPreview"][data-good="1"] { color: var(--acc); }
+        .set-val b[data-field="nitroPreview"][data-good="0"] { color: var(--warn); }
+        /* En 320 px el rail deja la fila demasiado estrecha para la etiqueta y
+           la palabra a la vez: el valor baja a la segunda linea y se alinea a
+           la derecha, en vez de empujar el panel fuera del viewport. */
+        .set-row.nitro-target-row { flex-wrap: wrap; }
+        .set-row.nitro-target-row .set-val { min-width: 0; max-width: 100%; margin-left: auto; }
+        .set-row.nitro-strategy-row { flex-wrap: wrap; }
+        .set-row.nitro-strategy-row .set-val { min-width: 0; max-width: 100%; margin-left: auto; }
+        .nitro-strategy { max-width: 100%; padding: 4px 6px; border-radius: 7px; cursor: pointer; color: var(--ink-2); background: rgba(0, 0, 0, .32); border: 1px solid var(--line); font: 700 8.5px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .03em; text-transform: uppercase; }
+        .nitro-strategy:hover { color: var(--acc-2); border-color: var(--line-strong); }
+        .nitro-strategy:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+        .nitro-strategy option { color: #111; background: #fff; }
+        .row.nitro-delta-row b[data-good="1"] { color: var(--acc); }
+        .row.nitro-delta-row b[data-good="0"] { color: var(--warn); }
+
+        /* Interruptor tipo iOS con muelle: el muelle va en linear() y el
+           cubic-bezier queda de repuesto para navegadores viejos. */
+        .sw { all: unset; position: relative; flex: none; width: 34px; height: 18px; border-radius: 999px; cursor: pointer; background: rgba(255, 255, 255, .09); border: 1px solid rgba(255, 255, 255, .12); transition: background .25s ease, border-color .25s ease, box-shadow .25s ease; }
+        .sw::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(180deg, var(--ink), #b9cfc2); box-shadow: 0 1px 3px rgba(0, 0, 0, .5); transition: transform .32s cubic-bezier(.34, 1.4, .5, 1); transition: transform .32s linear(0, 0.3 14%, 0.84 30%, 1.07 46%, 1.02 60%, 0.998 74%, 1); }
+        .sw[data-on="1"] { background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 90%, transparent), rgba(41, 196, 110, .85)); border-color: color-mix(in srgb, var(--acc) 55%, transparent); box-shadow: 0 0 14px -3px color-mix(in srgb, var(--acc) 80%, transparent), inset 0 0 8px -4px rgba(0, 0, 0, .6); }
+        .sw[data-on="1"]::after { transform: translateX(16px); }
+        .sw:hover { border-color: var(--line-strong); }
+        .sw:active::after { width: 17px; }
+
+        .seg { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 3px; border-radius: 9px; background: rgba(0, 0, 0, .32); border: 1px solid var(--line); }
+        .seg-glide { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 7px; background: var(--acc-dim); border: 1px solid var(--line-strong); box-shadow: inset 0 0 12px -6px var(--acc), 0 0 14px -8px var(--acc); transition: transform .32s cubic-bezier(.34, 1.4, .5, 1); transition: transform .32s linear(0, 0.3 14%, 0.84 30%, 1.07 46%, 1.02 60%, .998 74%, 1); }
+        .seg[data-index="1"] .seg-glide { transform: translateX(100%); }
+        .seg[data-index="2"] .seg-glide { transform: translateX(200%); }
+        .seg-btn { all: unset; position: relative; z-index: 1; padding: 5px 0; text-align: center; border-radius: 7px; cursor: pointer; font: 700 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); transition: color .2s ease; }
+        .seg-btn:hover { color: var(--acc-2); }
+        .seg[data-index="0"] .seg-btn[data-pace="soft"], .seg[data-index="1"] .seg-btn[data-pace="balanced"], .seg[data-index="2"] .seg-btn[data-pace="fast"] { color: var(--acc); }
+
+        .sld { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 2px 0 0; background: transparent; cursor: pointer; }
+        .sld::-webkit-slider-runnable-track { height: 4px; border-radius: 99px; background: linear-gradient(90deg, var(--acc) 0 var(--fill, 0%), rgba(255, 255, 255, .1) var(--fill, 0%) 100%); }
+        .sld::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; margin-top: -4.5px; border-radius: 50%; background: linear-gradient(180deg, #ffffff, var(--acc-2)); border: 1px solid color-mix(in srgb, var(--acc) 80%, transparent); box-shadow: 0 0 12px -2px color-mix(in srgb, var(--acc) 90%, transparent); transition: transform .16s cubic-bezier(.34, 1.5, .5, 1); }
+        .sld:active::-webkit-slider-thumb { transform: scale(1.25); }
+        .sld:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 99px; }
+        .sld-ends { display: flex; justify-content: space-between; font: 600 8px/1.2 ui-monospace, monospace; letter-spacing: .08em; color: var(--dim-2); }
+
+        .act { all: unset; flex: 1 1 0; padding: 6px 0; text-align: center; border-radius: 8px; cursor: pointer; font: 700 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); background: rgba(255, 255, 255, .045); border: 1px solid var(--line); transition: color .18s ease, background .18s ease, border-color .18s ease, transform .12s ease; }
+        .act:hover { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); }
+        .act:active { transform: translateY(1px); }
+        .act:disabled { opacity: .38; cursor: default; }
+        .act[data-act="report"] { color: #ffe3b8; border-color: color-mix(in srgb, var(--warn) 26%, transparent); }
+        .act[data-act="report"]:hover { color: #ffcf88; background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+        .cfg-text { display: block; width: 100%; height: 46px; margin-top: 7px; padding: 6px 7px; resize: vertical; color: var(--ink); background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 8px; font: 500 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; transition: border-color .2s ease, box-shadow .2s ease; }
+        .cfg-text:focus-visible { outline: none; border-color: var(--line-strong); box-shadow: 0 0 16px -8px var(--acc); }
+        .cfg-note { margin-top: 6px; font: 500 9px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
+
+        .keys { display: grid; gap: 3px; }
+        .key-row { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; font: 500 10px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--ink-2); }
+        .key-row kbd { padding: 2px 6px; border-radius: 5px; font: 600 9px/1.2 ui-monospace, monospace; color: var(--acc); background: color-mix(in srgb, var(--acc) 10%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 24%, transparent); white-space: nowrap; }
+        .about { font: 500 10px/1.5 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
+        .about b { color: var(--acc-2); font-weight: 700; }
+
+        /* ---------- barra de estado y acciones ------------------------------ */
+        .foot { padding: 7px 11px 8px; border-top: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, .012), rgba(0, 0, 0, .22)); }
+        .status { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 26px; margin-bottom: 6px; font: 500 9.5px/1.35 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; color: var(--dim); }
+        .foot-bar { display: flex; align-items: center; flex-wrap: nowrap; min-width: 0; gap: 5px; overflow: hidden; white-space: nowrap; font: 600 8.5px/1 ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: .05em; text-transform: uppercase; color: var(--dim-2); }
+        .led { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dim-2); box-shadow: 0 0 8px color-mix(in srgb, var(--dim-2) 50%, transparent); transition: background .25s ease, box-shadow .25s ease; }
+        .panel[data-state="running"] .led { background: var(--acc); box-shadow: 0 0 10px var(--acc); animation: nt-pulse 1.9s ease-in-out infinite; }
+        .panel[data-state="paused"] .led { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+        .panel[data-state="break"] .led { background: var(--info); box-shadow: 0 0 10px var(--info); }
+        .foot-bar b { color: #cfe6d8; font-weight: 700; }
+        .foot-bar [data-field="footAcc"] { color: var(--acc-2); }
+        .foot-bar .fsep { opacity: .35; }
+        .foot-bar .hint { margin-left: auto; color: var(--dim-2); }
+        .panel[data-foot="compact"] .foot-bar { gap: 7px; }
+        .panel[data-foot="compact"] .foot-bar [data-field="footMode"],
+        .panel[data-foot="compact"] .foot-bar [data-field="footCap"],
+        .panel[data-foot="compact"] .foot-bar .hint,
+        .panel[data-foot="compact"] .foot-bar .fsep { display: none; }
+        .panel[data-foot="hidden"] .foot-bar { display: none; }
+        .panel[data-standby="1"] .foot-bar .led { background: var(--info); box-shadow: 0 0 10px var(--info); }
+        /* Parado (sin modo NORMAL): ambar en la barra y en la etiqueta de la
+           tarjeta live. Es un estado, y se tiene que ver de un vistazo. */
+        .panel[data-stopped="1"][data-mode="auto"] .foot-bar .led { background: var(--warn); box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 75%, transparent); }
+        .panel[data-stopped="1"][data-mode="auto"] .foot-bar b[data-field="footState"] { color: #ffcf7a; }
+        .panel[data-stopped="1"][data-mode="auto"] .card-s[data-field="liveTag"] { color: var(--warn); }
+
+        /* Mini-grafica de model Δ: la linea de puntos es el cero; el area y la
+           linea usan el acento del tema y no necesitan ningun canvas. */
+        .spark { display: block; width: calc(100% - 22px); height: 24px; margin: 0 11px 6px; overflow: visible; }
+        .spark-line { fill: none; stroke: var(--acc); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; transition: opacity .2s ease; }
+        .spark-area { fill: color-mix(in srgb, var(--acc) 16%, transparent); stroke: none; }
+        .spark-zero { stroke: color-mix(in srgb, var(--acc) 22%, transparent); stroke-width: .6; stroke-dasharray: 2 3; }
+        .spark[data-empty="1"] { display: none; }
+
+        .actions { display: flex; gap: 6px; padding: 0 11px 11px; }
+        .toggle { all: unset; flex: 1 1 auto; padding: 9px 0; text-align: center; border-radius: 9px; cursor: pointer; font: 800 9.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--ink); background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 22%, transparent), color-mix(in srgb, var(--acc) 10%, transparent)); border: 1px solid color-mix(in srgb, var(--acc) 34%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1); transition: filter .15s ease, transform .1s ease, box-shadow .25s ease; }
+        .toggle:hover { filter: brightness(1.16); box-shadow: 0 0 20px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .12); }
+        .toggle:active { transform: translateY(1px); }
+        .panel[data-state="paused"] .toggle { color: var(--ink); background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 30%, transparent), color-mix(in srgb, var(--acc) 14%, transparent)); border-color: color-mix(in srgb, var(--acc) 50%, transparent); }
+        .stop { all: unset; flex: none; display: grid; place-items: center; padding: 9px 14px; border-radius: 9px; cursor: pointer; font: 800 9.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #ffd0d0; background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 18%, transparent), color-mix(in srgb, var(--bad) 8%, transparent)); border: 1px solid color-mix(in srgb, var(--bad) 32%, transparent); transition: filter .15s ease, transform .1s ease, color .2s ease, background .2s ease, border-color .2s ease; }
+        .stop:hover { filter: brightness(1.16); box-shadow: 0 0 20px -9px var(--bad); }
+        .stop:active { transform: translateY(1px); }
+        .stop[data-pending="true"] { color: #ffe6b8; background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 24%, transparent), color-mix(in srgb, var(--warn) 12%, transparent)); border-color: color-mix(in srgb, var(--warn) 42%, transparent); }
+        /* Parado no hay nada que parar: el boton se apaga en vez de cerrar una
+           tanda ya cerrada. */
+        .stop:disabled { opacity: .42; cursor: default; }
+        .stop:disabled:hover, .stop:disabled:active { filter: none; box-shadow: none; transform: none; }
+        .gear { all: unset; flex: none; display: grid; place-items: center; width: 32px; border-radius: 9px; cursor: pointer; color: var(--dim); background: rgba(255, 255, 255, .04); border: 1px solid var(--line); transition: filter .15s ease, color .18s ease, background .18s ease, border-color .18s ease, transform .12s ease; }
+        .gear:hover { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); }
+        .gear:active { transform: scale(.94); }
+        .gear[data-open="1"] { color: var(--acc); background: var(--acc-dim); border-color: var(--line-strong); box-shadow: 0 0 18px -8px var(--acc); }
+        .gear svg { width: 14px; height: 14px; display: block; }
+
+        /* ---------- acabado simple ----------------------------------------- */
+        /* Una segunda pasada, plana y silenciosa: menos adornos, mas aire y una
+           sola jerarquia. Las vistas siguen siendo las mismas; solo cambia la
+           piel que las contiene. */
+        .panel {
+          width: 330px;
+          background: linear-gradient(180deg, var(--bg-hi), var(--bg-lo));
+          border-radius: 12px;
+          box-shadow: 0 18px 42px -22px rgba(0, 0, 0, .95), 0 0 0 1px rgba(0, 0, 0, .65);
+          font-family: ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+        }
+        .head { gap: 7px; padding: 10px 11px 8px; }
+        .mark { width: 27px; height: 27px; border-radius: 8px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
+        .mark svg { width: 19px; height: 19px; filter: none; }
+        .title { font-size: 13px; letter-spacing: .1em; text-shadow: none; }
+        .sub { margin-top: 3px; font-size: 8px; letter-spacing: .08em; color: var(--dim); }
+        .chips-row { flex-wrap: wrap; row-gap: 5px; padding: 0 11px 9px; }
+        .pace, .mode, .cap { padding: 4px 7px; border-radius: 6px; font-size: 8px; letter-spacing: .08em; }
+        .cap { flex: 0 1 auto; }
+
+        .main { border-top-color: var(--line); }
+        .rail { padding: 8px 5px; background: transparent; }
+        .rail-glide { left: 5px; top: 8px; width: 30px; height: 30px; border-radius: 7px; background: var(--acc-dim); box-shadow: none; }
+        .rail-btn { width: 30px; height: 30px; border-radius: 7px; }
+        .views { padding: 10px 11px 11px; }
+        .view-head { align-items: center; margin-bottom: 9px; padding-bottom: 7px; border-bottom-color: var(--line); }
+        .view-head span { gap: 6px; font-size: 8px; letter-spacing: .13em; color: var(--dim); }
+        .view-head span::before { width: 5px; height: 5px; border-radius: 2px; box-shadow: none; }
+        .view-head b { font-size: 8px; color: var(--dim-2); }
+
+        .card { margin-bottom: 8px; padding: 10px; border-radius: 9px; background: var(--card); border-color: var(--line); transition: none; }
+        .card:hover { border-color: var(--line); box-shadow: none; }
+        .card::before, .card > .ghost { display: none; }
+        .card-h { align-items: center; margin-bottom: 7px; }
+        .card-t { font-size: 9px; letter-spacing: .13em; color: var(--ink-2); }
+        .card-s { font-size: 8px; color: var(--dim); }
+        .hero { padding: 10px 0 9px; }
+        .stat b { font-size: 28px; text-shadow: none; }
+        .stat b[data-good="1"] { text-shadow: none; }
+        .stat b[data-good="0"] { text-shadow: none; }
+        .stat span { margin-top: 5px; font-size: 7.5px; letter-spacing: .13em; color: var(--dim); }
+        .auto-pace { margin-top: 3px; padding: 3px 7px; border-color: var(--line); background: transparent; color: var(--dim); font-size: 7.5px; letter-spacing: .05em; }
+        .auto-pace::before { width: 4px; height: 4px; box-shadow: none; }
+
+        /* Las metricas de Live y Season se leen como una cuadricula, no como
+           una lista larga: dos columnas, etiqueta arriba y valor debajo. */
+        .v-stats .live-card .rows,
+        .v-stats .season-card .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 8px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--line); }
+        .v-stats .season-card .rows { grid-template-columns: .9fr 1.1fr; }
+        .v-stats .live-card .rows .row,
+        .v-stats .season-card .rows .row { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px; min-width: 0; padding: 7px 8px; border: 0; background: rgba(0, 0, 0, .16); }
+        .v-stats .live-card .rows .row > span,
+        .v-stats .season-card .rows .row > span { font-size: 7.5px; letter-spacing: .08em; color: var(--dim-2); }
+        .v-stats .live-card .rows .row b,
+        .v-stats .season-card .rows .row b { width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 10.5px; line-height: 1.3; color: var(--ink-2); }
+        .v-stats .live-card .rows .result-row { grid-column: 1 / -1; }
+        .v-stats .season-card .rows .row b { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .v-stats .live-card .rows .row.secondary { display: none; }
+
+        /* ---------- cuenta ------------------------------------------------- */
+        /* La vista Live ya no solo dice el target: ensena la cuenta que se leyo,
+           el historico usado y cuando fue la ultima lectura. */
+        .account-card .acct-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin: -1px 0 6px; }
+        .account-card .acct-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--acc-2); }
+        .account-card .acct-refresh { flex: 0 0 auto; padding: 4px 8px; font-size: 8px; }
+        .account-card .acct-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
+        .account-card .acct-metrics > div { min-width: 0; padding: 6px 7px; background: rgba(0, 0, 0, .16); }
+        .account-card .acct-metrics b { display: block; font: 700 15px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink); }
+        .account-card .acct-metrics span { display: block; margin-top: 2px; font: 700 7px/1.2 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--dim-2); }
+        .account-card .rows { margin-top: 7px; }
+        .account-card .acct-state { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .account-card .acct-state[data-state="ready"] { color: var(--acc); }
+        .account-card .acct-state[data-state="reading"] { color: var(--info); }
+        .account-card .acct-state[data-state="warn"] { color: var(--warn); }
+        .account-card .acct-state[data-state="idle"] { color: var(--dim-2); }
+        .season-card .season-name { margin: 1px 0 7px; font-size: 13px; }
+        .season-card .season-actions { margin-top: 7px; }
+        .season-card .season-actions .act { font-size: 8px; padding: 5px 9px; }
+        .update-card .season-actions .act { flex: 0 1 auto; }
+
+        .foot { padding: 7px 11px 8px; background: transparent; }
+        .status { min-height: 0; margin-bottom: 6px; font-size: 9px; color: var(--dim); }
+        .foot-bar { font-size: 8px; letter-spacing: .03em; }
+        .actions { padding: 0 11px 11px; }
+        .toggle { padding: 9px 0; border-radius: 8px; background: var(--acc-dim); border-color: var(--line-strong); box-shadow: none; }
+        .toggle:hover { box-shadow: none; }
+        .stop { border-radius: 8px; background: color-mix(in srgb, var(--bad) 12%, transparent); border-color: color-mix(in srgb, var(--bad) 28%, transparent); }
+        .stop:hover { box-shadow: none; }
+        .gear { border-radius: 8px; }
+        .act { border-radius: 7px; text-decoration: none; }
+        .theme { border-radius: 7px; }
+
+        /* ---------- selector de tema ---------------------------------------- */
+        .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 2px; }
+        .theme { all: unset; display: flex; flex-direction: column; gap: 4px; padding: 5px 5px 4px; border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: rgba(255, 255, 255, .022); transition: border-color .18s ease, background .18s ease, box-shadow .22s ease, transform .12s ease; }
+        .theme:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+        .theme:active { transform: translateY(0) scale(.97); }
+        .theme:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+        .theme i { display: block; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18), 0 2px 8px -4px rgba(0, 0, 0, .9); }
+        .theme span { text-align: center; font: 700 7.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-2); }
+        .theme[aria-pressed="true"] { border-color: var(--line-strong); background: var(--acc-dim); box-shadow: 0 0 18px -9px var(--acc), inset 0 0 0 1px var(--line); }
+        .theme[aria-pressed="true"] span { color: var(--acc); }
+        .theme[aria-pressed="true"] i { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .35), 0 0 12px -3px var(--acc); }
+        /* Las muestras no heredan el tema activo: cada tile ensena el suyo. */
+        .theme i.sw-carbon { background: linear-gradient(135deg, #0c110e, #35ea86 60%, #9bf7c5); }
+        .theme i.sw-aurora { background: linear-gradient(135deg, #071314, #3fe0c5 55%, #a78bfa); }
+        .theme i.sw-sunset { background: linear-gradient(135deg, #180c0b, #ff9a5c 55%, #ff77b0); }
+        .theme i.sw-ice { background: linear-gradient(135deg, #080f18, #66e3ff 55%, #d7f7ff); }
+        .theme i.sw-violet { background: linear-gradient(135deg, #120b1b, #c08bff 55%, #f0a9ff); }
+        .theme i.sw-rgb {
+          background: conic-gradient(from 0deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+        }
+
+        /* ---------- plegado -------------------------------------------------- */
+        /* Plegado: cabecera con el LED y el nombre, y los tres botones. Todo lo
+           demas fuera, que para eso esta el boton. */
+        .panel[data-collapsed="true"] { width: auto; min-width: 210px; }
+        .panel[data-collapsed="true"] .main,
+        .panel[data-collapsed="true"] .foot,
+        .panel[data-collapsed="true"] .chips-row { display: none; }
+        .panel[data-collapsed="true"] .head { padding-bottom: 9px; }
+        .panel[data-collapsed="true"] .actions { padding-top: 0; }
+
+        /* ---------- lectura y jerarquia ------------------------------------- */
+        /* Ultima pasada: superficies mas limpias, mas aire entre bloques y una
+           cabecera de seccion que acompana al recorrer TUNE. No cambia el
+           marcado ni los controles; solo la piel que los contiene. */
+
+        .panel {
+          width: 336px;
+          border-radius: 14px;
+          background:
+            radial-gradient(130% 76% at 50% -20%, color-mix(in srgb, var(--acc) 9%, transparent), transparent 64%),
+            linear-gradient(180deg, var(--bg-hi), var(--bg-lo));
+        }
+
+        .head { gap: 9px; padding: 12px 13px 9px; }
+        .head::after { left: 13px; right: 13px; background: linear-gradient(90deg, transparent, var(--line-strong), transparent); }
+        .mark { width: 29px; height: 29px; border-radius: 9px; }
+        .title { font-size: 13.5px; letter-spacing: .11em; }
+        .sub { margin-top: 4px; font-size: 8.5px; letter-spacing: .09em; color: var(--dim); }
+        .chips-row { gap: 5px; padding: 0 13px 10px; }
+        .pace, .mode, .cap { display: inline-flex; align-items: center; height: 21px; padding: 0 9px; border-radius: 999px; font-size: 8px; letter-spacing: .07em; }
+
+        .views { padding: 12px 13px 13px; }
+        .view-head { margin-bottom: 10px; padding-bottom: 8px; }
+        .view-head span { font-size: 8px; letter-spacing: .16em; }
+        .view-head b { font-size: 8px; }
+
+        .card {
+          padding: 11px 12px 12px;
+          border-radius: 11px;
+          border-color: var(--line);
+          background: linear-gradient(180deg, rgba(255, 255, 255, .048), rgba(255, 255, 255, .016));
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+        }
+        .card-h { margin-bottom: 9px; }
+        .card-t { font-size: 9px; letter-spacing: .16em; }
+        .card-s { font-size: 8.5px; }
+
+        /* Marcador: un panel interior muy tenue separa los dos numeros del
+           resto de la tarjeta sin competir con ellos. */
+        .v-stats .live-card .hero {
+          margin: 0 -2px 2px;
+          padding: 13px 4px 12px;
+          border: 1px solid var(--line);
+          border-radius: 9px;
+          background:
+            radial-gradient(120% 130% at 50% 0%, color-mix(in srgb, var(--acc) 7%, transparent), transparent 72%),
+            rgba(0, 0, 0, .14);
+        }
+        .stat b { font-size: 30px; }
+        .stat span { margin-top: 6px; font-size: 8px; letter-spacing: .14em; }
+        .sep { height: 38px; }
+        .auto-pace { margin-top: 8px; }
+        .v-stats .live-card .spark { width: calc(100% - 4px); margin: 0 2px 8px; }
+
+        /* Cuadricula de metricas: mas aire y la sesion junto al watchdog, que
+           es la pareja que se mira durante una carrera. */
+        .v-stats .live-card .rows .row,
+        .v-stats .season-card .rows .row { padding: 8px 9px; }
+        .v-stats .live-card .rows .row > span,
+        .v-stats .season-card .rows .row > span { font-size: 8px; letter-spacing: .07em; }
+
+        .account-card .acct-top { margin-bottom: 8px; }
+        .account-card .acct-metrics b { font-size: 16px; }
+        .account-card .acct-metrics span { font-size: 7.5px; }
+        .season-card .season-name { font-size: 14px; }
+        .hist-row:nth-child(even) { background: rgba(255, 255, 255, .018); }
+
+        /* TUNE: la cabecera de cada bloque se queda arriba mientras se recorre
+           su contenido. El filtro sigue siendo lo primero y no se pega. */
+        .tune-sec { margin-bottom: 13px; }
+        .v-tune .tune-sec-h {
+          position: sticky;
+          top: 0;
+          z-index: 2;
+          margin: 0 -2px 8px;
+          padding: 8px 2px 7px;
+          background: linear-gradient(180deg, var(--bg-hi) 80%, color-mix(in srgb, var(--bg-hi) 90%, transparent));
+          box-shadow: 0 8px 12px -12px rgba(0, 0, 0, .9);
+        }
+        .v-tune .tune-sec-h span { font-size: 8.5px; letter-spacing: .16em; }
+        .v-tune .tune-sec-h b { font-size: 8px; }
+        .tune-filter { margin-bottom: 10px; }
+
+        .theme { padding: 6px; border-radius: 9px; }
+        .theme i { height: 18px; border-radius: 6px; }
+        .theme span { font-size: 8px; letter-spacing: .1em; }
+
+        /* Las filas de acciones se reparten en tres columnas: con siete botones
+           el flex anterior empujaba "versions" fuera de la tarjeta. */
+        .btn-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+        .btn-row .act { padding: 7px 4px; }
+        .btn-row .act[data-act="channel"] { grid-column: 1 / -1; }
+
+        .views::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--acc) 14%, transparent); }
+        .views::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--acc) 26%, transparent); }
+        .v-stats .live-card .rows .watch-row b { font-size: 9.5px; }
+        .spark-area { fill: color-mix(in srgb, var(--acc) 10%, transparent); }
+
+        .foot { padding: 9px 13px 10px; background: linear-gradient(180deg, rgba(255, 255, 255, .014), rgba(0, 0, 0, .2)); }
+        .status { font-size: 9.5px; }
+        .actions { padding: 0 13px 12px; }
+        .act { padding: 7px 0; font-size: 8.5px; }
+        .toggle { padding: 10px 0; letter-spacing: .14em; }
+
+        /* En una ventana estrecha la cuenta ocupa el sitio del nombre. Se
+           retira antes de que el titulo empiece a cortarse. */
+        @media (max-width: 340px) {
+          .who { display: none; }
+        }
+
+        /* 160 CSS px (320 px fisicos al 200 %): el rail lateral y la columna
+           de botones ya no caben. El panel se vuelve una columna, el rail pasa
+           arriba y las vistas hacen scroll dentro de una altura maxima. */
+        @media (max-width: 200px) {
+          :host { left: 8px !important; }
+          .panel {
+            display: flex;
+            flex-direction: column;
+            width: calc(100vw - 16px);
+            max-width: calc(100vw - 16px);
+            max-height: calc(100vh - 32px);
+          }
+          .panel[data-collapsed="true"] { min-width: 0; }
+          .head { flex: none; gap: 6px; padding: 8px 8px 6px; }
+          .head::after { left: 8px; right: 8px; }
+          .head .dot,
+          .head .who,
+          .head .sub { display: none; }
+          .head .ghlink { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; }
+          .head .ghlink span { display: none; }
+          .title { font-size: 11px; letter-spacing: .08em; }
+          .chips-row { flex: none; flex-wrap: wrap; row-gap: 5px; padding: 0 8px 7px; }
+          .chips-row > * { flex: 0 1 auto; white-space: nowrap; }
+          .set-row { flex-direction: column; align-items: stretch; gap: 4px; }
+          .set-row .set-val { justify-content: flex-end; margin-left: auto; }
+          .main { flex: 1 1 auto; min-height: 0; flex-direction: column; }
+          .rail {
+            flex: none;
+            flex-direction: row;
+            justify-content: space-around;
+            padding: 4px;
+            border-right: 0;
+            border-bottom: 1px solid var(--line);
+          }
+          .rail-glide { display: none; }
+          .rail-btn { width: 24px; height: 24px; border-radius: 7px; }
+          .rail-btn svg { width: 13px; height: 13px; }
+          .rail-btn::after { display: none; }
+          .views { flex: 1 1 auto; min-height: 0; max-height: none; padding: 8px; }
+          .foot { display: none; }
+          .actions { flex: none; gap: 5px; padding: 0 8px 8px; }
+          .actions .gear { display: none; }
+          .actions .stop { padding-left: 10px; padding-right: 10px; }
+        }
+
+        /* Con el sistema pidiendo menos animacion se van las animaciones de
+           entrada (lo grande y decorativo) pero se quedan los cambios de estado
+           cortos: el muelle del interruptor y de los deslizadores es informacion
+           (dice si algo esta encendido), no adorno. */
+        @media (prefers-reduced-motion: reduce) {
+          .panel, .panel[data-fresh="1"] .card, .view, .stat b.bump, .recent-pair i.bump, .prog::after,
+          .panel .dot, .panel .led, .theme i.sw-rgb, .panel[data-theme="rgb"] .title { animation: none !important; }
+          /* El ciclo de tono no mueve nada: es color, no adorno. Se conserva
+             para que RGB siga cambiando aunque el sistema pida menos animacion;
+             el marco conico y el titulo si se quedan quietos. */
+          .panel[data-theme="rgb"] { animation: nt-rgb-hue 16s linear infinite !important; }
+        }
+      </style>
+      <div class="panel" role="region" aria-label="Nitro Wraith control panel" data-state="waiting" data-mode="auto" data-pace="legit" data-cfg="0" data-collapsed="false" data-tab="stats" data-fresh="1" data-theme="carbon">
+        <div class="head">
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
+            <i class="dot"></i>
+          </span>
+          <span class="brand">
+            <b class="title" data-field="title">NITRO WRAITH</b>
+            <span class="sub">human pace · <b data-field="ver">v7.0.0</b></span>
+          </span>
+          <a class="ghlink" href="${UPDATE_GITHUB_URL}" target="_blank" rel="noopener noreferrer" hidden title="Download the latest NITRO WRAITH userscript from GitHub" aria-label="Download the latest NITRO WRAITH userscript from GitHub">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
+          </a>
+          <button class="iconbtn collapse" type="button" data-act="expand" aria-label="Collapse panel" aria-expanded="true" title="Collapse / expand the panel">−</button>
+        </div>
+        <div class="chips-row">
+          <button class="pace" type="button">LEGIT · balanced</button>
+          <span class="mode" role="status" aria-live="polite" title="Always AUTO: the bot starts by itself. Stop stops it; it comes back on the next garage visit.">AUTO</span>
+          <span class="cap" data-field="cap" title="Hard ceiling: no race is ever allowed above this WPM">≤ 120 wpm</span>
+        </div>
+        <div class="race-line" aria-hidden="true"><i></i></div>
+        <div class="main">
+          <div class="rail" data-index="0" role="tablist" aria-label="Panel views">
+            <i class="rail-glide"></i>
+            <button class="rail-btn" type="button" role="tab" aria-selected="true" aria-controls="nt-view-stats" aria-label="Live" data-tab-btn="stats" data-label="Live">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/><circle cx="12" cy="13" r="1.4" fill="currentColor" stroke="none"/></svg>
+            </button>
+            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-tune" aria-label="Tune" data-tab-btn="tune" data-label="Tune" tabindex="-1">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M17 6h3M4 18h3M11 18h9M4 12h13M20 12h0"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/><circle cx="18" cy="12" r="2"/></svg>
+            </button>
+            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-log" aria-label="Log" data-tab-btn="log" data-label="Log" tabindex="-1">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h11M8 12h11M8 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>
+            </button>
+            <button class="rail-btn" type="button" role="tab" aria-selected="false" aria-controls="nt-view-info" aria-label="Info" data-tab-btn="info" data-label="Info" tabindex="-1">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="1.1" fill="currentColor" stroke="none"/></svg>
+            </button>
+          </div>
+          <div class="views">
+            <!-- ------------------------------ STATS ------------------------- -->
+            <section class="view v-stats" id="nt-view-stats" role="tabpanel" aria-label="Live">
+              <div class="view-head"><span>Live</span><b>race telemetry</b></div>
+              <div class="card live-card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17a9 9 0 1 1 18 0"/><path d="M12 13l4-3"/></svg></span>
+                <div class="card-h"><span class="card-t">Live</span><span class="card-s" data-field="liveTag">waiting</span><span class="card-age" data-field="liveAge" title="Data age: seconds since the game accepted the last key. Refreshed four times per second; amber means the race has gone quiet.">—</span></div>
+                <div class="hero">
+                  <div class="stat"><b data-field="live">—</b><span>live wpm</span></div>
+                  <i class="sep"></i>
+                  <div class="stat"><b data-field="acc">—</b><span>accuracy</span></div>
+                </div>
+                <div class="auto-pace" data-field="paceSource">auto · reading account</div>
+                <div class="prog"><i data-field="progfill"></i></div>
+                <svg class="spark" data-field="accSpark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img" aria-label="Accuracy model delta history: no samples yet.">
+                  <line class="spark-zero" x1="0" y1="12" x2="100" y2="12"></line>
+                  <path class="spark-area" data-field="accSparkArea" d=""></path>
+                  <polyline class="spark-line" data-field="accSparkLine" points=""></polyline>
+                </svg>
+                <div class="rows">
+                  <div class="row"><span>target</span><b data-field="target">—</b></div>
+                  <div class="row" title="Recent pace and accuracy: WPM and accuracy over the last 6 seconds of accepted keys, independent of the session averages"><span>recent</span><b class="recent-pair"><i data-field="liveNow">—</i><i class="recent-acc" data-field="liveNowAcc">—</i></b></div>
+                  <div class="row race-row secondary" title="Race progress"><span>race</span><b data-field="progress">—</b></div>
+                  <div class="row"><span>races</span><b data-field="races">0</b></div>
+                  <div class="row day-xp-row" title="XP the game awarded today, read from the same daily summary as the 7-day card"><span>today</span><b data-field="dayXp">—</b></div>
+                  <div class="row tanda-row" title="Average of every measured race in this session, not just the ones in the list"><span>session</span><b data-field="tanda">—</b></div>
+                  <div class="row watch-row" title="Real-time race watchdog: phase, which tab holds the typing lease and how long the game has gone without accepting a key"><span>watch</span><b data-field="watch">—</b></div>
+                  <div class="row secondary" title="Which WPM calibration sample is active"><span>set</span><b data-field="session">—</b></div>
+                  <div class="row rate-row secondary" title="XP per hour at the current session pace"><span>rate</span><b data-field="rate">—</b></div>
+                  <div class="row nitro-row secondary" title="Nitro this session: races that used it, characters the game typed for you and the time they would have taken at the planned pace"><span>nitro</span><b data-field="nitro">—</b></div>
+                  <div class="row nitro-delta-row secondary" title="Nitro WPM check: races with nitro minus races without it, over the last 10 measured races. Zero or below means the nitro is not lifting the average; positive is a warning"><span>nitro Δ</span><b data-field="nitroDelta">—</b></div>
+                  <div class="row cycle-row secondary" title="Dead time between races: median and best gap from the end of one race to the first key of the next"><span>cycle</span><b data-field="cycle">—</b></div>
+                  <div class="row xp-break-row secondary" title="Last race XP split into place, speed, accuracy and session or other bonuses"><span>xp/race</span><b data-field="xpBreak">—</b></div>
+                  <div class="row session-row" style="display:none" title="Site session token: time left before it expires. The queue renews it on the garage, between races"><span>login</span><b data-field="sessionLeft">—</b></div>
+                  <div class="row trim-row" style="display:none"><span>trim</span><b data-field="trim">—</b></div>
+                  <div class="row hud-row" style="display:none" title="The WPM Nitro Type itself is printing right now, next to the hard ceiling"><span>game</span><b data-field="hud">—</b></div>
+                  <div class="row result-row" style="display:none" title="Place and prize of the last race, read from the game's own race result"><span>result</span><b data-field="result">—</b></div>
+                  <div class="row clock-row" style="display:none" title="The precise clock could not start (the site's CSP blocked the Worker). In a background tab the browser slows page timers down and typing can stall long enough for a disqualification."><span>clock</span><b data-field="clock">page</b></div>
+                  <div class="row guard-row" style="display:none" title="Why the bot is waiting: a guard break, duplicate copies of the script or a site block"><span>guard</span><b data-field="guard">—</b></div>
+                  <div class="row box-row" style="display:none" title="Daily Mystery Box in the garage"><span>box</span><b data-field="box">—</b></div>
+                  <div class="row break-row secondary"><span>break</span><b data-field="break">—</b></div>
+                  <div class="row dq-row" style="display:none"><span>dq streak</span><b data-field="dq">×0</b></div>
+                </div>
+              </div>
+              <div class="card account-card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0M4 4h3M4 4v3M20 4h-3M20 4v3"/></svg></span>
+                <div class="card-h"><span class="card-t">Account</span><span class="card-s acct-state" data-field="acctState" data-state="idle" role="status" aria-live="polite">waiting</span></div>
+                <div class="acct-top">
+                  <b class="acct-id" data-field="acctId">—</b>
+                  <button class="act acct-refresh" type="button" data-field="acctRefresh" title="Read the signed-in account now: profile and full monthly history">refresh</button>
+                </div>
+                <div class="acct-metrics">
+                  <div><b data-field="acctAvg">—</b><span>avg</span></div>
+                  <div><b data-field="acctTarget">—</b><span>live</span></div>
+                  <div><b data-field="acctAcc">—</b><span>acc</span></div>
+                </div>
+                <div class="rows">
+                  <div class="row"><span>history</span><b data-field="acctHistory">—</b></div>
+                  <div class="row"><span>range</span><b data-field="acctRange">—</b></div>
+                  <div class="row"><span>read</span><b data-field="acctRead">never</b></div>
+                </div>
+              </div>
+              <div class="card season-card" data-field="seasonCard">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 4h10v3a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3M12 12v5M8 21h8"/></svg></span>
+                <div class="card-h"><span class="card-t">Season</span><span class="card-s" data-field="seasonTag">no snapshot</span></div>
+                <div class="season-name" data-field="seasonName">Season</div>
+                <div class="prog season-prog"><i data-field="seasonFill"></i></div>
+                <div class="rows">
+                  <div class="row"><span>tier</span><b data-field="seasonTier">—</b></div>
+                  <div class="row"><span>xp</span><b data-field="seasonXp">—</b></div>
+                  <div class="row"><span>to next</span><b data-field="seasonNext">—</b></div>
+                  <div class="row" title="How many races the next reward needs at the XP per race of the last races"><span>races</span><b data-field="seasonRaces">—</b></div>
+                  <div class="row season-pace-row" title="XP per active day over the last week, projected to the season end at that pace"><span>pace</span><b data-field="seasonPace">—</b></div>
+                  <div class="row"><span>ends</span><b data-field="seasonEnds">—</b></div>
+                </div>
+                <div class="season-alert" data-field="seasonAlert" role="status" style="display:none"></div>
+                <div class="season-actions">
+                  <button class="act" type="button" data-act="season" data-field="seasonOpen" title="Open Nitro Type's Season page; the script captures the tier and XP for this card">open season</button>
+                </div>
+                <div class="cfg-note" data-field="seasonNote">Open Season once to capture the tier and XP.</div>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
+                <div class="card-h"><span class="card-t">Last 10 races</span><span class="card-s">place · xp · wpm</span></div>
+                <div class="hist">
+                  <div class="hist-head"><span>time</span><span>place</span><span>xp</span><span>wpm</span><span>dev</span></div>
+                  <div data-field="history"></div>
+                  <div class="hist-foot" data-field="foot" style="display:none">
+                    <span>avg <b data-field="avg">—</b></span>
+                    <span>best <b data-field="best">—</b></span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Las vistas que no estan activas se montan al abrirlas. Asi el
+                 primer segundo solo cuesta la vista Live, no las cuatro. -->
+            <template data-view="tune">
+            <section class="view v-tune cfg" id="nt-view-tune" role="tabpanel" aria-label="Tune">
+              <div class="view-head"><span>Tune</span><b>rhythm · limits · automation</b></div>
+              <div class="tune-filter">
+                <label class="tune-search" title="Filter settings by name, section or description">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+                  <input type="search" data-field="tuneSearch" placeholder="Filter settings…" autocomplete="off" spellcheck="false" aria-label="Filter settings by name, section or description">
+                  <button class="tune-clear" type="button" data-field="tuneClear" aria-label="Clear settings filter" title="Clear filter" hidden>×</button>
+                </label>
+                <span class="tune-count" data-field="tuneCount" aria-live="polite">settings</span>
+              </div>
+              <div class="tune-empty" data-field="tuneEmpty" role="status" hidden></div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-health-label">
+                <div class="tune-sec-h"><span id="tune-health-label">Health</span><b>account · AFK · update</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h4l2-5 4 10 2-5h6"/><path d="M4 20h16"/></svg></span>
+                  <div class="card-h"><span class="card-t">Health center</span><span class="card-s" data-field="healthSummary">checking</span></div>
+                  <div class="rows">
+                    <div class="row" title="Account calibration source and freshness"><span>account</span><b data-field="healthAccount">—</b></div>
+                    <div class="row" title="AFK farming, keep-alive and the strict interlock; the same values as the AFK rows below"><span>AFK gate</span><b data-field="healthAfk">—</b></div>
+                    <div class="row" title="Last update check result and age"><span>update</span><b data-field="healthUpdate">—</b></div>
+                    <div class="row" title="Page Lifecycle freezes recorded in this browser"><span>freezes</span><b data-field="healthFreeze">—</b></div>
+                  </div>
+                  <div class="cfg-note" data-field="healthNote">One place to see what needs attention.</div>
+                  <button class="act" type="button" data-act="report" title="Copy the full diagnostic report, including the recent flight recorder, to paste when something is off">copy report</button>
+                  <button class="act" type="button" data-act="support" title="Copy a redacted support bundle: version, environment, flight recorder and state, with tokens, account names and identifiers removed">support</button>
+                </div>
+              </div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-rhythm-label">
+                <div class="tune-sec-h"><span id="tune-rhythm-label">Rhythm</span><b>pace and calibration</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
+                  <div class="card-h"><span class="card-t">Pace</span><span class="card-s">all under the ceiling</span></div>
+                  <div class="seg" data-index="1">
+                    <i class="seg-glide"></i>
+                    <button class="seg-btn" type="button" data-pace="soft" title="A little below the account average, for an easier session">soft</button>
+                    <button class="seg-btn" type="button" data-pace="balanced" title="The account's own average and calibrated range">balanced</button>
+                    <button class="seg-btn" type="button" data-pace="fast" title="A little above the account average, still under the ceiling">fast</button>
+                  </div>
+                  <div class="rows">
+                    <div class="row"><span>ceiling</span><b data-field="tuneCap">≤ 120 wpm</b></div>
+                    <div class="row"><span>range</span><b data-field="tuneRange">—</b></div>
+                    <div class="row cal-row" data-field="calRow" title="Always automatic: reads the account average from the site profile and the stats API, and centres the balanced range on it. Click to refresh now."><span>auto</span><b data-field="cal">on</b></div>
+                    <div class="row"><span>calibrated</span><b data-field="calWpm">—</b></div>
+                    <div class="row"><span>accuracy</span><b data-field="calAcc">—</b></div>
+                    <div class="row"><span>account</span><b data-field="calAccount">—</b></div>
+                    <div class="row custom-row" title="Manual WPM target. Leave empty or 0 for automatic calibration. A manual value overrides the account average and the top-based recovery floor."><span>custom wpm</span><input class="num" type="number" inputmode="numeric" min="15" max="119" step="1" placeholder="auto" data-field="customWpm" aria-label="Custom WPM target; empty or 0 uses automatic calibration"></div>
+                    <div class="row custom-row" title="Manual accuracy target from 96% to 100%. Leave empty or 0 for automatic calibration. Below 96% the game pays no accuracy bonus."><span>custom acc</span><input class="num" type="number" inputmode="numeric" min="96" max="100" step="1" placeholder="auto" data-field="customAcc" aria-label="Custom accuracy target; empty or 0 uses automatic calibration"></div>
+                    <div class="cfg-note">Custom values override auto. Empty or 0 returns to automatic.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-limits-label">
+                <div class="tune-sec-h"><span id="tune-limits-label">Limits</span><b>session, day and hours</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2"/><circle cx="15" cy="16" r="2"/></svg></span>
+                  <div class="card-h"><span class="card-t">Session limit</span><span class="card-s">the bot stops on its own</span></div>
+                  <div class="limit-row row" data-field="raceLimitRow" title="Click: races per session (free, 25, 50, 100). 25 is where the session bonus reaches its 250 XP per race cap">
+                    <span>races</span><b data-field="limit">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="limitSlider" aria-label="Races per session" title="Races per session: free, 25, 50 or 100">
+                  <div class="sld-ends"><span>free</span><span>25</span><span>50</span><span>100</span></div>
+                  <div class="limit-row row time-row" data-field="timeLimitRow" title="Click: minutes per session (free, 15, 30, 60, 120). The clock starts with the first race of the session">
+                    <span>time</span><b data-field="timeLimit">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="timeSlider" aria-label="Minutes per session" title="Minutes per session: free, 15, 30, 60 or 120">
+                  <div class="sld-ends"><span>free</span><span>15m</span><span>30m</span><span>1h</span><span>2h</span></div>
+                  <div class="limit-row row xp-row" data-field="xpLimitRow" title="Click: XP per session (free, 5k, 10k, 25k, 50k). Counts the XP the game itself awards in each race">
+                    <span>xp</span><b data-field="xpLimit">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="4" step="1" value="0" data-field="xpSlider" aria-label="XP per session" title="XP per session: free, 5k, 10k, 25k or 50k">
+                  <div class="sld-ends"><span>free</span><span>5k</span><span>10k</span><span>25k</span><span>50k</span></div>
+                  <div class="rows">
+                    <div class="row"><span>left</span><b data-field="etaLeft">—</b></div>
+                    <div class="row time-left-row" data-field="timeLeftRow" style="display:none"><span>time left</span><b data-field="timeLeft">—</b></div>
+                    <div class="row xp-left-row" data-field="xpRow" style="display:none"><span>xp</span><b data-field="xpTotal">—</b></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 18V6M4 18h16"/><path d="M8 14v-3M12 14V7M16 14v-5"/></svg></span>
+                  <div class="card-h"><span class="card-t">Daily budget</span><span class="card-s">stop before tomorrow</span></div>
+                  <div class="limit-row row" data-field="dailyRaceRow" title="Click: races per day (free, 100, 200, 300). Counts the races the game recorded today">
+                    <span>races/day</span><b data-field="dailyRaces">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyRaceSlider" aria-label="Races per day" title="Races per day: free, 100, 200 or 300">
+                  <div class="sld-ends"><span>free</span><span>100</span><span>200</span><span>300</span></div>
+                  <div class="limit-row row xp-row" data-field="dailyXpRow" title="Click: XP per day (free, 50k, 100k, 200k). Counts the XP the game paid today">
+                    <span>xp/day</span><b data-field="dailyXp">free</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="3" step="1" value="0" data-field="dailyXpSlider" aria-label="XP per day" title="XP per day: free, 50k, 100k or 200k">
+                  <div class="sld-ends"><span>free</span><span>50k</span><span>100k</span><span>200k</span></div>
+                  <div class="rows">
+                    <div class="row" data-field="dailyLeftRow" title="Budget left today; both counters reset at midnight"><span>left</span><b data-field="dailyLeft">—</b></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span>
+                  <div class="card-h"><span class="card-t">Active hours</span><span class="card-s">races only in this window</span></div>
+                  <div class="limit-row row" data-field="activeRow" title="Click: turn the active window on/off. Shift+click resets 08:00–23:00">
+                    <span>window</span><b data-field="activeState">off</b>
+                  </div>
+                  <div class="limit-row row" data-field="activeStartRow" title="Click: start hour +1 (Shift+click: −1). The window can cross midnight">
+                    <span>from</span><b data-field="activeStart">08:00</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="23" step="1" value="8" data-field="activeStartSlider" aria-label="Active window start hour" title="Start of the active window">
+                  <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+                  <div class="limit-row row" data-field="activeEndRow" title="Click: end hour +1 (Shift+click: −1). An end before the start crosses midnight">
+                    <span>to</span><b data-field="activeEnd">23:00</b>
+                  </div>
+                  <input class="sld" type="range" min="0" max="23" step="1" value="23" data-field="activeEndSlider" aria-label="Active window end hour" title="End of the active window">
+                  <div class="sld-ends"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+                  <div class="rows">
+                    <div class="row" data-field="activeNowRow" title="Local time. Races only start while the window is open"><span>now</span><b data-field="activeNow">always</b></div>
+                  </div>
+                </div>
+              </div>
+              <div class="tune-sec" role="group" aria-labelledby="tune-automation-label">
+                <div class="tune-sec-h"><span id="tune-automation-label">Automation</span><b>behavior, panel and tools</b></div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></span>
+                  <div class="card-h"><span class="card-t">Switches</span><span class="card-s">saved on this browser</span></div>
+                  <div class="set-row">
+                    <span class="set-lbl">Breaks<i>human pauses between races</i></span>
+                    <span class="set-val"><b data-sw-txt="breaks" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="breaks" data-on="1" title="Human pauses between races (9-16 races apart, 20-90 s, 15% of them 3-10 min)"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Mystery Box<i>free garage reward, every ~21 h</i></span>
+                    <span class="set-val"><b data-sw-txt="mysteryBox" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="mysteryBox" data-on="1" title="Claim the free garage reward roughly every 21 h"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Stickers<i>one in every race</i></span>
+                    <span class="set-val"><b data-sw-txt="stickers" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="stickers" data-on="1" title="Send one sticker in every race"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK farming<i>race while this tab is hidden</i></span>
+                    <span class="set-val"><b data-sw-txt="backgroundFarm" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="backgroundFarm" data-on="0" title="Off by default. Chrome can freeze a hidden tab, and a race with no keys ends in a disqualification. Turn it on only if you accept that risk."></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK keep-alive<i>near-silent audio holds the tab</i></span>
+                    <span class="set-val"><b data-sw-txt="keepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="keepAlive" data-on="0" title="Optional and off by default. Near-silent audio makes Chrome treat this tab as active while AFK farming is on. It needs one click to unlock audio and cannot guarantee that the tab will not freeze. Muting the tab can disable it."></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK interlock<i>hidden races need keep-alive running</i></span>
+                    <span class="set-val"><b data-sw-txt="afkRequireKeepAlive" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="afkRequireKeepAlive" data-on="0" title="Recommended with AFK farming: a hidden tab cannot open a race unless the keep-alive reports a running AudioContext. A suspended or blocked keep-alive holds the queue instead of risking a DQ."></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">AFK safety guard<i>DQ after a freeze turns AFK off</i></span>
+                    <span class="set-val"><b data-sw-txt="afkFreezeGuard" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="afkFreezeGuard" data-on="1" title="On by default. If a disqualification happens within 15 minutes of a recorded freeze while AFK farming is on, AFK is turned off and a notice is kept. It does not undo the DQ."></button></span>
+                  </div>
+                  <div class="set-row afk-health-row" title="Live AFK state, keep-alive state and freeze events recorded by this browser">
+                    <span class="set-lbl">AFK health<i>hidden state · freeze count</i></span>
+                    <span class="set-val"><b data-field="afkHealth" data-state="off" role="status" aria-live="polite">off · visible-only</b><button class="afk-health-reset" type="button" data-act="afkFreezeReset" title="Clear the freeze history recorded in this browser">reset</button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Auto nitro<i>skips one long word per race</i></span>
+                    <span class="set-val"><b data-sw-txt="useNitro" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="useNitro" data-on="1" title="Auto nitro: press Enter once per race to skip one word chosen by the nitro strategy. It does not raise WPM; the saved time is paid back over the rest of the lesson"></button></span>
+                  </div>
+                  <div class="set-row nitro-strategy-row">
+                    <span class="set-lbl">Nitro strategy<i>which word Enter skips</i></span>
+                    <span class="set-val"><select class="nitro-strategy" data-field="nitroStrategy" aria-label="Nitro strategy"><option value="longest">longest</option><option value="first">first</option><option value="last">last</option></select></span>
+                  </div>
+                  <div class="set-row nitro-target-row" title="The word the nitro strategy would skip on the current lesson. It updates live and clears after the nitro is spent.">
+                    <span class="set-lbl">Nitro target<i>the word Enter would skip</i></span>
+                    <span class="set-val"><b data-field="nitroPreview">—</b></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Guard<i>stops on an impossible reading</i></span>
+                    <span class="set-val"><b data-sw-txt="guard" data-on="1">on</b><button class="sw" type="button" role="switch" aria-checked="true" data-toggle="guard" data-on="1" title="Safety guard: ends the race and opens a long break if the measured WPM goes past the ceiling. Turn it off only if you know what you are doing"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Sound<i>discreet tone when the bot waits</i></span>
+                    <span class="set-val"><b data-sw-txt="sound" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="sound" data-on="0" title="Sound alerts: a short tone on long breaks, duplicate copies and site blocks"></button></span>
+                  </div>
+                  <div class="set-row">
+                    <span class="set-lbl">Desktop alerts<i>DQ and site blocks, with permission</i></span>
+                    <span class="set-val"><b data-sw-txt="notifications" data-on="0">off</b><button class="sw" type="button" role="switch" aria-checked="false" data-toggle="notifications" data-on="0" title="Desktop alerts: permission is requested on the first click. Only disqualifications, site blocks and the AFK safety guard use them; the panel and sound settings are unchanged."></button></span>
+                  </div>
+                </div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 0 18h1.6a1.7 1.7 0 0 0 1.2-2.9l-.5-.5a1.7 1.7 0 0 1 1.2-2.9H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.7Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="8.3" r="1.1" fill="currentColor" stroke="none"/></svg></span>
+                  <div class="card-h"><span class="card-t">Theme</span><span class="card-s" data-field="themeName">Carbon</span></div>
+                  <div class="themes" data-field="themes" role="group" aria-label="Panel theme">
+                    <button class="theme" type="button" data-theme-btn="carbon" aria-pressed="true" title="Carbon: green on carbon, the classic"><i class="sw-carbon"></i><span>Carbon</span></button>
+                    <button class="theme" type="button" data-theme-btn="aurora" aria-pressed="false" title="Aurora: teal fading into violet"><i class="sw-aurora"></i><span>Aurora</span></button>
+                    <button class="theme" type="button" data-theme-btn="sunset" aria-pressed="false" title="Sunset: warm orange and pink"><i class="sw-sunset"></i><span>Sunset</span></button>
+                    <button class="theme" type="button" data-theme-btn="ice" aria-pressed="false" title="Ice: cold cyan on deep blue"><i class="sw-ice"></i><span>Ice</span></button>
+                    <button class="theme" type="button" data-theme-btn="violet" aria-pressed="false" title="Violet: purple neon"><i class="sw-violet"></i><span>Violet</span></button>
+                    <button class="theme" type="button" data-theme-btn="rgb" aria-pressed="false" title="RGB: animated rainbow border and title"><i class="sw-rgb"></i><span>RGB</span></button>
+                  </div>
+                </div>
+                <div class="card">
+                  <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/></svg></span>
+                  <div class="card-h"><span class="card-t">Config</span><span class="card-s">carry it anywhere</span></div>
+                  <div class="rows btn-row" style="margin:0 0 2px">
+                    <button class="act" type="button" data-act="export" title="Copy this configuration (profile, limit, sound, switches) so it can be pasted in another browser or account">copy</button>
+                    <button class="act" type="button" data-act="import" title="Apply whatever config is pasted in the box below">apply</button>
+                    <button class="act" type="button" data-act="report" title="Copy a diagnostic report (version, profile, counters, last races, recent notices, flight recorder, environment) to paste when something is off">report</button>
+                    <button class="act" type="button" data-act="support" title="Copy a redacted support bundle for an issue: tokens, account names and identifiers are removed">support</button>
+                    <button class="act" type="button" data-act="csv" title="Download the closed sessions as a CSV (date, races, WPM, target, deviation, accuracy, DQ, reason) for a spreadsheet">csv</button>
+                    <button class="act" type="button" data-act="releases" title="Open the GitHub release history to install a previous version if the newest one misbehaves">versions</button>
+                    <button class="act" type="button" data-act="channel" title="${CHANNEL === 'canary' ? 'Download the stable release and go back to the normal channel' : 'Install the canary test build; it updates itself from the canary release and never changes the stable one'}">${CHANNEL === 'canary' ? 'stable' : 'canary'}</button>
+                  </div>
+                  <div class="rows">
+                    <div class="row up-row" data-field="upRow" title="Auto-update check: the last result, its error and when it will retry"><span>update</span><b data-field="up">—</b></div>
+                    <div class="row ch-row" data-field="chRow" title="Daily Challenge popup: close it automatically. Shift+click sets a CSS selector"><span>challenge</span><b data-field="ch">on</b></div>
+                  </div>
+                  <textarea class="cfg-text" data-field="cfgText" spellcheck="false" placeholder="Paste a copied config here and press apply."></textarea>
+                  <div class="cfg-note" data-field="cfgNote">Pace and switches are saved on this browser and survive reloads.</div>
+                </div>
+              </div>
+            </section>
+            </template>
+
+            <!-- ------------------------------ LOG --------------------------- -->
+            <template data-view="log">
+            <section class="view v-log" id="nt-view-log" role="tabpanel" aria-label="Log">
+              <div class="view-head"><span>Log</span><b>sessions · challenges</b></div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 1.8"/></svg></span>
+                <div class="card-h"><span class="card-t" data-field="prevLabel">prev</span><span class="card-s">click for the table</span></div>
+                <div class="prev-row row" style="display:none" title="The last session that closed: races, average WPM and deviation from target">
+                  <span>session</span><b data-field="prev">—</b>
+                </div>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
+                <div class="card-h"><span class="card-t">Closed sessions</span><span class="card-s" data-field="logCount">0</span></div>
+                <div class="log-list" data-field="closedList"></div>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V9M10 20V4M16 20v-6M22 20H2"/></svg></span>
+                <div class="card-h"><span class="card-t">Last 7 days</span><span class="card-s" data-field="weekTotal">empty</span></div>
+                <div class="log-list" data-field="weekList"></div>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>
+                <div class="card-h"><span class="card-t">Daily Challenges</span><span class="card-s" data-field="chCount">no data</span></div>
+                <div class="log-list" data-field="chList"></div>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 1.8"/></svg></span>
+                <div class="card-h"><span class="card-t">Calibration</span><span class="card-s">account average</span></div>
+                <div class="rows">
+                  <div class="row"><span>when</span><b data-field="calLogWhen">never</b></div>
+                  <div class="row"><span>wpm</span><b data-field="calLogWpm">—</b></div>
+                  <div class="row"><span>accuracy</span><b data-field="calLogAcc">—</b></div>
+                  <div class="row" title="Our accuracy model minus the one the game printed, averaged over the last 20 races"><span>model Δ</span><b data-field="calDelta">—</b></div>
+                </div>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19V5M4 19h16"/><path d="M8 15l3-4 3 2 4-6"/></svg></span>
+                <div class="card-h"><span class="card-t">Live passes</span><span class="card-s" data-field="liveCount">none</span></div>
+                <div class="rows btn-row" style="margin:0 0 2px">
+                  <button class="act" type="button" data-field="liveLoad" title="Load tests/live/live-history.csv or live-history.json (the files npm run live writes) to compare the last passes">load file</button>
+                  <button class="act" type="button" data-field="liveClear" title="Forget the loaded passes; the CSV on disk is untouched">clear</button>
+                  <button class="act" type="button" data-field="livePickExport" disabled title="Download the selected A/B comparison as live-compare-*.csv">export A/B</button>
+                </div>
+                <input type="file" accept=".csv,.json,text/csv,application/json" data-field="liveFile" style="display:none" aria-label="Load the live pass CSV or JSON">
+                <div class="today-row row" data-field="liveDriftRow" style="display:none" title="Latest pass mean vs the average of the previous passes"><span>trend</span><b data-field="liveDrift">—</b></div>
+                <div class="today-row row" data-field="liveCompareRow" style="display:none" title="The last two passes, side by side (mean model Δ)"><span>last two</span><b data-field="liveCompare">—</b></div>
+                <div class="rows" data-field="livePickRow" style="display:none">
+                  <div class="row cmp-row" title="First pass; the difference is B minus A"><span>A</span><select class="cmp-select" data-field="livePickA" aria-label="First live pass"></select></div>
+                  <div class="row cmp-row" title="Second pass; the difference is B minus A"><span>B</span><select class="cmp-select" data-field="livePickB" aria-label="Second live pass"></select></div>
+                  <div class="row" title="Mean model Δ of B minus A"><span>diff</span><b data-field="livePickResult">—</b></div>
+                </div>
+                <div class="today-row row" data-field="liveStreakRow" style="display:none" title="Two or more passes in a row drifted past the band"><span>streak</span><b data-field="liveStreak">—</b></div>
+                <div class="today-row row" data-field="liveSpreadRow" style="display:none" title="Latest block of 10+ races: model Δ spread (sd); above 0.10 pts means the block is too scattered"><span>spread</span><b data-field="liveSpread">—</b></div>
+                <div class="log-list" data-field="liveList"></div>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8h12M6 12h12M6 16h8"/></svg></span>
+                <div class="card-h"><span class="card-t">Today</span><span class="card-s">resets at midnight</span></div>
+                <div class="today-row row" data-field="todayRow" style="display:none" title="Today: races · average WPM · Mystery Boxes claimed · disqualifications"><span>summary</span><b data-field="today">—</b></div>
+                <div class="log-list" data-field="noticeList"></div>
+              </div>
+            </section>
+            </template>
+
+            <!-- ------------------------------ INFO -------------------------- -->
+            <template data-view="info">
+            <section class="view v-info" id="nt-view-info" role="tabpanel" aria-label="Info">
+              <div class="view-head"><span>Info</span><b>keys · guardrails</b></div>
+              <div class="card update-card">
+                <div class="card-h"><span class="card-t">Updates</span><span class="card-s">GitHub releases</span></div>
+                <div class="rows">
+                  <div class="row" title="Last public update check. A newer build is downloaded from GitHub, never installed without your click."><span>check</span><b data-field="upInfo">—</b></div>
+                </div>
+                <div class="season-actions">
+                  <a class="act" href="${UPDATE_PAGE_URL}" target="_blank" rel="noopener noreferrer" title="Open the latest release on GitHub">open GitHub</a>
+                  <button class="act" type="button" data-act="updateCheck" title="Check the public Gist for a newer version now">check now</button>
+                </div>
+                <div class="cfg-note">The Gist meta is checked every 5 minutes, when you return to the tab and when the connection comes back; if the Gist is down, the latest GitHub release asset is used. The installed copy changes only when you download a release.</div>
+              </div>
+              <div class="card">
+                <div class="card-h"><span class="card-t">About</span><span class="card-s" data-field="aboutVer">v7.0.0</span></div>
+                <p class="about">Human-paced racer for one account: calibrated typing inside the account's own envelope, human breaks, a queue that recovers the garage, reloads, CAPTCHAs and re-logins, and a guard that stops everything on an impossible reading. <b>There is no fast mode.</b></p>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M17 6h3M4 18h3M11 18h9"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="18" r="2"/></svg></span>
+                <div class="card-h"><span class="card-t">Keys</span><span class="card-s">any time</span></div>
+                <div class="keys">
+                  <div class="key-row"><kbd>MODE chip</kbd><span>status only: always AUTO, it starts by itself</span></div>
+                  <div class="key-row"><kbd>Alt+A</kbd><span>resume, from anywhere and even while typing</span></div>
+                  <div class="key-row"><kbd>Alt+N / Stop</kbd><span>stop it (the chip never turns it off)</span></div>
+                  <div class="key-row"><kbd>Alt+R</kbd><span>clear the race history</span></div>
+                  <div class="key-row"><kbd>Alt+Shift+C</kbd><span>clear the accuracy trend (model Δ)</span></div>
+                  <div class="key-row"><kbd>Alt+H</kbd><span>closed sessions, table in the console</span></div>
+                  <div class="key-row"><kbd>Alt+T</kbd><span>cycle the panel theme (saved)</span></div>
+                  <div class="key-row"><kbd>Alt+G</kbd><span>fold / unfold the garage panel</span></div>
+                  <div class="key-row"><kbd>Alt+M</kbd><span>footer HUD: full / compact / hidden</span></div>
+                  <div class="key-row"><kbd>Alt+S / Esc</kbd><span>stop (mid-race it waits for the race to end)</span></div>
+                </div>
+              </div>
+              <div class="card">
+                <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l8 4v6c0 5-3.4 7.4-8 8-4.6-.6-8-3-8-8V7z"/></svg></span>
+                <div class="card-h"><span class="card-t">Guard</span><span class="card-s">two failures, no excuses</span></div>
+                <div class="keys">
+                  <div class="key-row"><kbd>ceiling</kbd><span>no race may average above <b data-field="infoCap">120</b> WPM</span></div>
+                  <div class="key-row"><kbd>copies</kbd><span>two copies alive: one types, the rest wait</span></div>
+                  <div class="key-row"><kbd>report</kbd><span>TUNE → report copies a full diagnostic</span></div>
+                </div>
+              </div>
+            </section>
+            </template>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="status" data-field="status" role="status" aria-live="polite">waiting…</div>
+          <div class="foot-bar">
+            <span class="led"></span>
+            <b data-field="footState">idle</b>
+            <span class="fsep">|</span>
+            <span data-field="footMode">auto</span>
+            <span class="fsep">|</span>
+            <span data-field="footWpm">— wpm</span>
+            <span class="fsep">|</span>
+            <span data-field="footAcc" title="Live accuracy">— acc</span>
+            <span class="fsep">|</span>
+            <span data-field="footClock" title="Race clock">0:00</span>
+            <span class="fsep">|</span>
+            <span data-field="footCap">cap 120</span>
+            <span class="hint" data-field="footHint">Alt+S stop</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="toggle" type="button">Pause</button>
+          <button class="gear" type="button" data-open="0" title="Settings: pace profile, switches, session limit and export/import of the config">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </button>
+          <button class="stop" type="button" title="Stop after the current race · Alt+S">Stop</button>
+        </div>
+      </div>
+    `;
+
+    // Las vistas inactivas viven en <template>: sus nodos se parsean, pero no
+    // entran en el arbol del documento ni en el layout. `pick` las encuentra
+    // para que el codigo que ya las pinta siga funcionando, y `hydrateView`
+    // las mueve a su sitio la primera vez que se abre la pestana.
+    const templates = [...shadow.querySelectorAll('template[data-view]')];
+    const pick = (selector) => {
+      const found = shadow.querySelector(selector);
+      if (found) return found;
+      for (const template of templates) {
+        const node = template.content.querySelector(selector);
+        if (node) return node;
+      }
+      return null;
+    };
+
+    document.body.appendChild(host);
+    perfCounters.panelNodes = shadow.querySelectorAll('*').length;
+    panel.host = host;
+    panel.mountedViews = new Set(['stats']);
+
+    panel.root = pick('.panel');
+    panel.refs = {
+      mode: pick('.mode'),
+      pace: pick('.pace'),
+      cap: pick('[data-field="cap"]'),
+      hudRow: pick('.hud-row'),
+      hud: pick('[data-field="hud"]'),
+      clockRow: pick('.clock-row'),
+      clock: pick('[data-field="clock"]'),
+      resultRow: pick('.result-row'),
+      result: pick('[data-field="result"]'),
+      guardRow: pick('.guard-row'),
+      guard: pick('[data-field="guard"]'),
+      watchRow: pick('.watch-row'),
+      watch: pick('[data-field="watch"]'),
+      todayRow: pick('[data-field="todayRow"]'),
+      today: pick('[data-field="today"]'),
+      boxRow: pick('.box-row'),
+      box: pick('[data-field="box"]'),
+      target: pick('[data-field="target"]'),
+      live: pick('[data-field="live"]'),
+      acc: pick('[data-field="acc"]'),
+      paceSource: pick('[data-field="paceSource"]'),
+      session: pick('[data-field="session"]'),
+      sessionRow: pick('.session-row'),
+      sessionLeft: pick('[data-field="sessionLeft"]'),
+      breakLeft: pick('[data-field="break"]'),
+      dqRow: pick('.dq-row'),
+      dq: pick('[data-field="dq"]'),
+      status: pick('[data-field="status"]'),
+      trimRow: pick('.trim-row'),
+      trim: pick('[data-field="trim"]'),
+      history: pick('[data-field="history"]'),
+      progress: pick('[data-field="progress"]'),
+      progFill: pick('[data-field="progfill"]'),
+      races: pick('[data-field="races"]'),
+      dayXp: pick('[data-field="dayXp"]'),
+      rate: pick('[data-field="rate"]'),
+      nitro: pick('[data-field="nitro"]'),
+      nitroDelta: pick('[data-field="nitroDelta"]'),
+      cycle: pick('[data-field="cycle"]'),
+      xpBreak: pick('[data-field="xpBreak"]'),
+      tanda: pick('[data-field="tanda"]'),
+      raceLimitRow: pick('[data-field="raceLimitRow"]'),
+      limit: pick('[data-field="limit"]'),
+      prevRow: pick('.prev-row'),
+      prevLabel: pick('[data-field="prevLabel"]'),
+      prev: pick('[data-field="prev"]'),
+      // --- rediseno v7: rail, cabecera, ajustes y barra de estado ---
+      title: pick('[data-field="title"]'),
+      ver: pick('[data-field="ver"]'),
+      update: pick('.ghlink'),
+      rail: pick('.rail'),
+      views: pick('.views'),
+      liveTag: pick('[data-field="liveTag"]'),
+      liveAge: pick('[data-field="liveAge"]'),
+      liveNow: pick('[data-field="liveNow"]'),
+      liveNowAcc: pick('[data-field="liveNowAcc"]'),
+      footState: pick('[data-field="footState"]'),
+      footMode: pick('[data-field="footMode"]'),
+      footWpm: pick('[data-field="footWpm"]'),
+      footAcc: pick('[data-field="footAcc"]'),
+      footClock: pick('[data-field="footClock"]'),
+      footCap: pick('[data-field="footCap"]'),
+      footHint: pick('[data-field="footHint"]'),
+      seg: pick('.seg'),
+      themes: pick('[data-field="themes"]'),
+      themeName: pick('[data-field="themeName"]'),
+      tuneCap: pick('[data-field="tuneCap"]'),
+      tuneRange: pick('[data-field="tuneRange"]'),
+      healthSummary: pick('[data-field="healthSummary"]'),
+      healthAccount: pick('[data-field="healthAccount"]'),
+      healthAfk: pick('[data-field="healthAfk"]'),
+      healthUpdate: pick('[data-field="healthUpdate"]'),
+      healthFreeze: pick('[data-field="healthFreeze"]'),
+      healthNote: pick('[data-field="healthNote"]'),
+      tuneSearch: pick('[data-field="tuneSearch"]'),
+      tuneClear: pick('[data-field="tuneClear"]'),
+      tuneCount: pick('[data-field="tuneCount"]'),
+      tuneEmpty: pick('[data-field="tuneEmpty"]'),
+      limitSlider: pick('[data-field="limitSlider"]'),
+      etaLeft: pick('[data-field="etaLeft"]'),
+      timeLimitRow: pick('[data-field="timeLimitRow"]'),
+      timeLimit: pick('[data-field="timeLimit"]'),
+      timeSlider: pick('[data-field="timeSlider"]'),
+      timeLeftRow: pick('[data-field="timeLeftRow"]'),
+      timeLeft: pick('[data-field="timeLeft"]'),
+      xpLimitRow: pick('[data-field="xpLimitRow"]'),
+      xpLimit: pick('[data-field="xpLimit"]'),
+      xpSlider: pick('[data-field="xpSlider"]'),
+      xpRow: pick('[data-field="xpRow"]'),
+      xpTotal: pick('[data-field="xpTotal"]'),
+      dailyRaceRow: pick('[data-field="dailyRaceRow"]'),
+      dailyRaces: pick('[data-field="dailyRaces"]'),
+      dailyRaceSlider: pick('[data-field="dailyRaceSlider"]'),
+      dailyXpRow: pick('[data-field="dailyXpRow"]'),
+      dailyXp: pick('[data-field="dailyXp"]'),
+      dailyXpSlider: pick('[data-field="dailyXpSlider"]'),
+      dailyLeft: pick('[data-field="dailyLeft"]'),
+      activeRow: pick('[data-field="activeRow"]'),
+      activeState: pick('[data-field="activeState"]'),
+      activeStartRow: pick('[data-field="activeStartRow"]'),
+      activeStart: pick('[data-field="activeStart"]'),
+      activeStartSlider: pick('[data-field="activeStartSlider"]'),
+      activeEndRow: pick('[data-field="activeEndRow"]'),
+      activeEnd: pick('[data-field="activeEnd"]'),
+      activeEndSlider: pick('[data-field="activeEndSlider"]'),
+      activeNow: pick('[data-field="activeNow"]'),
+      calRow: pick('[data-field="calRow"]'),
+      cal: pick('[data-field="cal"]'),
+      calWpm: pick('[data-field="calWpm"]'),
+      calAcc: pick('[data-field="calAcc"]'),
+      calAccount: pick('[data-field="calAccount"]'),
+      acctId: pick('[data-field="acctId"]'),
+      acctState: pick('[data-field="acctState"]'),
+      acctAvg: pick('[data-field="acctAvg"]'),
+      acctTarget: pick('[data-field="acctTarget"]'),
+      acctAcc: pick('[data-field="acctAcc"]'),
+      acctHistory: pick('[data-field="acctHistory"]'),
+      acctRange: pick('[data-field="acctRange"]'),
+      acctRead: pick('[data-field="acctRead"]'),
+      acctRefresh: pick('[data-field="acctRefresh"]'),
+      customWpm: pick('[data-field="customWpm"]'),
+      customAcc: pick('[data-field="customAcc"]'),
+      calDelta: pick('[data-field="calDelta"]'),
+      accSpark: pick('[data-field="accSpark"]'),
+      accSparkLine: pick('[data-field="accSparkLine"]'),
+      accSparkArea: pick('[data-field="accSparkArea"]'),
+      liveCount: pick('[data-field="liveCount"]'),
+      liveLoad: pick('[data-field="liveLoad"]'),
+      liveFile: pick('[data-field="liveFile"]'),
+      liveList: pick('[data-field="liveList"]'),
+      liveClear: pick('[data-field="liveClear"]'),
+      liveDriftRow: pick('[data-field="liveDriftRow"]'),
+      liveDrift: pick('[data-field="liveDrift"]'),
+      liveCompareRow: pick('[data-field="liveCompareRow"]'),
+      liveCompare: pick('[data-field="liveCompare"]'),
+      livePickRow: pick('[data-field="livePickRow"]'),
+      livePickA: pick('[data-field="livePickA"]'),
+      livePickB: pick('[data-field="livePickB"]'),
+      livePickResult: pick('[data-field="livePickResult"]'),
+      livePickExport: pick('[data-field="livePickExport"]'),
+      liveStreakRow: pick('[data-field="liveStreakRow"]'),
+      liveStreak: pick('[data-field="liveStreak"]'),
+      liveSpreadRow: pick('[data-field="liveSpreadRow"]'),
+      liveSpread: pick('[data-field="liveSpread"]'),
+      chCount: pick('[data-field="chCount"]'),
+      chList: pick('[data-field="chList"]'),
+      calLogWhen: pick('[data-field="calLogWhen"]'),
+      calLogWpm: pick('[data-field="calLogWpm"]'),
+      calLogAcc: pick('[data-field="calLogAcc"]'),
+      chRow: pick('[data-field="chRow"]'),
+      ch: pick('[data-field="ch"]'),
+      weekList: pick('[data-field="weekList"]'),
+      weekTotal: pick('[data-field="weekTotal"]'),
+      closedList: pick('[data-field="closedList"]'),
+      logCount: pick('[data-field="logCount"]'),
+      noticeList: pick('[data-field="noticeList"]'),
+      aboutVer: pick('[data-field="aboutVer"]'),
+      infoCap: pick('[data-field="infoCap"]'),
+      gear: pick('.gear'),
+      cfg: pick('.cfg'),
+      cfgText: pick('[data-field="cfgText"]'),
+      cfgNote: pick('[data-field="cfgNote"]'),
+      up: pick('[data-field="up"]'),
+      upInfo: pick('[data-field="upInfo"]'),
+      updateCheck: pick('[data-act="updateCheck"]'),
+      afkFreezeReset: pick('[data-act="afkFreezeReset"]'),
+      nitroStrategy: pick('[data-field="nitroStrategy"]'),
+      nitroPreview: pick('[data-field="nitroPreview"]'),
+      foot: pick('[data-field="foot"]'),
+      avg: pick('[data-field="avg"]'),
+      best: pick('[data-field="best"]'),
+      toggle: pick('.toggle'),
+      stop: pick('.stop'),
+      collapse: pick('.collapse'),
+      seasonCard: pick('[data-field="seasonCard"]'),
+      seasonTag: pick('[data-field="seasonTag"]'),
+      seasonName: pick('[data-field="seasonName"]'),
+      seasonFill: pick('[data-field="seasonFill"]'),
+      seasonTier: pick('[data-field="seasonTier"]'),
+      seasonXp: pick('[data-field="seasonXp"]'),
+      seasonNext: pick('[data-field="seasonNext"]'),
+      seasonRaces: pick('[data-field="seasonRaces"]'),
+      seasonPace: pick('[data-field="seasonPace"]'),
+      seasonEnds: pick('[data-field="seasonEnds"]'),
+      seasonAlert: pick('[data-field="seasonAlert"]'),
+      seasonNote: pick('[data-field="seasonNote"]'),
+      seasonOpen: pick('[data-field="seasonOpen"]'),
+    };
+
+    // El ultimo aviso importante se pinta aqui desde ya: si el panel se crea
+    // despues de una DQ, la razon no se pierde.
+    statusEl = panel.refs.status;
+    if (statusEl) setText(statusEl, lastStatus || 'waiting…');
+
+    panel.refs.toggle.title = 'Pause or resume sending keys (inside a race the pause resumes by itself after 6 s)';
+    // El chip del ritmo sigue siendo LEGIT (no hay otro tipo de ritmo) y ahora
+    // cicla el perfil: soft, normal, fast, todos con la misma cadencia humana.
+    paintPace();
+    paintTheme();
+
+    // Cabecera: version. No cambia en caliente, se pinta una vez.
+    const versionLabel = `v${VERSION}${CHANNEL === 'canary' ? ' · canary' : ''}`;
+    setText(panel.refs.ver, versionLabel);
+    setText(panel.refs.aboutVer, versionLabel);
+    if (!panel.mountedViews || panel.mountedViews.has('log')) {
+      paintLogLists();
+      paintChallengeList();
+    } else {
+      readChallengeProgress();
+    }
+    if (panel.refs.cap) {
+      const cap = CONFIG.wpm.hardCap;
+      setText(panel.refs.cap, Number.isFinite(cap) ? `≤ ${cap} wpm` : 'no cap');
+    }
+
+    if (panel.refs.raceLimitRow) {
+      panel.refs.raceLimitRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const next = LIMIT_STEPS.find((value) => value > session.raceLimit);
+        setRaceLimit(next === undefined ? 0 : next);
+      });
+    }
+
+    // La fila del tope por tiempo cicla igual que la de carreras, con sus
+    // propios escalones: libre, 15 min, 30 min, 1 h, 2 h.
+    if (panel.refs.timeLimitRow) {
+      panel.refs.timeLimitRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const next = TIME_LIMIT_STEPS.find((value) => value > session.timeLimit);
+        setTimeLimit(next === undefined ? 0 : next);
+      });
+    }
+
+    // Y el tercero, en XP: mismos escalones que se pintan en sld-ends.
+    if (panel.refs.xpLimitRow) {
+      panel.refs.xpLimitRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const next = XP_LIMIT_STEPS.find((value) => value > session.xpLimit);
+        setXpLimit(next === undefined ? 0 : next);
+      });
+    }
+
+    // La tarjeta Season no adivina: abre la pagina oficial y deja que su propia
+    // pestana escriba la foto que este panel leera al volver.
+    if (panel.refs.afkFreezeReset) {
+      panel.refs.afkFreezeReset.addEventListener('click', (event) => {
+        event.stopPropagation();
+        resetAfkFreezeStats();
+        log('AFK freeze history cleared for this browser.');
+        paintConfig();
+        if (typeof paintGaragePanel === 'function') paintGaragePanel();
+      });
+    }
+
+    if (panel.refs.updateCheck) {
+      panel.refs.updateCheck.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const button = panel.refs.updateCheck;
+        if (button.disabled) return;
+        button.disabled = true;
+        setText(button, 'checking…');
+        const ok = await checkForUpdate(true);
+        setText(button, ok ? 'check now' : 'retry');
+        paintUpdateHealth(true);
+        setTimeout(() => {
+          if (!button.isConnected) return;
+          setText(button, 'check now');
+          button.disabled = false;
+        }, 1400);
+      });
+    }
+
+    if (panel.refs.seasonOpen) {
+      panel.refs.seasonOpen.addEventListener('click', (event) => {
+        event.stopPropagation();
+        try {
+          window.open('https://www.nitrotype.com/season', '_blank', 'noopener');
+          setText(panel.refs.seasonNote, 'Season opened. This card refreshes when that tab finishes loading.');
+        } catch {
+          location.href = '/season';
+        }
+      });
+    }
+
+    // La fila de la ultima tanda cerrada abre la misma tabla que Alt+H: el
+    // detalle de cada sesion, sin tener que recordar el atajo.
+    if (panel.refs.prevRow) {
+      panel.refs.prevRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        showTandaLog();
+      });
+    }
+
+    // Rail: cada icono abre su vista. El cuadrado verde que viaja lo mueve el
+    // data-index del contenedor, con muelle, desde el CSS.
+    if (panel.refs.rail) {
+      panel.refs.rail.addEventListener('click', (event) => {
+        const btn = event.target && event.target.closest ? event.target.closest('[data-tab-btn]') : null;
+        if (!btn) return;
+        event.stopPropagation();
+        showTab(btn.dataset.tabBtn);
+        btn.blur();
+      });
+
+      // Patron tablist: flechas, Home y End mueven la vista y el foco. No toca
+      // el teclado del juego porque solo se activa con el foco dentro del rail.
+      panel.refs.rail.addEventListener('keydown', (event) => {
+        const btn = event.target && event.target.closest ? event.target.closest('[data-tab-btn]') : null;
+        if (!btn) return;
+        const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        const buttons = Array.from(panel.refs.rail.querySelectorAll('[data-tab-btn]'));
+        const current = buttons.indexOf(btn);
+        if (current < 0) return;
+        let next = current;
+        if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = buttons.length - 1;
+        else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (current + 1) % buttons.length;
+        else next = (current - 1 + buttons.length) % buttons.length;
+        event.preventDefault();
+        event.stopPropagation();
+        showTab(buttons[next].dataset.tabBtn);
+        buttons[next].focus();
+      });
+    }
+
+    // Tope de tanda con deslizador: los mismos escalones que el clic en la fila
+    // (libre, 10, 20, 50, 100). El relleno verde lo pinta paintLimitSlider.
+    if (panel.refs.limitSlider) {
+      panel.refs.limitSlider.addEventListener('input', (event) => {
+        event.stopPropagation();
+        const index = clamp(parseInt(panel.refs.limitSlider.value, 10) || 0, 0, LIMIT_STEPS.length - 1);
+        setRaceLimit(LIMIT_STEPS[index]);
+      });
+      paintLimitSlider();
+    }
+
+    // Mismo deslizador, otro reloj: el relleno verde lo pinta paintTimeSlider.
+    if (panel.refs.timeSlider) {
+      panel.refs.timeSlider.addEventListener('input', (event) => {
+        event.stopPropagation();
+        const index = clamp(parseInt(panel.refs.timeSlider.value, 10) || 0, 0, TIME_LIMIT_STEPS.length - 1);
+        setTimeLimit(TIME_LIMIT_STEPS[index]);
+      });
+      paintTimeSlider();
+    }
+
+    if (panel.refs.xpSlider) {
+      panel.refs.xpSlider.addEventListener('input', (event) => {
+        event.stopPropagation();
+        const index = clamp(parseInt(panel.refs.xpSlider.value, 10) || 0, 0, XP_LIMIT_STEPS.length - 1);
+        setXpLimit(XP_LIMIT_STEPS[index]);
+      });
+      paintXpSlider();
+    }
+
+    // Presupuesto diario: mismos dos controles (fila + deslizador) que los
+    // topes de tanda, pero guardados en sus propias claves.
+    if (panel.refs.dailyRaceRow) {
+      panel.refs.dailyRaceRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const next = DAILY_RACE_STEPS.find((value) => value > session.dailyRaceLimit);
+        setDailyRaceLimit(next === undefined ? 0 : next);
+      });
+    }
+    if (panel.refs.dailyRaceSlider) {
+      panel.refs.dailyRaceSlider.addEventListener('input', (event) => {
+        event.stopPropagation();
+        const index = clamp(parseInt(panel.refs.dailyRaceSlider.value, 10) || 0, 0, DAILY_RACE_STEPS.length - 1);
+        setDailyRaceLimit(DAILY_RACE_STEPS[index]);
+      });
+      paintDailyRaceSlider();
+    }
+    if (panel.refs.dailyXpRow) {
+      panel.refs.dailyXpRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const next = DAILY_XP_STEPS.find((value) => value > session.dailyXpLimit);
+        setDailyXpLimit(next === undefined ? 0 : next);
+      });
+    }
+    if (panel.refs.dailyXpSlider) {
+      panel.refs.dailyXpSlider.addEventListener('input', (event) => {
+        event.stopPropagation();
+        const index = clamp(parseInt(panel.refs.dailyXpSlider.value, 10) || 0, 0, DAILY_XP_STEPS.length - 1);
+        setDailyXpLimit(DAILY_XP_STEPS[index]);
+      });
+      paintDailyXpSlider();
+    }
+
+    // Horas activas: la fila enciende/apaga y los dos deslizadores eligen la
+    // hora exacta. Shift en las filas mueve al reves (o resetea el rango).
+    if (panel.refs.activeRow) {
+      panel.refs.activeRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (event.shiftKey) {
+          setActiveHour('start', 8, true);
+          setActiveHour('end', 23, true);
+          setActiveOn(true);
+          return;
+        }
+        setActiveOn(!session.activeOn);
+      });
+    }
+    if (panel.refs.activeStartRow) {
+      panel.refs.activeStartRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setActiveHour('start', (session.activeStart + (event.shiftKey ? 23 : 1)) % 24);
+      });
+    }
+    if (panel.refs.activeEndRow) {
+      panel.refs.activeEndRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setActiveHour('end', (session.activeEnd + (event.shiftKey ? 23 : 1)) % 24);
+      });
+    }
+    if (panel.refs.activeStartSlider) {
+      panel.refs.activeStartSlider.addEventListener('input', (event) => {
+        event.stopPropagation();
+        setActiveHour('start', parseInt(panel.refs.activeStartSlider.value, 10) || 0, true);
+        paintActiveSlider('start');
+      });
+      paintActiveSlider('start');
+    }
+    if (panel.refs.activeEndSlider) {
+      panel.refs.activeEndSlider.addEventListener('input', (event) => {
+        event.stopPropagation();
+        setActiveHour('end', parseInt(panel.refs.activeEndSlider.value, 10) || 0, true);
+        paintActiveSlider('end');
+      });
+      paintActiveSlider('end');
+    }
+
+    // Buscador de TUNE: filtra por texto de la tarjeta y por el titulo del
+    // bloque. Los ajustes ocultos siguen existiendo; solo dejan de ocupar sitio.
+    if (panel.refs.tuneSearch) {
+      panel.refs.tuneSearch.addEventListener('input', () => filterTune());
+      panel.refs.tuneSearch.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        event.stopPropagation();
+      });
+    }
+    if (panel.refs.tuneClear) {
+      panel.refs.tuneClear.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (panel.refs.tuneSearch) panel.refs.tuneSearch.value = '';
+        filterTune();
+        if (panel.refs.tuneSearch) panel.refs.tuneSearch.focus();
+      });
+    }
+    filterTune();
+
+    // Fila de auto-calibracion: no hay apagado; el clic solo fuerza una lectura
+    // nueva para que el rango se mueva ya con la media mas reciente.
+    if (panel.refs.calRow) {
+      panel.refs.calRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        refreshCalibration();
+      });
+    }
+
+    if (panel.refs.acctRefresh) {
+      panel.refs.acctRefresh.addEventListener('click', (event) => {
+        event.stopPropagation();
+        refreshCalibration();
+        panel.refs.acctRefresh.blur();
+      });
+    }
+
+    // Overrides manuales de WPM y precision. `change` evita aplicar cada tecla
+    // a medias; Enter confirma sin tener que pulsar fuera del campo.
+    if (panel.refs.customWpm) {
+      panel.refs.customWpm.addEventListener('change', (event) => {
+        event.stopPropagation();
+        setCustomWpm(panel.refs.customWpm.value);
+      });
+      panel.refs.customWpm.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        panel.refs.customWpm.blur();
+      });
+    }
+    if (panel.refs.customAcc) {
+      panel.refs.customAcc.addEventListener('change', (event) => {
+        event.stopPropagation();
+        setCustomAccuracy(panel.refs.customAcc.value);
+      });
+      panel.refs.customAcc.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        panel.refs.customAcc.blur();
+      });
+    }
+
+    // Fila del popup de challenges: clic normal enciende/apaga; Mayus+clic pide
+    // el selector CSS para cuando el barrido por texto no baste.
+    if (panel.refs.chRow) {
+      panel.refs.chRow.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (event.shiftKey) {
+          const next = prompt('CSS selector for the Daily Challenge popup (empty = detect by text):', CONFIG.challenges.selector || '');
+          if (next !== null) {
+            CONFIG.challenges.selector = next.trim();
+            disk.set(KEYS.challengeSelector, CONFIG.challenges.selector);
+            log(CONFIG.challenges.selector ? `Challenge selector set: ${CONFIG.challenges.selector}` : 'Challenge selector cleared: text detection.');
+            paintChallenges();
+          }
+          return;
+        }
+        CONFIG.challenges.enabled = !CONFIG.challenges.enabled;
+        savePrefs();
+        log(CONFIG.challenges.enabled ? 'Daily Challenge popups: auto-close on.' : 'Daily Challenge popups: auto-close off.');
+        paintChallenges();
+      });
+    }
+
+    // El panel es nuevo: hay que repintar el historial y la temporada aunque
+    // los datos no hayan cambiado (si no, quedan vacios hasta el proximo cambio).
+    panel.historySig = '';
+    panel.seasonSig = '';
+    panel.seasonBaseSig = '';
+    seasonPaintAt = 0;
+
+    applyCollapsed(disk.get(KEYS.panelCollapsed) === '1');
+    applyFootMode();
+    restorePosition();
+    makeDraggable(shadow);
+
+    panel.refs.toggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setPaused(!session.paused);
+      panel.refs.toggle.blur();
+    });
+
+    panel.refs.stop.addEventListener('click', (event) => {
+      event.stopPropagation();
+      // Parado no hay nada que parar: el mismo boton vuelve a arrancar. Hace
+      // lo mismo que Alt+A, con las mismas puertas (tope diario y horas).
+      if (session.stopped) resumeAuto();
+      else requestStop();
+      panel.refs.stop.blur();
+    });
+
+    panel.refs.collapse.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const collapsed = panel.root.dataset.collapsed !== 'true';
+      applyCollapsed(collapsed);
+      restorePosition();
+      if (!collapsed) updatePanel(true);
+      panel.refs.collapse.blur();
+    });
+
+    // El chip del modo no es un interruptor: dice AUTO y nada mas. Parar es
+    // cosa de Stop / Esc, y la cola se rearma sola.
+
+    // El chip LEGIT cambia de perfil al pulsarlo: soft -> balanced -> fast.
+    if (panel.refs.pace) {
+      panel.refs.pace.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const index = PACE_ORDER.indexOf(paceProfile);
+        setPaceProfile(PACE_ORDER[(index + 1) % PACE_ORDER.length]);
+        panel.refs.pace.blur();
+      });
+    }
+
+    // Tema: un solo escuchador para las seis muestras. El CSS hace el resto.
+    if (panel.refs.themes) {
+      panel.refs.themes.addEventListener('click', (event) => {
+        const chip = event.target && event.target.closest ? event.target.closest('[data-theme-btn]') : null;
+        if (!chip) return;
+        event.stopPropagation();
+        setTheme(chip.dataset.themeBtn);
+        chip.blur();
+      });
+    }
+
+    // ⚙ lleva a la vista de ajustes (y vuelve): es el mismo cajon de siempre,
+    // ahora como una pestaña mas del rail.
+    if (panel.refs.gear) {
+      panel.refs.gear.addEventListener('click', (event) => {
+        event.stopPropagation();
+        showTab(panel.root.dataset.tab === 'tune' ? 'stats' : 'tune');
+        panel.refs.gear.blur();
+      });
+    }
+
+    // Los chips del cajon: perfil, interruptores y exportar/importar. Un solo
+    // escuchador para todos, que el cajon se repinta entero y no hay que
+    // reenganchar nada al cambiar de perfil.
+    if (panel.refs.cfg) {
+      panel.refs.cfg.addEventListener('click', (event) => {
+        const target = event.target;
+        const chip = target && target.closest ? target.closest('button') : null;
+        if (!chip) return;
+        event.stopPropagation();
+
+        if (chip.dataset.pace) {
+          setPaceProfile(chip.dataset.pace);
+        } else if (chip.dataset.toggle === 'useNitro') {
+          setUseNitro(CONFIG.useNitro === false);
+        } else if (chip.dataset.toggle === 'backgroundFarm') {
+          setBackgroundFarm(CONFIG.queue.backgroundFarm !== true);
+        } else if (chip.dataset.toggle === 'keepAlive') {
+          setKeepAlive(CONFIG.queue.keepAlive !== true);
+        } else if (chip.dataset.toggle === 'afkRequireKeepAlive') {
+          setAfkRequireKeepAlive(CONFIG.queue.afkRequireKeepAlive !== true);
+        } else if (chip.dataset.toggle === 'afkFreezeGuard') {
+          setAfkFreezeGuard(CONFIG.queue.afkFreezeGuard === false);
+        } else if (chip.dataset.toggle === 'notifications') {
+          setNotifications(CONFIG.notifications.enabled !== true);
+        } else if (chip.dataset.toggle === 'sound') {
+          // El click ya es gesto valido para el audio: al encenderlo suena.
+          setSfx(!sfxOn);
+        } else if (chip.dataset.toggle && CONFIG[chip.dataset.toggle]) {
+          const key = chip.dataset.toggle;
+          CONFIG[key].enabled = CONFIG[key].enabled === false;
+          savePrefs();
+          paintConfig();
+          log(`${key} ${CONFIG[key].enabled === false ? 'off' : 'on'}.`);
+        } else if (chip.dataset.act === 'export') {
+          exportConfig();
+        } else if (chip.dataset.act === 'import') {
+          importConfig();
+        } else if (chip.dataset.act === 'report') {
+          exportDiagnostics();
+        } else if (chip.dataset.act === 'support') {
+          exportSupportBundle();
+        } else if (chip.dataset.act === 'csv') {
+          exportSessionsCsv();
+        } else if (chip.dataset.act === 'releases') {
+          try { window.open(UPDATE_RELEASES_URL, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+        } else if (chip.dataset.act === 'channel') {
+          // En canary el boton vuelve al Gist estable; en estable abre el build
+          // de prueba. Ninguno de los dos cambia la release estable por si solo.
+          const url = CHANNEL === 'canary' ? UPDATE_STABLE_URL : UPDATE_CANARY_URL;
+          try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* bloqueado */ }
+        }
+
+        chip.blur();
+      });
+    }
+
+    if (panel.refs.nitroStrategy) {
+      panel.refs.nitroStrategy.addEventListener('change', (event) => {
+        event.stopPropagation();
+        setNitroStrategy(panel.refs.nitroStrategy.value);
+      });
+    }
+
+    // Pasadas del banco live: el boton abre el selector y el CSV se queda
+    // guardado. La tarjeta vive en LOG y no depende de la consola.
+    if (panel.refs.liveLoad && panel.refs.liveFile) {
+      panel.refs.liveLoad.addEventListener('click', (event) => {
+        event.stopPropagation();
+        panel.refs.liveFile.click();
+        panel.refs.liveLoad.blur();
+      });
+      panel.refs.liveFile.addEventListener('change', () => {
+        const file = panel.refs.liveFile.files && panel.refs.liveFile.files[0];
+        if (file) loadLiveCsv(file);
+        panel.refs.liveFile.value = '';
+      });
+    }
+
+    if (panel.refs.liveClear) {
+      panel.refs.liveClear.addEventListener('click', (event) => {
+        event.stopPropagation();
+        clearLivePasses();
+        panel.refs.liveClear.blur();
+      });
+    }
+    for (const select of [panel.refs.livePickA, panel.refs.livePickB]) {
+      if (select) select.addEventListener('change', paintLivePick);
+    }
+    if (panel.refs.livePickExport) {
+      panel.refs.livePickExport.addEventListener('click', (event) => {
+        event.stopPropagation();
+        downloadLiveCompareCsv();
+        panel.refs.livePickExport.blur();
+      });
+    }
+    renderLivePasses();
+
+    paintConfig();
+    updatePanel();
+  }
+  /* ==========================================================================
+   * 12.3 QUEUE SOCIAL PANEL
+   * ========================================================================== */
+  // Amigos y Equipo comparten el panel pequeno, pero en modo de solo lectura.
+  // La ruta se mantiene separada de garagePanelRoute(): solo el garaje puede
+  // armar la cola o pulsar «Race Now».
+  //
+  // El estado vive en esta fabrica y no en runQueue(): asi el bucle de la cola
+  // no comparte una cache que solo usa esta vista. Las dependencias entran por
+  // `deps` y el panel se consulta con un getter porque se crea mas tarde.
+  function createQueueSocial(deps) {
+    const {
+      panel, paint, signedIn, onlineNow, shortWait, siteUser, jwtClaims, readToken,
+    } = deps;
+    let cache = { at: 0, data: null, pending: null, failedAt: 0, owner: '' };
+    let routeSeen = '';
+    let wakeAt = 0;
+    // Lectura social: no es informacion que cambie al segundo y son tres GET
+    // por refresco. Dos minutos de cache bajan el trafico sin dejar la vista
+    // congelada; al abrir la pestana social se fuerza una lectura fresca.
+    const TTL_MS = 120000;
+    const RETRY_MS = 120000;
+    const TIMEOUT_MS = 12000;
+
+    function route() {
+      const path = location.pathname;
+      return path === '/friends' || path.startsWith('/friends/')
+        || path === '/team' || path.startsWith('/team/');
+    }
+
+    function pageLabel() {
+      const path = location.pathname;
+      return path === '/team' || path.startsWith('/team/') ? 'team' : 'friends';
+    }
+
+    // El perfil que el sitio ya guardo es el respaldo inmediato: el panel tiene
+    // algo que enseñar antes de que contesten las tres peticiones de lectura.
+    function persisted() {
+      const user = siteUser(0) || {};
+      const listed = Array.isArray(user.friends)
+        ? user.friends.length
+        : (user.friends && typeof user.friends === 'object' ? Object.keys(user.friends).length : null);
+      const total = Number(user.totalFriends);
+      const friends = Number.isFinite(listed) ? listed : (Number.isFinite(total) ? total : null);
+      const tag = String(user.tag || user.teamTag || '').trim();
+      const role = String(user.teamRole || user.teamRoleName || '').trim();
+      const owner = String(user.userID || user.id || user.username || '').trim();
+      return {
+        friends: Number.isFinite(friends) ? friends : null,
+        teamTag: tag || null,
+        teamRole: role || null,
+        owner,
+      };
+    }
+
+    // La cache social no puede sobrevivir a un cambio de cuenta sin recargar:
+    // los contadores del usuario anterior no son del usuario nuevo. El token
+    // cubre el caso en el que el perfil aun no se ha escrito en persist:nt.
+    function ownerOf(profile = persisted()) {
+      if (profile.owner) return profile.owner;
+      const claims = jwtClaims();
+      return claims && claims.sub ? String(claims.sub) : '';
+    }
+
+    function countText(value, pending = cache.pending) {
+      if (Number.isFinite(value)) return String(value);
+      return pending ? '…' : '—';
+    }
+
+    function statusText(current = cache) {
+      if (current.pending) return 'Refreshing now.';
+      const last = current.at
+        ? `Last checked ${shortWait(Math.max(1000, Date.now() - current.at))} ago.`
+        : 'Not checked yet.';
+      return current.failedAt ? `${last} The latest read failed; retrying.` : last;
+    }
+
+    function snapshot() {
+      const profile = persisted();
+      const owner = ownerOf(profile);
+      const current = cache.owner === owner;
+      // Si la cuenta cambio, se enseña el respaldo del perfil nuevo y se
+      // ignoran los contadores de la cuenta anterior hasta la siguiente GET.
+      const cached = current ? (cache.data || {}) : {};
+      return {
+        current,
+        pending: current && Boolean(cache.pending),
+        friends: Number.isFinite(cached.friends) ? cached.friends : profile.friends,
+        online: Number.isFinite(cached.online) ? cached.online : null,
+        requests: Number.isFinite(cached.requests) ? cached.requests : null,
+        teamTag: profile.teamTag,
+        teamRole: profile.teamRole,
+      };
+    }
+
+    function setSocialText(el, value) {
+      if (el && el.textContent !== value) el.textContent = value;
+    }
+
+    function setSocialTitle(el, value) {
+      if (el && el.title !== value) el.title = value;
+    }
+
+    function paintRows(visible) {
+      const refs = panel();
+      if (!refs) return;
+      const state = snapshot();
+      const rows = [
+        [refs.socialFriendsRow, refs.socialFriends],
+        [refs.socialOnlineRow, refs.socialOnline],
+        [refs.socialRequestsRow, refs.socialRequests],
+        [refs.socialTeamRow, refs.socialTeam],
+        [refs.socialUpdatedRow, refs.socialUpdated],
+      ];
+      for (const [row] of rows) {
+        if (row) row.hidden = !visible;
+      }
+      if (!visible) return;
+
+      const current = state.current
+        ? cache
+        : { at: 0, pending: null, failedAt: 0 };
+      setSocialText(refs.socialFriends, countText(state.friends, state.pending));
+      setSocialText(refs.socialOnline, countText(state.online, state.pending));
+      setSocialText(refs.socialRequests, countText(state.requests, state.pending));
+      setSocialText(refs.socialTeam, state.teamTag
+        ? `[${state.teamTag}]${state.teamRole ? ` · ${state.teamRole}` : ''}`
+        : (signedIn() ? 'none' : '—'));
+      const age = current.at
+        ? `${shortWait(Math.max(1000, Date.now() - current.at))} ago`
+        : '';
+      setSocialText(refs.socialUpdated, state.pending
+        ? 'refreshing…'
+        : (current.failedAt ? (age ? `${age} · retry` : 'failed') : (age || '—')));
+
+      const status = statusText(current);
+      setSocialTitle(refs.socialFriendsRow,
+        `Friends on this account. Read-only: the panel never adds or removes friends. ${status}`);
+      setSocialTitle(refs.socialOnlineRow,
+        `Friends online right now. Read-only; the panel does not invite or message anyone. ${status}`);
+      setSocialTitle(refs.socialRequestsRow,
+        `Pending friend requests. Read-only; the panel never accepts or denies them. ${status}`);
+      setSocialTitle(refs.socialTeamRow,
+        `Team tag and role from your profile. Read-only; the panel never invites, applies or leaves. ${status}`);
+      setSocialTitle(refs.socialUpdatedRow,
+        `Last read status for the three GET requests. ${status}`);
+    }
+
+    // Tres GET sin efectos: total de amigos, amigos online y solicitudes. El
+    // panel no tiene ningun camino hacia accept/deny/invite/send. Si una
+    // peticion falla, se conserva el respaldo del perfil y se reintenta luego.
+    async function refresh(force = false) {
+      if (!route()) return;
+      // Las tres GET se reintentan al volver online; offline solo llenarian
+      // la cache de fallos y dejarian el panel en «retry» sin motivo.
+      if (!onlineNow()) return;
+      const now = Date.now();
+      const profile = persisted();
+      const owner = ownerOf(profile);
+      if (cache.owner !== owner) {
+        // La peticion vieja puede seguir viva, pero su resultado se descarta
+        // al ver que el owner ya no coincide. Se suelta el pending para que
+        // la cuenta nueva no espere los 12 s de la anterior.
+        cache = { at: 0, data: null, pending: null, failedAt: 0, owner };
+      }
+      if (document.hidden && !force) return;
+      if (cache.pending) return cache.pending;
+      if (!force && cache.data && now - cache.at < TTL_MS) return;
+      if (!force && cache.failedAt && now - cache.failedAt < RETRY_MS) return;
+
+      if (!cache.data) {
+        cache.data = { friends: profile.friends, online: null, requests: null };
+      }
+
+      const pending = (async () => {
+        const token = readToken();
+        // Un GET colgado no puede dejar el panel en «refreshing» para siempre.
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = controller ? setTimeout(() => controller.abort(), TIMEOUT_MS) : null;
+        const headers = { accept: 'application/json, text/plain, */*' };
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+          const claims = jwtClaims(token);
+          if (claims && claims.sub) headers['x-uid'] = String(claims.sub);
+        }
+
+        const stamp = Date.now();
+        const read = async (url) => {
+          try {
+            const response = await fetch(url, {
+              method: 'GET',
+              credentials: 'include',
+              headers,
+              cache: 'no-store',
+              signal: controller ? controller.signal : undefined,
+            });
+            if (!response.ok) return null;
+            return await response.json();
+          } catch {
+            return null;
+          }
+        };
+
+        let all;
+        let online;
+        let requests;
+        try {
+          [all, online, requests] = await Promise.all([
+            read(`/api/v2/friends?_=${stamp}`),
+            read(`/api/v2/friends?online=1&_=${stamp}`),
+            read(`/api/v2/friend-requests?r=${stamp}`),
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+
+        const countValues = (body) => {
+          const results = body && body.results;
+          return Array.isArray(results && results.values) ? results.values.length : null;
+        };
+        const countRequests = (body) => {
+          const results = body && body.results;
+          if (Array.isArray(results && results.requests)) return results.requests.length;
+          const total = Number(results && results.totalRecords);
+          return Number.isFinite(total) ? total : null;
+        };
+
+        // Una respuesta de una cuenta que ya no esta activa no puede
+        // reemplazar los contadores de la cuenta nueva.
+        if (cache.owner !== owner) return;
+
+        const next = {
+          friends: countValues(all),
+          online: countValues(online),
+          requests: countRequests(requests),
+        };
+        if (next.friends === null && next.online === null && next.requests === null) {
+          cache.failedAt = Date.now();
+        } else {
+          cache.data = next;
+          cache.at = Date.now();
+          cache.failedAt = 0;
+        }
+      })();
+
+      cache.pending = pending;
+      try {
+        await pending;
+      } catch {
+        // Un error inesperado no debe quedar como rechazo sin manejar en una
+        // llamada fire-and-forget desde el latido.
+        if (cache.owner === owner) cache.failedAt = Date.now();
+      } finally {
+        if (cache.pending === pending) cache.pending = null;
+        if (route()) paint();
+      }
+    }
+
+    function wake() {
+      if (!route()) return;
+      const now = Date.now();
+      if (now - wakeAt < 1500) return;
+      wakeAt = now;
+      refresh(true).catch(() => {});
+    }
+
+    function setRoute(path) {
+      routeSeen = path;
+    }
+
+    function resetRoute() {
+      routeSeen = '';
+    }
+
+    return {
+      route,
+      pageLabel,
+      snapshot,
+      paintRows,
+      refresh,
+      wake,
+      setRoute,
+      resetRoute,
+      routeSeen: () => routeSeen,
+    };
+  }
+  /* ==========================================================================
+   * 12.4 GARAGE PANEL DOM
+   * ========================================================================== */
+  // Plantilla, estilos y refs del panel del garaje. No conoce la cola: el
+  // cableado de eventos y el estado siguen en runQueue().
+  function createGaragePanelDom() {
+    registerThemeProperties();
+    const host = document.createElement('div');
+    host.id = 'nt-queue-panel';
+    host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483000;';
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = `
+      <style>
+        * { box-sizing: border-box; }
+
+        :focus-visible { outline: 2px solid var(--acc, #35ea86); outline-offset: 2px; }
+
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: .001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: .001ms !important;
+            scroll-behavior: auto !important;
+          }
+        }
+
+        /* La misma piel que el panel grande: carbon con un verde de fondo,
+           lineas de un pixel, numeros en mono y un filo de luz arriba. Los dos
+           paneles se reconocen como la misma herramienta. */
+        .p {
+          --acc: #35ea86;
+          --acc-2: #9bf7c5;
+          --acc-dim: color-mix(in srgb, var(--acc) 14%, transparent);
+          --line: color-mix(in srgb, var(--acc) 12%, transparent);
+          --line-strong: color-mix(in srgb, var(--acc) 26%, transparent);
+          --ink: #e9f7ef;
+          --ink-2: #cfe9db;
+          --dim: #8ea49a;
+          --dim-2: #7f9389;
+          --warn: #ffb340;
+          --bad: #ff6f6f;
+          --info: #63c8ff;
+          --bg-hi: rgba(12, 17, 14, .985);
+          --bg-lo: rgba(5, 8, 6, .995);
+          position: relative;
+          width: 292px;
+          max-width: calc(100vw - 32px);
+          border-radius: 14px;
+          overflow: hidden;
+          color: var(--ink);
+          background:
+            repeating-linear-gradient(0deg, rgba(255, 255, 255, .014) 0 1px, transparent 1px 3px),
+            radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--acc) 10%, transparent), transparent 58%),
+          radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--acc-2) 8%, transparent), transparent 62%),
+            linear-gradient(168deg, var(--bg-hi), var(--bg-lo));
+          border: 1px solid var(--line-strong);
+          box-shadow:
+            0 22px 44px -18px rgba(0, 0, 0, .85),
+            0 0 0 1px rgba(0, 0, 0, .6),
+            0 0 34px -14px color-mix(in srgb, var(--acc) 50%, transparent),
+            inset 0 1px 0 rgba(255, 255, 255, .05);
+          font: 12px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+          font-variant-numeric: tabular-nums;
+          color-scheme: dark;
+          animation: nt-qp-boot .4s cubic-bezier(.2, .9, .25, 1) both;
+        }
+        @keyframes nt-qp-boot {
+          from { opacity: 0; transform: translateY(8px) scale(.985); }
+          to   { opacity: 1; transform: none; }
+        }
+
+        .h { position: relative; display: flex; align-items: center; gap: 9px; padding: 11px 12px 9px;
+             cursor: grab; user-select: none; touch-action: none;
+             background: linear-gradient(180deg, rgba(255, 255, 255, .025), transparent);
+             border-bottom: 1px solid var(--line);
+             transition: background .15s ease; }
+        .h::after {
+          content: '';
+          position: absolute;
+          left: 12px; right: 12px; bottom: -1px; height: 1px;
+          background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 55%, transparent), transparent);
+          pointer-events: none;
+        }
+        .h:hover { background: rgba(255, 255, 255, .035); }
+        .h:active { cursor: grabbing; }
+        /* Plegado: la cabecera queda como una pastilla y el garaje recupera
+           la pantalla. El estado se guarda, no se pierde al recargar. */
+        .p[data-fold="1"] .rows,
+        .p[data-fold="1"] .season,
+        .p[data-fold="1"] .why,
+        .p[data-fold="1"] .acts { display: none; }
+        .p[data-fold="1"] .h { border-bottom-color: transparent; }
+        /* Social view: no queue controls and no rows that suggest an action.
+           The five read-only rows are the whole panel on /friends and /team. */
+        .p[data-social="1"] .rows > .r:not(.social),
+        .p[data-social="1"] .season,
+        .p[data-social="1"] .why,
+        .p[data-social="1"] .acts { display: none; }
+
+        .dot { flex: none; width: 8px; height: 8px; border-radius: 50%;
+               background: var(--dim-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim-2) 14%, transparent);
+               transition: background .25s ease, box-shadow .25s ease; }
+        .mark { position: relative; flex: none; display: grid; place-items: center;
+                width: 23px; height: 23px; border-radius: 7px; color: var(--acc);
+                background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 13%, rgba(255, 255, 255, .04)), rgba(255, 255, 255, .015));
+                border: 1px solid var(--line-strong);
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 14px -8px var(--acc); }
+        .mark svg { width: 16px; height: 16px; display: block;
+                    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 55%, transparent)); }
+        .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px;
+                     box-shadow: 0 0 0 2px var(--bg-hi), 0 0 7px color-mix(in srgb, var(--acc) 70%, transparent); }
+        /* El LED dice si corre o espera; el chip ya no tiene estado OFF. */
+        .p[data-armed="1"] .dot { background: var(--acc);
+               box-shadow: 0 0 0 3px var(--acc-dim), 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent); }
+        .p[data-armed="0"] .dot { background: var(--warn);
+               box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 12px color-mix(in srgb, var(--warn) 60%, transparent); }
+
+        .t { display: block; font-weight: 800; font-size: 12px; line-height: 1.15;
+             letter-spacing: .13em; text-transform: uppercase; color: var(--ink);
+             text-shadow: 0 0 14px color-mix(in srgb, var(--acc) 35%, transparent); }
+        .s { display: block; margin-top: 3px; font-weight: 600; font-size: 8px;
+             line-height: 1; letter-spacing: .13em; text-transform: uppercase;
+             color: var(--dim-2); }
+
+        .mode { margin-left: auto; flex: none; padding: 5px 10px; border-radius: 999px;
+                cursor: default;
+                font: 800 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+                letter-spacing: .1em; text-transform: uppercase;
+                color: var(--acc-2); background: var(--acc-dim);
+                border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
+                transition: color .2s ease, background .2s ease, border-color .2s ease; }
+        .fold { all: unset; flex: none; display: grid; place-items: center;
+                width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
+                font: 800 13px/1 ui-monospace, monospace; color: var(--dim);
+                background: rgba(255, 255, 255, .04); border: 1px solid var(--line);
+                transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
+        .fold:hover { color: var(--acc-2); background: var(--acc-dim); border-color: var(--line-strong); }
+        .fold:active { transform: scale(.92); }
+        .fold:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+        /* Acceso compacto al update cuando el panel esta plegado. No ocupa
+           sitio en la cabecera normal porque ahi ya manda el boton grande. */
+        .hupd { all: unset; flex: none; display: none; place-items: center;
+                width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
+                color: var(--acc-2); background: var(--acc-dim);
+                border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
+                transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
+        .hupd[hidden] { display: none !important; }
+        .p[data-fold="1"] .hupd:not([hidden]) { display: grid; }
+        .hupd:hover { color: var(--ink); background: color-mix(in srgb, var(--acc) 20%, transparent); border-color: var(--acc); }
+        .hupd:active { transform: scale(.92); }
+        .hupd:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+        .hupd svg { width: 12px; height: 12px; display: block; }
+
+        .rows { display: grid; padding: 8px 12px 6px; }
+        .r { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+             padding: 3px 0; font-weight: 500; font-size: 10.5px; line-height: 1.45;
+             color: var(--dim); border-bottom: 1px solid rgba(255, 255, 255, .03); }
+        .r:last-child { border-bottom: 0; }
+        .r > span { flex: 0 0 auto; letter-spacing: .05em; }
+        /* El valor puede ser largo ("next check in 21 h"): se le deja encoger y
+           partir en dos lineas en vez de salirse por el borde del panel. */
+        .r b { flex: 1 1 auto; min-width: 0; font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+               font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: right;
+               overflow-wrap: break-word; }
+        .r b.race { cursor: pointer; }
+        .r b.race[data-cancel="1"] { color: var(--warn); text-decoration: underline dotted; }
+        /* La cuenta atras de Race Now, dibujada sobre el borde de la fila:
+           dice cuanto falta sin añadir otra barra ni otro numero. */
+        .r[data-f="raceRow"] { position: relative; }
+        .r[data-f="raceRow"]::after {
+          content: '';
+          position: absolute;
+          left: 0; bottom: -1px; height: 1px;
+          width: calc(var(--race-progress, 0) * 1%);
+          background: linear-gradient(90deg, transparent, var(--acc));
+          box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 60%, transparent);
+          pointer-events: none;
+          transition: width .2s linear;
+        }
+        .r[hidden] { display: none; }
+        .r b[data-warn="1"] { color: var(--warn); }
+        .r b[data-warn="2"] { color: var(--bad); }
+
+        /* Aviso de temporada, el mismo de la tarjeta Season: una franja al
+           pie para no tener que abrir una carrera para verlo. */
+        .season { margin: 2px 12px 8px; padding: 6px 8px; border-radius: 8px;
+                  font-weight: 600; font-size: 9.5px; line-height: 1.35; color: var(--warn);
+                  background: color-mix(in srgb, var(--warn) 8%, transparent);
+                  border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent); }
+        .season[hidden] { display: none; }
+
+        /* La fila de tema es un control, no una metrica: se ve clicable y
+           lleva un punto del acento para reconocer la piel activa. */
+        .r .theme { all: unset; flex: 1 1 auto; min-width: 0; cursor: pointer;
+             font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+             font-variant-numeric: tabular-nums; color: var(--acc); text-align: right;
+             border-radius: 5px; }
+        .r .theme::before { content: ''; display: inline-block; width: 7px; height: 7px;
+             margin-right: 6px; border-radius: 50%; vertical-align: 1px;
+             background: var(--acc); box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 70%, transparent); }
+        .r .theme:hover { text-decoration: underline dotted; }
+        .r .theme:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+        /* Las mismas seis pieles, otra vez: cada shadow root tiene su propio
+           CSS y no hereda la paleta del panel grande. */
+        .p[data-theme="aurora"] { --acc: #3fe0c5; --acc-2: #a78bfa; --ink: #e8fbf7; --ink-2: #c3ece5; --dim: #7c9a98; --dim-2: #789693; --bg-hi: rgba(7, 19, 20, .985); --bg-lo: rgba(4, 10, 13, .995); }
+        .p[data-theme="sunset"] { --acc: #ff9a5c; --acc-2: #ff77b0; --ink: #fff3ea; --ink-2: #f6d8c7; --dim: #a08a80; --dim-2: #9c877d; --bg-hi: rgba(24, 12, 11, .985); --bg-lo: rgba(12, 6, 8, .995); }
+        .p[data-theme="ice"] { --acc: #66e3ff; --acc-2: #d7f7ff; --ink: #eefaff; --ink-2: #c9e9f6; --dim: #7e97a4; --dim-2: #7a93a0; --bg-hi: rgba(8, 16, 24, .985); --bg-lo: rgba(4, 8, 14, .995); }
+        .p[data-theme="violet"] { --acc: #c08bff; --acc-2: #f0a9ff; --ink: #f7f0ff; --ink-2: #ddcbf2; --dim: #93849f; --dim-2: #8f809b; --bg-hi: rgba(18, 11, 27, .985); --bg-lo: rgba(8, 5, 14, .995); }
+        .p[data-theme="rgb"] {
+          --nt-hue: 0;
+          --nt-angle: 0deg;
+          --acc: hsl(var(--nt-hue) 92% 63%);
+          --acc-2: hsl(calc(var(--nt-hue) + 70) 94% 76%);
+          --ink: #f6f7ff;
+          --ink-2: #d9dcf0;
+          --dim: #8d90a6;
+          --dim-2: #8a8da3;
+          --bg-hi: rgba(11, 11, 19, .985);
+          --bg-lo: rgba(5, 5, 10, .995);
+          animation:
+            nt-qp-boot .4s cubic-bezier(.2, .9, .25, 1) both,
+            nt-rgb-hue 16s linear infinite,
+            nt-rgb-angle 8s linear infinite;
+        }
+        @keyframes nt-rgb-hue { to { --nt-hue: 360; } }
+        @keyframes nt-rgb-angle { to { --nt-angle: 360deg; } }
+
+        .p[data-theme="rgb"]::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          z-index: 5;
+          padding: 1px;
+          border-radius: 14px;
+          background: conic-gradient(from var(--nt-angle, 0deg),
+            #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+          pointer-events: none;
+        }
+
+        /* El mismo titulo arcoiris que el panel grande, para que el garaje no
+           parezca otra herramienta cuando el tema es RGB. */
+        .p[data-theme="rgb"] .t {
+          background: linear-gradient(90deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
+          background-size: 300% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          text-shadow: none;
+          animation: nt-rgb-title 6s linear infinite;
+        }
+        @keyframes nt-rgb-title { to { background-position: 300% 0; } }
+
+        /* La espera no es una metrica: es la respuesta a «por que no corre».
+           Va en ambar y se separa de la lista, no compite con ella. */
+        .r[data-f="waitRow"] { margin: 4px 0; padding: 5px 8px; border-radius: 8px;
+             border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent);
+             background: color-mix(in srgb, var(--warn) 8%, transparent); color: #cfa96b; font-size: 10px; }
+        .r[data-f="waitRow"] b { font-size: 10px; color: var(--warn); }
+
+        /* Pie: el motivo, con la misma linea de separacion que el panel grande
+           usa para su barra de estado. */
+        .why { margin-top: 2px; padding: 8px 12px 0; border-top: 1px solid var(--line);
+               font-weight: 500; font-size: 9.5px; line-height: 1.35; color: var(--dim); }
+        .why b { font-weight: 500; color: #cfe3d6; }
+        .why[hidden] { display: none; }
+
+        .acts { display: flex; flex-wrap: wrap; gap: 7px; padding: 9px 12px 12px; }
+        .act { flex: 1 1 auto; min-width: 0; padding: 9px 0; text-align: center;
+               border-radius: 9px; cursor: pointer;
+               font: 800 9.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+               letter-spacing: .14em; text-transform: uppercase; color: var(--ink);
+               background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 22%, transparent), color-mix(in srgb, var(--acc) 10%, transparent));
+               border: 1px solid color-mix(in srgb, var(--acc) 34%, transparent);
+               box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1);
+               transition: filter .15s ease, box-shadow .25s ease, transform .1s ease; }
+        .act:hover:not(:disabled) { filter: brightness(1.16);
+               box-shadow: 0 0 20px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .12); }
+        .act:active:not(:disabled) { transform: translateY(1px); }
+        .act:disabled { opacity: .38; cursor: default; }
+        .act.ghost { color: #cfe9db; background: rgba(255, 255, 255, .045);
+               border-color: var(--line); box-shadow: none; }
+        .act.ghost:hover:not(:disabled) { color: var(--acc); background: var(--acc-dim);
+               border-color: var(--line-strong); }
+        /* Stop comparte sitio con las acciones normales, pero su color no
+           invita a pulsarlo: parar es una salida, no el siguiente paso. */
+        .act.danger { color: #ffd0d0;
+               background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 18%, transparent), color-mix(in srgb, var(--bad) 8%, transparent));
+               border-color: color-mix(in srgb, var(--bad) 32%, transparent);
+               box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
+        .act.danger:hover:not(:disabled) { color: #fff;
+               background: color-mix(in srgb, var(--bad) 22%, transparent);
+               border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+               box-shadow: 0 0 20px -9px var(--bad), inset 0 1px 0 rgba(255, 255, 255, .12); }
+        /* «Copy» es una herramienta, no una accion de carrera: se queda
+           compacto para no apretar los dos botones que se usan de verdad. */
+        .act.tool { flex: 0 0 auto; padding: 9px 12px; color: var(--dim); }
+        .act.tool:hover:not(:disabled) { color: var(--acc); }
+        /* Update lleva su propio icono y el numero de version: se centra en
+           una linea y no se deja partir cuando el panel esta estrecho. */
+        .act.update { display: inline-flex; align-items: center; justify-content: center;
+               gap: 6px; white-space: nowrap; }
+        .act.update svg { width: 12px; height: 12px; flex: none; }
+        .act.update[hidden] { display: none; }
+        .act:focus-visible, .mode:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+        @media (prefers-reduced-motion: reduce) {
+          .p, .p *, .p::before, .p::after { animation: none !important; transition: none !important; }
+          /* Misma regla que el panel grande: el color sigue, el movimiento no. */
+          .p[data-theme="rgb"] { animation: nt-rgb-hue 16s linear infinite !important; }
+        }
+      </style>
+      <div class="p" data-mode="auto" data-theme="${panelTheme}">
+        <div class="h" title="Drag to move · double-click to put it back in the corner">
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
+            <i class="dot"></i>
+          </span>
+          <span><b class="t">NITRO WRAITH</b><span class="s" data-f="sub">garage · queue</span></span>
+          <span class="mode" role="status" aria-live="polite" title="Always AUTO: it starts and re-arms by itself. To stop it, use Stop / Esc in the race.">AUTO</span>
+          <button class="hupd" type="button" data-f="updateCompact" hidden title="A newer NITRO WRAITH is available; click to download the userscript" aria-label="Update available. Download the new userscript.">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg>
+          </button>
+          <button class="fold" type="button" data-f="fold" aria-expanded="true" aria-label="Fold the garage panel" title="Fold the garage panel (Alt+G)">−</button>
+        </div>
+        <div class="rows">
+          <div class="r social" data-f="socialFriendsRow" hidden><span>friends</span><b data-f="socialFriends" aria-live="polite" aria-atomic="true">—</b></div>
+          <div class="r social" data-f="socialOnlineRow" hidden><span>online</span><b data-f="socialOnline" aria-live="polite" aria-atomic="true">—</b></div>
+          <div class="r social" data-f="socialRequestsRow" hidden><span>requests</span><b data-f="socialRequests" aria-live="polite" aria-atomic="true">—</b></div>
+          <div class="r social" data-f="socialTeamRow" hidden><span>team</span><b data-f="socialTeam" aria-live="polite" aria-atomic="true">—</b></div>
+          <div class="r social" data-f="socialUpdatedRow" hidden><span>updated</span><b data-f="socialUpdated">—</b></div>
+          <div class="r"><span>state</span><b data-f="state">—</b></div>
+          <div class="r" data-f="afkRow"><span>afk</span><b data-f="afk">—</b></div>
+          <div class="r" data-f="keepAliveRow"><span>keep-alive</span><b data-f="keepAlive">—</b></div>
+          <div class="r" data-f="retryRow" hidden><span>login retry</span><b data-f="loginRetry">—</b></div>
+          <div class="r"><span>login</span><b data-f="login">—</b></div>
+          <div class="r"><span>mystery box</span><b data-f="box">—</b></div>
+          <div class="r"><span>session</span><b data-f="session">—</b></div>
+          <div class="r" data-f="challengeRow" hidden><span>challenges</span><b data-f="challenges">—</b></div>
+          <div class="r" data-f="nextRow" hidden><span>next</span><b data-f="next">—</b></div>
+          <div class="r"><span>theme</span><button class="theme" type="button" data-f="theme" aria-live="polite" aria-label="Panel theme: ${THEME_LABELS[panelTheme] || panelTheme}. Activate to cycle." title="Click to cycle the panel theme: carbon, aurora, sunset, ice, violet, rgb. The race panel follows it.">${THEME_LABELS[panelTheme] || panelTheme}</button></div>
+          <div class="r" data-f="renewedRow" hidden><span>renewed</span><b data-f="renewed">—</b></div>
+          <div class="r" data-f="waitRow" hidden><span>waiting on</span><b data-f="wait">—</b></div>
+          <div class="r" data-f="stopRow" hidden><span data-f="stopLabel">last stop</span><b data-f="lastStop">—</b></div>
+          <div class="r" data-f="stopHistoryRow" hidden><span>recent stops</span><b data-f="stopHistory">—</b></div>
+          <div class="r" data-f="raceRow"><span>next race</span><b class="race" data-f="race" title="Automatic start: click the value to cancel it (the bot stays armed and offers it again a little later)">—</b></div>
+          <div class="r" data-f="dayRow" hidden><span>races</span><b data-f="dayRaces">—</b></div>
+          <div class="r" data-f="budgetRow" hidden><span>day left</span><b data-f="dayBudget">—</b></div>
+          <div class="r" data-f="boxesRow" hidden><span>boxes</span><b data-f="dayBoxes">—</b></div>
+          <div class="r" data-f="alertsRow" hidden><span>alerts</span><b data-f="dayAlerts">—</b></div>
+        </div>
+        <div class="season" data-f="seasonRow" hidden><b data-f="seasonAlert">—</b></div>
+        <div class="why" data-f="whyRow" hidden><b data-f="why">—</b></div>
+        <div class="acts">
+          <button class="act ghost" type="button" data-act="afk" data-f="afkBtn" title="AFK farming is off: races only start while this tab is visible. Turn it on to keep the queue running hidden; a frozen tab can still end a race in a DQ.">AFK off</button>
+          <button class="act" type="button" data-act="box">Claim box</button>
+          <button class="act ghost" type="button" data-act="race">Race now</button>
+          <button class="act danger" type="button" data-act="stop" title="Stop the bot; mid-race it waits for the current race to end (same as Alt+S)">Stop</button>
+          <button class="act ghost" type="button" data-act="resume" title="Clear a stop and start now; with a live race this sends the same Alt+A">Resume</button>
+          <button class="act ghost" type="button" data-act="retry" hidden title="Advance the next sign-in retry without waiting for the countdown">Retry login</button>
+          <button class="act ghost tool" type="button" data-act="diag" title="Copy a diagnostic of the queue: mode, state, active waits, last decision, last failure, today and budgets">Copy</button>
+          <button class="act update" type="button" data-act="update" data-f="update" hidden title="A newer NITRO WRAITH is available; click to download the userscript">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(host);
+
+    garageUpdateNode = root.querySelector('[data-f="update"]');
+    garageCompactUpdateNode = root.querySelector('[data-f="updateCompact"]');
+    return {
+      host,
+      head: root.querySelector('.h'),
+      panel: root.querySelector('.p'),
+      mode: root.querySelector('.mode'),
+      sub: root.querySelector('[data-f="sub"]'),
+      socialFriendsRow: root.querySelector('[data-f="socialFriendsRow"]'),
+      socialFriends: root.querySelector('[data-f="socialFriends"]'),
+      socialOnlineRow: root.querySelector('[data-f="socialOnlineRow"]'),
+      socialOnline: root.querySelector('[data-f="socialOnline"]'),
+      socialRequestsRow: root.querySelector('[data-f="socialRequestsRow"]'),
+      socialRequests: root.querySelector('[data-f="socialRequests"]'),
+      socialTeamRow: root.querySelector('[data-f="socialTeamRow"]'),
+      socialTeam: root.querySelector('[data-f="socialTeam"]'),
+      socialUpdatedRow: root.querySelector('[data-f="socialUpdatedRow"]'),
+      socialUpdated: root.querySelector('[data-f="socialUpdated"]'),
+      state: root.querySelector('[data-f="state"]'),
+      afkRow: root.querySelector('[data-f="afkRow"]'),
+      afk: root.querySelector('[data-f="afk"]'),
+      keepAliveRow: root.querySelector('[data-f="keepAliveRow"]'),
+      keepAlive: root.querySelector('[data-f="keepAlive"]'),
+      retryRow: root.querySelector('[data-f="retryRow"]'),
+      loginRetry: root.querySelector('[data-f="loginRetry"]'),
+      login: root.querySelector('[data-f="login"]'),
+      box: root.querySelector('[data-f="box"]'),
+      session: root.querySelector('[data-f="session"]'),
+      challengeRow: root.querySelector('[data-f="challengeRow"]'),
+      challenges: root.querySelector('[data-f="challenges"]'),
+      nextRow: root.querySelector('[data-f="nextRow"]'),
+      next: root.querySelector('[data-f="next"]'),
+      theme: root.querySelector('[data-f="theme"]'),
+      fold: root.querySelector('[data-f="fold"]'),
+      renewedRow: root.querySelector('[data-f="renewedRow"]'),
+      renewed: root.querySelector('[data-f="renewed"]'),
+      waitRow: root.querySelector('[data-f="waitRow"]'),
+      wait: root.querySelector('[data-f="wait"]'),
+      stopRow: root.querySelector('[data-f="stopRow"]'),
+      stopLabel: root.querySelector('[data-f="stopLabel"]'),
+      lastStop: root.querySelector('[data-f="lastStop"]'),
+      stopHistoryRow: root.querySelector('[data-f="stopHistoryRow"]'),
+      stopHistory: root.querySelector('[data-f="stopHistory"]'),
+      raceRow: root.querySelector('[data-f="raceRow"]'),
+      race: root.querySelector('[data-f="race"]'),
+      dayRow: root.querySelector('[data-f="dayRow"]'),
+      dayRaces: root.querySelector('[data-f="dayRaces"]'),
+      budgetRow: root.querySelector('[data-f="budgetRow"]'),
+      dayBudget: root.querySelector('[data-f="dayBudget"]'),
+      boxesRow: root.querySelector('[data-f="boxesRow"]'),
+      dayBoxes: root.querySelector('[data-f="dayBoxes"]'),
+      alertsRow: root.querySelector('[data-f="alertsRow"]'),
+      dayAlerts: root.querySelector('[data-f="dayAlerts"]'),
+      seasonRow: root.querySelector('[data-f="seasonRow"]'),
+      seasonAlert: root.querySelector('[data-f="seasonAlert"]'),
+      whyRow: root.querySelector('[data-f="whyRow"]'),
+      why: root.querySelector('[data-f="why"]'),
+      boxBtn: root.querySelector('[data-act="box"]'),
+      raceBtn: root.querySelector('[data-act="race"]'),
+      afkBtn: root.querySelector('[data-act="afk"]'),
+      stopBtn: root.querySelector('[data-act="stop"]'),
+      resumeBtn: root.querySelector('[data-act="resume"]'),
+      retryBtn: root.querySelector('[data-act="retry"]'),
+      diagBtn: root.querySelector('[data-act="diag"]'),
+      update: garageUpdateNode,
+      updateCompact: garageCompactUpdateNode,
+    };
+
+
+  }
 
   /* ==========================================================================
    * 14. QUEUE AND RECOVERY (TOP WINDOW ONLY)
@@ -16596,8 +18673,6 @@ All of this only aims at believable statistics. It is your call and your risk.
     // cola estaba viva: la caja parecia no reclamarse nunca. Este panel pequeno
     // vive en la ventana de arriba, solo en la home y el garaje, y da lo justo:
     // estado, estado de la caja y los dos botones que se usan aqui.
-    const QPANEL_ID = 'nt-queue-panel';
-
     let qpanel = null;
     let garageAutoDone = false;
 
@@ -16717,6 +18792,25 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
     }
 
+    function resetQPanel() {
+      try { localStorage.removeItem(QPANEL_POS); } catch { /* bloqueado */ }
+      if (!qpanel || !qpanel.host) return;
+      qpanel.host.style.left = 'auto';
+      qpanel.host.style.top = 'auto';
+      qpanel.host.style.right = '16px';
+      qpanel.host.style.bottom = '16px';
+    }
+
+    function saveQPanelPosition() {
+      if (!qpanel || !qpanel.host) return;
+      try {
+        localStorage.setItem(QPANEL_POS, JSON.stringify({
+          left: parseFloat(qpanel.host.style.left) || 0,
+          top: parseFloat(qpanel.host.style.top) || 0,
+        }));
+      } catch { /* almacenamiento bloqueado */ }
+    }
+
     function dragQPanel(handle) {
       let dragging = false;
       let offsetX = 0;
@@ -16744,24 +18838,46 @@ All of this only aims at believable statistics. It is your call and your risk.
         if (!dragging) return;
         dragging = false;
         handle.style.cursor = 'grab';
-        try {
-          localStorage.setItem(QPANEL_POS, JSON.stringify({
-            left: parseFloat(qpanel.host.style.left) || 0,
-            top: parseFloat(qpanel.host.style.top) || 0,
-          }));
-        } catch { /* almacenamiento bloqueado */ }
+        saveQPanelPosition();
       };
 
       handle.addEventListener('pointerup', stop);
       handle.addEventListener('pointercancel', stop);
 
-      handle.addEventListener('dblclick', () => {
-        try { localStorage.removeItem(QPANEL_POS); } catch { /* bloqueado */ }
-        qpanel.host.style.left = 'auto';
-        qpanel.host.style.top = 'auto';
-        qpanel.host.style.right = '16px';
-        qpanel.host.style.bottom = '16px';
+      // Misma alternativa que el panel de carrera: foco en la cabecera, flechas
+      // para moverlo, Shift para pasos grandes y Home para volver a la esquina.
+      handle.tabIndex = 0;
+      handle.setAttribute('role', 'group');
+      handle.setAttribute(
+        'aria-label',
+        'Garage panel position. Arrow keys move it; hold Shift for bigger steps; Home restores the corner.',
+      );
+      handle.addEventListener('keydown', (event) => {
+        if (event.target !== handle) return;
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+        if (event.key === 'Home') {
+          event.preventDefault();
+          resetQPanel();
+          return;
+        }
+
+        const step = event.shiftKey ? 32 : 8;
+        const rect = qpanel.host.getBoundingClientRect();
+        let left = rect.left;
+        let top = rect.top;
+        if (event.key === 'ArrowLeft') left -= step;
+        else if (event.key === 'ArrowRight') left += step;
+        else if (event.key === 'ArrowUp') top -= step;
+        else if (event.key === 'ArrowDown') top += step;
+        else return;
+
+        event.preventDefault();
+        placeQPanel(left, top);
+        saveQPanelPosition();
       });
+
+      handle.addEventListener('dblclick', () => resetQPanel());
     }
 
     // Plegar no es ocultar el panel: la cabecera, el LED y el chip AUTO se
@@ -16787,428 +18903,7 @@ All of this only aims at believable statistics. It is your call and your risk.
     }
 
     function buildGaragePanel() {
-      registerThemeProperties();
-      const host = document.createElement('div');
-      host.id = QPANEL_ID;
-      host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483000;';
-      const root = host.attachShadow({ mode: 'open' });
-      root.innerHTML = `
-        <style>
-          * { box-sizing: border-box; }
-
-          /* La misma piel que el panel grande: carbon con un verde de fondo,
-             lineas de un pixel, numeros en mono y un filo de luz arriba. Los dos
-             paneles se reconocen como la misma herramienta. */
-          .p {
-            --acc: #35ea86;
-            --acc-2: #9bf7c5;
-            --acc-dim: color-mix(in srgb, var(--acc) 14%, transparent);
-            --line: color-mix(in srgb, var(--acc) 12%, transparent);
-            --line-strong: color-mix(in srgb, var(--acc) 26%, transparent);
-            --ink: #e9f7ef;
-            --ink-2: #cfe9db;
-            --dim: #8ea49a;
-            --dim-2: #7f9389;
-            --warn: #ffb340;
-            --bad: #ff6f6f;
-            --info: #63c8ff;
-            --bg-hi: rgba(12, 17, 14, .985);
-            --bg-lo: rgba(5, 8, 6, .995);
-            position: relative;
-            width: 292px;
-            max-width: calc(100vw - 32px);
-            border-radius: 14px;
-            overflow: hidden;
-            color: var(--ink);
-            background:
-              repeating-linear-gradient(0deg, rgba(255, 255, 255, .014) 0 1px, transparent 1px 3px),
-              radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--acc) 10%, transparent), transparent 58%),
-            radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--acc-2) 8%, transparent), transparent 62%),
-              linear-gradient(168deg, var(--bg-hi), var(--bg-lo));
-            border: 1px solid var(--line-strong);
-            box-shadow:
-              0 22px 44px -18px rgba(0, 0, 0, .85),
-              0 0 0 1px rgba(0, 0, 0, .6),
-              0 0 34px -14px color-mix(in srgb, var(--acc) 50%, transparent),
-              inset 0 1px 0 rgba(255, 255, 255, .05);
-            font: 12px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
-            font-variant-numeric: tabular-nums;
-            color-scheme: dark;
-            animation: nt-qp-boot .4s cubic-bezier(.2, .9, .25, 1) both;
-          }
-          @keyframes nt-qp-boot {
-            from { opacity: 0; transform: translateY(8px) scale(.985); }
-            to   { opacity: 1; transform: none; }
-          }
-
-          .h { position: relative; display: flex; align-items: center; gap: 9px; padding: 11px 12px 9px;
-               cursor: grab; user-select: none; touch-action: none;
-               background: linear-gradient(180deg, rgba(255, 255, 255, .025), transparent);
-               border-bottom: 1px solid var(--line);
-               transition: background .15s ease; }
-          .h::after {
-            content: '';
-            position: absolute;
-            left: 12px; right: 12px; bottom: -1px; height: 1px;
-            background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 55%, transparent), transparent);
-            pointer-events: none;
-          }
-          .h:hover { background: rgba(255, 255, 255, .035); }
-          .h:active { cursor: grabbing; }
-          /* Plegado: la cabecera queda como una pastilla y el garaje recupera
-             la pantalla. El estado se guarda, no se pierde al recargar. */
-          .p[data-fold="1"] .rows,
-          .p[data-fold="1"] .season,
-          .p[data-fold="1"] .why,
-          .p[data-fold="1"] .acts { display: none; }
-          .p[data-fold="1"] .h { border-bottom-color: transparent; }
-          /* Social view: no queue controls and no rows that suggest an action.
-             The five read-only rows are the whole panel on /friends and /team. */
-          .p[data-social="1"] .rows > .r:not(.social),
-          .p[data-social="1"] .season,
-          .p[data-social="1"] .why,
-          .p[data-social="1"] .acts { display: none; }
-
-          .dot { flex: none; width: 8px; height: 8px; border-radius: 50%;
-                 background: var(--dim-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim-2) 14%, transparent);
-                 transition: background .25s ease, box-shadow .25s ease; }
-          .mark { position: relative; flex: none; display: grid; place-items: center;
-                  width: 23px; height: 23px; border-radius: 7px; color: var(--acc);
-                  background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 13%, rgba(255, 255, 255, .04)), rgba(255, 255, 255, .015));
-                  border: 1px solid var(--line-strong);
-                  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 14px -8px var(--acc); }
-          .mark svg { width: 16px; height: 16px; display: block;
-                      filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 55%, transparent)); }
-          .mark .dot { position: absolute; right: -2px; top: -2px; width: 5px; height: 5px;
-                       box-shadow: 0 0 0 2px var(--bg-hi), 0 0 7px color-mix(in srgb, var(--acc) 70%, transparent); }
-          /* El LED dice si corre o espera; el chip ya no tiene estado OFF. */
-          .p[data-armed="1"] .dot { background: var(--acc);
-                 box-shadow: 0 0 0 3px var(--acc-dim), 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent); }
-          .p[data-armed="0"] .dot { background: var(--warn);
-                 box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent), 0 0 12px color-mix(in srgb, var(--warn) 60%, transparent); }
-
-          .t { display: block; font-weight: 800; font-size: 12px; line-height: 1.15;
-               letter-spacing: .13em; text-transform: uppercase; color: var(--ink);
-               text-shadow: 0 0 14px color-mix(in srgb, var(--acc) 35%, transparent); }
-          .s { display: block; margin-top: 3px; font-weight: 600; font-size: 8px;
-               line-height: 1; letter-spacing: .13em; text-transform: uppercase;
-               color: var(--dim-2); }
-
-          .mode { margin-left: auto; flex: none; padding: 5px 10px; border-radius: 999px;
-                  cursor: default;
-                  font: 800 9px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
-                  letter-spacing: .1em; text-transform: uppercase;
-                  color: var(--acc-2); background: var(--acc-dim);
-                  border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
-                  transition: color .2s ease, background .2s ease, border-color .2s ease; }
-          .fold { all: unset; flex: none; display: grid; place-items: center;
-                  width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
-                  font: 800 13px/1 ui-monospace, monospace; color: var(--dim);
-                  background: rgba(255, 255, 255, .04); border: 1px solid var(--line);
-                  transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
-          .fold:hover { color: var(--acc-2); background: var(--acc-dim); border-color: var(--line-strong); }
-          .fold:active { transform: scale(.92); }
-          .fold:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-          /* Acceso compacto al update cuando el panel esta plegado. No ocupa
-             sitio en la cabecera normal porque ahi ya manda el boton grande. */
-          .hupd { all: unset; flex: none; display: none; place-items: center;
-                  width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
-                  color: var(--acc-2); background: var(--acc-dim);
-                  border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
-                  transition: color .15s ease, background .15s ease, border-color .15s ease, transform .12s ease; }
-          .hupd[hidden] { display: none !important; }
-          .p[data-fold="1"] .hupd:not([hidden]) { display: grid; }
-          .hupd:hover { color: var(--ink); background: color-mix(in srgb, var(--acc) 20%, transparent); border-color: var(--acc); }
-          .hupd:active { transform: scale(.92); }
-          .hupd:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-          .hupd svg { width: 12px; height: 12px; display: block; }
-
-          .rows { display: grid; padding: 8px 12px 6px; }
-          .r { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
-               padding: 3px 0; font-weight: 500; font-size: 10.5px; line-height: 1.45;
-               color: var(--dim); border-bottom: 1px solid rgba(255, 255, 255, .03); }
-          .r:last-child { border-bottom: 0; }
-          .r > span { flex: 0 0 auto; letter-spacing: .05em; }
-          /* El valor puede ser largo ("next check in 21 h"): se le deja encoger y
-             partir en dos lineas en vez de salirse por el borde del panel. */
-          .r b { flex: 1 1 auto; min-width: 0; font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-                 font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: right;
-                 overflow-wrap: break-word; }
-          .r b.race { cursor: pointer; }
-          .r b.race[data-cancel="1"] { color: var(--warn); text-decoration: underline dotted; }
-          /* La cuenta atras de Race Now, dibujada sobre el borde de la fila:
-             dice cuanto falta sin añadir otra barra ni otro numero. */
-          .r[data-f="raceRow"] { position: relative; }
-          .r[data-f="raceRow"]::after {
-            content: '';
-            position: absolute;
-            left: 0; bottom: -1px; height: 1px;
-            width: calc(var(--race-progress, 0) * 1%);
-            background: linear-gradient(90deg, transparent, var(--acc));
-            box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 60%, transparent);
-            pointer-events: none;
-            transition: width .2s linear;
-          }
-          .r[hidden] { display: none; }
-          .r b[data-warn="1"] { color: var(--warn); }
-          .r b[data-warn="2"] { color: var(--bad); }
-
-          /* Aviso de temporada, el mismo de la tarjeta Season: una franja al
-             pie para no tener que abrir una carrera para verlo. */
-          .season { margin: 2px 12px 8px; padding: 6px 8px; border-radius: 8px;
-                    font-weight: 600; font-size: 9.5px; line-height: 1.35; color: var(--warn);
-                    background: color-mix(in srgb, var(--warn) 8%, transparent);
-                    border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent); }
-          .season[hidden] { display: none; }
-
-          /* La fila de tema es un control, no una metrica: se ve clicable y
-             lleva un punto del acento para reconocer la piel activa. */
-          .r .theme { all: unset; flex: 1 1 auto; min-width: 0; cursor: pointer;
-               font: 600 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-               font-variant-numeric: tabular-nums; color: var(--acc); text-align: right;
-               border-radius: 5px; }
-          .r .theme::before { content: ''; display: inline-block; width: 7px; height: 7px;
-               margin-right: 6px; border-radius: 50%; vertical-align: 1px;
-               background: var(--acc); box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 70%, transparent); }
-          .r .theme:hover { text-decoration: underline dotted; }
-          .r .theme:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-
-          /* Las mismas seis pieles, otra vez: cada shadow root tiene su propio
-             CSS y no hereda la paleta del panel grande. */
-          .p[data-theme="aurora"] { --acc: #3fe0c5; --acc-2: #a78bfa; --ink: #e8fbf7; --ink-2: #c3ece5; --dim: #7c9a98; --dim-2: #789693; --bg-hi: rgba(7, 19, 20, .985); --bg-lo: rgba(4, 10, 13, .995); }
-          .p[data-theme="sunset"] { --acc: #ff9a5c; --acc-2: #ff77b0; --ink: #fff3ea; --ink-2: #f6d8c7; --dim: #a08a80; --dim-2: #9c877d; --bg-hi: rgba(24, 12, 11, .985); --bg-lo: rgba(12, 6, 8, .995); }
-          .p[data-theme="ice"] { --acc: #66e3ff; --acc-2: #d7f7ff; --ink: #eefaff; --ink-2: #c9e9f6; --dim: #7e97a4; --dim-2: #7a93a0; --bg-hi: rgba(8, 16, 24, .985); --bg-lo: rgba(4, 8, 14, .995); }
-          .p[data-theme="violet"] { --acc: #c08bff; --acc-2: #f0a9ff; --ink: #f7f0ff; --ink-2: #ddcbf2; --dim: #93849f; --dim-2: #8f809b; --bg-hi: rgba(18, 11, 27, .985); --bg-lo: rgba(8, 5, 14, .995); }
-          .p[data-theme="rgb"] {
-            --nt-hue: 0;
-            --nt-angle: 0deg;
-            --acc: hsl(var(--nt-hue) 92% 63%);
-            --acc-2: hsl(calc(var(--nt-hue) + 70) 94% 76%);
-            --ink: #f6f7ff;
-            --ink-2: #d9dcf0;
-            --dim: #8d90a6;
-            --dim-2: #8a8da3;
-            --bg-hi: rgba(11, 11, 19, .985);
-            --bg-lo: rgba(5, 5, 10, .995);
-            animation:
-              nt-qp-boot .4s cubic-bezier(.2, .9, .25, 1) both,
-              nt-rgb-hue 16s linear infinite,
-              nt-rgb-angle 8s linear infinite;
-          }
-          @keyframes nt-rgb-hue { to { --nt-hue: 360; } }
-          @keyframes nt-rgb-angle { to { --nt-angle: 360deg; } }
-
-          .p[data-theme="rgb"]::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            z-index: 5;
-            padding: 1px;
-            border-radius: 14px;
-            background: conic-gradient(from var(--nt-angle, 0deg),
-              #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
-            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-            -webkit-mask-composite: xor;
-            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-            mask-composite: exclude;
-            pointer-events: none;
-          }
-
-          /* El mismo titulo arcoiris que el panel grande, para que el garaje no
-             parezca otra herramienta cuando el tema es RGB. */
-          .p[data-theme="rgb"] .t {
-            background: linear-gradient(90deg, #ff5f6d, #ffc371, #47ffa1, #5ad1ff, #b06bff, #ff5f6d);
-            background-size: 300% 100%;
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            text-shadow: none;
-            animation: nt-rgb-title 6s linear infinite;
-          }
-          @keyframes nt-rgb-title { to { background-position: 300% 0; } }
-
-          /* La espera no es una metrica: es la respuesta a «por que no corre».
-             Va en ambar y se separa de la lista, no compite con ella. */
-          .r[data-f="waitRow"] { margin: 4px 0; padding: 5px 8px; border-radius: 8px;
-               border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent);
-               background: color-mix(in srgb, var(--warn) 8%, transparent); color: #cfa96b; font-size: 10px; }
-          .r[data-f="waitRow"] b { font-size: 10px; color: var(--warn); }
-
-          /* Pie: el motivo, con la misma linea de separacion que el panel grande
-             usa para su barra de estado. */
-          .why { margin-top: 2px; padding: 8px 12px 0; border-top: 1px solid var(--line);
-                 font-weight: 500; font-size: 9.5px; line-height: 1.35; color: var(--dim); }
-          .why b { font-weight: 500; color: #cfe3d6; }
-          .why[hidden] { display: none; }
-
-          .acts { display: flex; flex-wrap: wrap; gap: 7px; padding: 9px 12px 12px; }
-          .act { flex: 1 1 auto; min-width: 0; padding: 9px 0; text-align: center;
-                 border-radius: 9px; cursor: pointer;
-                 font: 800 9.5px/1 ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
-                 letter-spacing: .14em; text-transform: uppercase; color: var(--ink);
-                 background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 22%, transparent), color-mix(in srgb, var(--acc) 10%, transparent));
-                 border: 1px solid color-mix(in srgb, var(--acc) 34%, transparent);
-                 box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1);
-                 transition: filter .15s ease, box-shadow .25s ease, transform .1s ease; }
-          .act:hover:not(:disabled) { filter: brightness(1.16);
-                 box-shadow: 0 0 20px -8px var(--acc), inset 0 1px 0 rgba(255, 255, 255, .12); }
-          .act:active:not(:disabled) { transform: translateY(1px); }
-          .act:disabled { opacity: .38; cursor: default; }
-          .act.ghost { color: #cfe9db; background: rgba(255, 255, 255, .045);
-                 border-color: var(--line); box-shadow: none; }
-          .act.ghost:hover:not(:disabled) { color: var(--acc); background: var(--acc-dim);
-                 border-color: var(--line-strong); }
-          /* Stop comparte sitio con las acciones normales, pero su color no
-             invita a pulsarlo: parar es una salida, no el siguiente paso. */
-          .act.danger { color: #ffd0d0;
-                 background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 18%, transparent), color-mix(in srgb, var(--bad) 8%, transparent));
-                 border-color: color-mix(in srgb, var(--bad) 32%, transparent);
-                 box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
-          .act.danger:hover:not(:disabled) { color: #fff;
-                 background: color-mix(in srgb, var(--bad) 22%, transparent);
-                 border-color: color-mix(in srgb, var(--bad) 55%, transparent);
-                 box-shadow: 0 0 20px -9px var(--bad), inset 0 1px 0 rgba(255, 255, 255, .12); }
-          /* «Copy» es una herramienta, no una accion de carrera: se queda
-             compacto para no apretar los dos botones que se usan de verdad. */
-          .act.tool { flex: 0 0 auto; padding: 9px 12px; color: var(--dim); }
-          .act.tool:hover:not(:disabled) { color: var(--acc); }
-          /* Update lleva su propio icono y el numero de version: se centra en
-             una linea y no se deja partir cuando el panel esta estrecho. */
-          .act.update { display: inline-flex; align-items: center; justify-content: center;
-                 gap: 6px; white-space: nowrap; }
-          .act.update svg { width: 12px; height: 12px; flex: none; }
-          .act.update[hidden] { display: none; }
-          .act:focus-visible, .mode:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-
-          @media (prefers-reduced-motion: reduce) {
-            .p, .p *, .p::before, .p::after { animation: none !important; transition: none !important; }
-            /* Misma regla que el panel grande: el color sigue, el movimiento no. */
-            .p[data-theme="rgb"] { animation: nt-rgb-hue 16s linear infinite !important; }
-          }
-        </style>
-        <div class="p" data-mode="auto" data-theme="${panelTheme}">
-          <div class="h" title="Drag to move · double-click to put it back in the corner">
-            <span class="mark" aria-hidden="true">
-              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="14" stroke-opacity=".22"/><path d="M6.5 9.5 11 23l5-9 5 9 4.5-13.5"/></svg>
-              <i class="dot"></i>
-            </span>
-            <span><b class="t">NITRO WRAITH</b><span class="s" data-f="sub">garage · queue</span></span>
-            <span class="mode" role="status" aria-live="polite" title="Always AUTO: it starts and re-arms by itself. To stop it, use Stop / Esc in the race.">AUTO</span>
-            <button class="hupd" type="button" data-f="updateCompact" hidden title="A newer NITRO WRAITH is available; click to download the userscript" aria-label="Update available. Download the new userscript.">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg>
-            </button>
-            <button class="fold" type="button" data-f="fold" aria-expanded="true" aria-label="Fold the garage panel" title="Fold the garage panel (Alt+G)">−</button>
-          </div>
-          <div class="rows">
-            <div class="r social" data-f="socialFriendsRow" hidden><span>friends</span><b data-f="socialFriends" aria-live="polite" aria-atomic="true">—</b></div>
-            <div class="r social" data-f="socialOnlineRow" hidden><span>online</span><b data-f="socialOnline" aria-live="polite" aria-atomic="true">—</b></div>
-            <div class="r social" data-f="socialRequestsRow" hidden><span>requests</span><b data-f="socialRequests" aria-live="polite" aria-atomic="true">—</b></div>
-            <div class="r social" data-f="socialTeamRow" hidden><span>team</span><b data-f="socialTeam" aria-live="polite" aria-atomic="true">—</b></div>
-            <div class="r social" data-f="socialUpdatedRow" hidden><span>updated</span><b data-f="socialUpdated">—</b></div>
-            <div class="r"><span>state</span><b data-f="state">—</b></div>
-            <div class="r" data-f="afkRow"><span>afk</span><b data-f="afk">—</b></div>
-            <div class="r" data-f="keepAliveRow"><span>keep-alive</span><b data-f="keepAlive">—</b></div>
-            <div class="r" data-f="retryRow" hidden><span>login retry</span><b data-f="loginRetry">—</b></div>
-            <div class="r"><span>login</span><b data-f="login">—</b></div>
-            <div class="r"><span>mystery box</span><b data-f="box">—</b></div>
-            <div class="r"><span>session</span><b data-f="session">—</b></div>
-            <div class="r" data-f="challengeRow" hidden><span>challenges</span><b data-f="challenges">—</b></div>
-            <div class="r" data-f="nextRow" hidden><span>next</span><b data-f="next">—</b></div>
-            <div class="r"><span>theme</span><button class="theme" type="button" data-f="theme" aria-live="polite" aria-label="Panel theme: ${THEME_LABELS[panelTheme] || panelTheme}. Activate to cycle." title="Click to cycle the panel theme: carbon, aurora, sunset, ice, violet, rgb. The race panel follows it.">${THEME_LABELS[panelTheme] || panelTheme}</button></div>
-            <div class="r" data-f="renewedRow" hidden><span>renewed</span><b data-f="renewed">—</b></div>
-            <div class="r" data-f="waitRow" hidden><span>waiting on</span><b data-f="wait">—</b></div>
-            <div class="r" data-f="stopRow" hidden><span data-f="stopLabel">last stop</span><b data-f="lastStop">—</b></div>
-            <div class="r" data-f="stopHistoryRow" hidden><span>recent stops</span><b data-f="stopHistory">—</b></div>
-            <div class="r" data-f="raceRow"><span>next race</span><b class="race" data-f="race" title="Automatic start: click the value to cancel it (the bot stays armed and offers it again a little later)">—</b></div>
-            <div class="r" data-f="dayRow" hidden><span>races</span><b data-f="dayRaces">—</b></div>
-            <div class="r" data-f="budgetRow" hidden><span>day left</span><b data-f="dayBudget">—</b></div>
-            <div class="r" data-f="boxesRow" hidden><span>boxes</span><b data-f="dayBoxes">—</b></div>
-            <div class="r" data-f="alertsRow" hidden><span>alerts</span><b data-f="dayAlerts">—</b></div>
-          </div>
-          <div class="season" data-f="seasonRow" hidden><b data-f="seasonAlert">—</b></div>
-          <div class="why" data-f="whyRow" hidden><b data-f="why">—</b></div>
-          <div class="acts">
-            <button class="act ghost" type="button" data-act="afk" data-f="afkBtn" title="AFK farming is off: races only start while this tab is visible. Turn it on to keep the queue running hidden; a frozen tab can still end a race in a DQ.">AFK off</button>
-            <button class="act" type="button" data-act="box">Claim box</button>
-            <button class="act ghost" type="button" data-act="race">Race now</button>
-            <button class="act danger" type="button" data-act="stop" title="Stop the bot; mid-race it waits for the current race to end (same as Alt+S)">Stop</button>
-            <button class="act ghost" type="button" data-act="resume" title="Clear a stop and start now; with a live race this sends the same Alt+A">Resume</button>
-            <button class="act ghost" type="button" data-act="retry" hidden title="Advance the next sign-in retry without waiting for the countdown">Retry login</button>
-            <button class="act ghost tool" type="button" data-act="diag" title="Copy a diagnostic of the queue: mode, state, active waits, last decision, last failure, today and budgets">Copy</button>
-            <button class="act update" type="button" data-act="update" data-f="update" hidden title="A newer NITRO WRAITH is available; click to download the userscript">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg><span>Update</span>
-            </button>
-          </div>
-        </div>`;
-      document.body.appendChild(host);
-
-      garageUpdateNode = root.querySelector('[data-f="update"]');
-      garageCompactUpdateNode = root.querySelector('[data-f="updateCompact"]');
-      const refs = {
-        host,
-        head: root.querySelector('.h'),
-        panel: root.querySelector('.p'),
-        mode: root.querySelector('.mode'),
-        sub: root.querySelector('[data-f="sub"]'),
-        socialFriendsRow: root.querySelector('[data-f="socialFriendsRow"]'),
-        socialFriends: root.querySelector('[data-f="socialFriends"]'),
-        socialOnlineRow: root.querySelector('[data-f="socialOnlineRow"]'),
-        socialOnline: root.querySelector('[data-f="socialOnline"]'),
-        socialRequestsRow: root.querySelector('[data-f="socialRequestsRow"]'),
-        socialRequests: root.querySelector('[data-f="socialRequests"]'),
-        socialTeamRow: root.querySelector('[data-f="socialTeamRow"]'),
-        socialTeam: root.querySelector('[data-f="socialTeam"]'),
-        socialUpdatedRow: root.querySelector('[data-f="socialUpdatedRow"]'),
-        socialUpdated: root.querySelector('[data-f="socialUpdated"]'),
-        state: root.querySelector('[data-f="state"]'),
-        afkRow: root.querySelector('[data-f="afkRow"]'),
-        afk: root.querySelector('[data-f="afk"]'),
-        keepAliveRow: root.querySelector('[data-f="keepAliveRow"]'),
-        keepAlive: root.querySelector('[data-f="keepAlive"]'),
-        retryRow: root.querySelector('[data-f="retryRow"]'),
-        loginRetry: root.querySelector('[data-f="loginRetry"]'),
-        login: root.querySelector('[data-f="login"]'),
-        box: root.querySelector('[data-f="box"]'),
-        session: root.querySelector('[data-f="session"]'),
-        challengeRow: root.querySelector('[data-f="challengeRow"]'),
-        challenges: root.querySelector('[data-f="challenges"]'),
-        nextRow: root.querySelector('[data-f="nextRow"]'),
-        next: root.querySelector('[data-f="next"]'),
-        theme: root.querySelector('[data-f="theme"]'),
-        fold: root.querySelector('[data-f="fold"]'),
-        renewedRow: root.querySelector('[data-f="renewedRow"]'),
-        renewed: root.querySelector('[data-f="renewed"]'),
-        waitRow: root.querySelector('[data-f="waitRow"]'),
-        wait: root.querySelector('[data-f="wait"]'),
-        stopRow: root.querySelector('[data-f="stopRow"]'),
-        stopLabel: root.querySelector('[data-f="stopLabel"]'),
-        lastStop: root.querySelector('[data-f="lastStop"]'),
-        stopHistoryRow: root.querySelector('[data-f="stopHistoryRow"]'),
-        stopHistory: root.querySelector('[data-f="stopHistory"]'),
-        raceRow: root.querySelector('[data-f="raceRow"]'),
-        race: root.querySelector('[data-f="race"]'),
-        dayRow: root.querySelector('[data-f="dayRow"]'),
-        dayRaces: root.querySelector('[data-f="dayRaces"]'),
-        budgetRow: root.querySelector('[data-f="budgetRow"]'),
-        dayBudget: root.querySelector('[data-f="dayBudget"]'),
-        boxesRow: root.querySelector('[data-f="boxesRow"]'),
-        dayBoxes: root.querySelector('[data-f="dayBoxes"]'),
-        alertsRow: root.querySelector('[data-f="alertsRow"]'),
-        dayAlerts: root.querySelector('[data-f="dayAlerts"]'),
-        seasonRow: root.querySelector('[data-f="seasonRow"]'),
-        seasonAlert: root.querySelector('[data-f="seasonAlert"]'),
-        whyRow: root.querySelector('[data-f="whyRow"]'),
-        why: root.querySelector('[data-f="why"]'),
-        boxBtn: root.querySelector('[data-act="box"]'),
-        raceBtn: root.querySelector('[data-act="race"]'),
-        afkBtn: root.querySelector('[data-act="afk"]'),
-        stopBtn: root.querySelector('[data-act="stop"]'),
-        resumeBtn: root.querySelector('[data-act="resume"]'),
-        retryBtn: root.querySelector('[data-act="retry"]'),
-        diagBtn: root.querySelector('[data-act="diag"]'),
-        update: garageUpdateNode,
-        updateCompact: garageCompactUpdateNode,
-      };
+      const refs = createGaragePanelDom();
 
       // Ciclo de tema desde el garaje: el selector grande vive en el iframe de
       // la carrera, pero volver alli solo para cambiar la piel no tiene sentido.
@@ -17435,9 +19130,9 @@ All of this only aims at believable statistics. It is your call and your risk.
       // estado frenado en segundo plano y los contadores sociales no deben
       // quedarse viejos justo cuando el usuario mira.
       document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) socialWake();
+        if (!document.hidden) social.wake();
       });
-      window.addEventListener('focus', () => socialWake());
+      window.addEventListener('focus', () => social.wake());
       applyGarageFold(disk.get(KEYS.garageFolded) === '1', { persist: false });
       refs.fold.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -17673,6 +19368,14 @@ All of this only aims at believable statistics. It is your call and your risk.
       }
       if (isArmed()) {
         const hidden = pageHidden();
+        const hold = CONFIG.queue.afkFreezeGuard !== false && afkHoldActive();
+        if (hold) {
+          return {
+            text: hidden ? 'on · wait visible' : 'on · clear hold',
+            warn: hidden ? 2 : 0,
+            title: `AFK freeze hold: ${afkHoldInfo().reason}. One race with the tab visible clears it; hidden races stay paused until then.`,
+          };
+        }
         return {
           text: hidden ? 'on · hidden' : 'on',
           warn: 0,
@@ -17701,6 +19404,10 @@ All of this only aims at believable statistics. It is your call and your risk.
       if (blockedMin > 0) return `hold · site block ${blockedMin}m`;
       if (!onlineNow()) return 'waiting · offline';
       if (activeGate()) return 'waiting · active hours';
+      if (armed && pageHidden() && backgroundFarm()
+        && CONFIG.queue.afkFreezeGuard !== false && afkHoldActive()) {
+        return 'waiting · AFK hold';
+      }
       if (armed) return 'on · armed';
       if (stop) {
         // El motivo y la cuenta atras ya los pinta la fila ambar ("waiting on"),
@@ -17721,27 +19428,27 @@ All of this only aims at believable statistics. It is your call and your risk.
 
       const signed = signedIn();
       const armed = signed && isArmed();
-      const social = socialPanelRoute();
-      if (qpanel.panel.dataset.social !== (social ? '1' : '0')) {
-        qpanel.panel.dataset.social = social ? '1' : '0';
+      const isSocial = social.route();
+      if (qpanel.panel.dataset.social !== (isSocial ? '1' : '0')) {
+        qpanel.panel.dataset.social = isSocial ? '1' : '0';
       }
-      if (qpanel.sub) qpanel.sub.textContent = social ? `${socialPageLabel()} · read-only` : 'garage · queue';
+      if (qpanel.sub) qpanel.sub.textContent = isSocial ? `${social.pageLabel()} · read-only` : 'garage · queue';
       // Nada de OFF: el chip dice AUTO siempre y el LED dice si esta corriendo
       // o esperando. En Amigos/Equipo el chip dice READ: ahi no hay acciones
       // sociales ni cola que armar.
       if (qpanel.panel.dataset.mode !== 'auto') qpanel.panel.dataset.mode = 'auto';
       const armedFlag = armed ? '1' : '0';
       if (qpanel.panel.dataset.armed !== armedFlag) qpanel.panel.dataset.armed = armedFlag;
-      qpanel.mode.textContent = social ? 'READ' : 'AUTO';
-      if (social) qpanel.mode.setAttribute('aria-label', 'Read-only social panel');
+      qpanel.mode.textContent = isSocial ? 'READ' : 'AUTO';
+      if (isSocial) qpanel.mode.setAttribute('aria-label', 'Read-only social panel');
       else qpanel.mode.removeAttribute('aria-label');
-      qpanel.mode.title = social
+      qpanel.mode.title = isSocial
         ? 'Read-only: friends and team data. Accept, deny, invite and send are not available.'
         : (armed
           ? 'Automation runs by itself (always AUTO). To stop it, use Stop / Esc in the race.'
           : 'Waiting; it starts again by itself. There is no off switch: the mode is always AUTO.');
-      qpanel.state.textContent = social ? 'read-only' : garageStateText();
-      paintSocialRows(social);
+      qpanel.state.textContent = isSocial ? 'read-only' : garageStateText();
+      social.paintRows(isSocial);
 
       // Indicador AFK y cuenta atras real del reintento de login. La fecha vive
       // en sessionStorage, asi que no se pierde al recargar ni al navegar.
@@ -18133,268 +19840,25 @@ All of this only aims at believable statistics. It is your call and your risk.
       return path === '/' || path === '/garage' || path.startsWith('/garage/');
     }
 
-    // Amigos y Equipo comparten el panel pequeno, pero en modo de solo lectura.
-    // La ruta se mantiene separada de garagePanelRoute(): solo el garaje puede
-    // armar la cola o pulsar «Race Now».
-    function socialPanelRoute() {
-      const path = location.pathname;
-      return path === '/friends' || path.startsWith('/friends/')
-        || path === '/team' || path.startsWith('/team/');
-    }
-
     function panelRoute() {
-      return garagePanelRoute() || socialPanelRoute();
+      return garagePanelRoute() || social.route();
     }
 
-    function socialPageLabel() {
-      const path = location.pathname;
-      return path === '/team' || path.startsWith('/team/') ? 'team' : 'friends';
-    }
-
-    // El perfil que el sitio ya guardo es el respaldo inmediato: el panel tiene
-    // algo que enseñar antes de que contesten las tres peticiones de lectura.
-    function persistedSocial() {
-      const user = siteUser(0) || {};
-      const listed = Array.isArray(user.friends)
-        ? user.friends.length
-        : (user.friends && typeof user.friends === 'object' ? Object.keys(user.friends).length : null);
-      const total = Number(user.totalFriends);
-      const friends = Number.isFinite(listed) ? listed : (Number.isFinite(total) ? total : null);
-      const tag = String(user.tag || user.teamTag || '').trim();
-      const role = String(user.teamRole || user.teamRoleName || '').trim();
-      const owner = String(user.userID || user.id || user.username || '').trim();
-      return {
-        friends: Number.isFinite(friends) ? friends : null,
-        teamTag: tag || null,
-        teamRole: role || null,
-        owner,
-      };
-    }
-
-    // La cache social no puede sobrevivir a un cambio de cuenta sin recargar:
-    // los contadores del usuario anterior no son del usuario nuevo. El token
-    // cubre el caso en el que el perfil aun no se ha escrito en persist:nt.
-    function socialOwner(profile = persistedSocial()) {
-      if (profile.owner) return profile.owner;
-      const claims = jwtClaims();
-      return claims && claims.sub ? String(claims.sub) : '';
-    }
-
-    function socialCountText(value, pending = socialCache.pending) {
-      if (Number.isFinite(value)) return String(value);
-      return pending ? '…' : '—';
-    }
-
-    let socialCache = { at: 0, data: null, pending: null, failedAt: 0, owner: '' };
-    let socialRouteSeen = '';
-    let socialWakeAt = 0;
-    // Lectura social: no es informacion que cambie al segundo y son tres GET
-    // por refresco. Dos minutos de cache bajan el trafico sin dejar la vista
-    // congelada; al abrir la pestana social se fuerza una lectura fresca.
-    const SOCIAL_TTL_MS = 120000;
-    const SOCIAL_RETRY_MS = 120000;
-    const SOCIAL_TIMEOUT_MS = 12000;
-
-    function socialStatusText(cache = socialCache) {
-      if (cache.pending) return 'Refreshing now.';
-      const last = cache.at
-        ? `Last checked ${shortWait(Math.max(1000, Date.now() - cache.at))} ago.`
-        : 'Not checked yet.';
-      return cache.failedAt ? `${last} The latest read failed; retrying.` : last;
-    }
-
-    function socialWake() {
-      if (!socialPanelRoute()) return;
-      const now = Date.now();
-      if (now - socialWakeAt < 1500) return;
-      socialWakeAt = now;
-      refreshSocial(true).catch(() => {});
-    }
-
-    function socialSnapshot() {
-      const profile = persistedSocial();
-      const owner = socialOwner(profile);
-      const current = socialCache.owner === owner;
-      // Si la cuenta cambio, se enseña el respaldo del perfil nuevo y se
-      // ignoran los contadores de la cuenta anterior hasta la siguiente GET.
-      const cached = current ? (socialCache.data || {}) : {};
-      return {
-        current,
-        pending: current && Boolean(socialCache.pending),
-        friends: Number.isFinite(cached.friends) ? cached.friends : profile.friends,
-        online: Number.isFinite(cached.online) ? cached.online : null,
-        requests: Number.isFinite(cached.requests) ? cached.requests : null,
-        teamTag: profile.teamTag,
-        teamRole: profile.teamRole,
-      };
-    }
-
-    function setSocialText(el, value) {
-      if (el && el.textContent !== value) el.textContent = value;
-    }
-
-    function setSocialTitle(el, value) {
-      if (el && el.title !== value) el.title = value;
-    }
-
-    function paintSocialRows(social) {
-      if (!qpanel) return;
-      const snapshot = socialSnapshot();
-      const rows = [
-        [qpanel.socialFriendsRow, qpanel.socialFriends],
-        [qpanel.socialOnlineRow, qpanel.socialOnline],
-        [qpanel.socialRequestsRow, qpanel.socialRequests],
-        [qpanel.socialTeamRow, qpanel.socialTeam],
-        [qpanel.socialUpdatedRow, qpanel.socialUpdated],
-      ];
-      for (const [row] of rows) {
-        if (row) row.hidden = !social;
-      }
-      if (!social) return;
-
-      const cache = snapshot.current
-        ? socialCache
-        : { at: 0, pending: null, failedAt: 0 };
-      setSocialText(qpanel.socialFriends, socialCountText(snapshot.friends, snapshot.pending));
-      setSocialText(qpanel.socialOnline, socialCountText(snapshot.online, snapshot.pending));
-      setSocialText(qpanel.socialRequests, socialCountText(snapshot.requests, snapshot.pending));
-      setSocialText(qpanel.socialTeam, snapshot.teamTag
-        ? `[${snapshot.teamTag}]${snapshot.teamRole ? ` · ${snapshot.teamRole}` : ''}`
-        : (signedIn() ? 'none' : '—'));
-      const age = cache.at
-        ? `${shortWait(Math.max(1000, Date.now() - cache.at))} ago`
-        : '';
-      setSocialText(qpanel.socialUpdated, snapshot.pending
-        ? 'refreshing…'
-        : (cache.failedAt ? (age ? `${age} · retry` : 'failed') : (age || '—')));
-
-      const status = socialStatusText(cache);
-      setSocialTitle(qpanel.socialFriendsRow,
-        `Friends on this account. Read-only: the panel never adds or removes friends. ${status}`);
-      setSocialTitle(qpanel.socialOnlineRow,
-        `Friends online right now. Read-only; the panel does not invite or message anyone. ${status}`);
-      setSocialTitle(qpanel.socialRequestsRow,
-        `Pending friend requests. Read-only; the panel never accepts or denies them. ${status}`);
-      setSocialTitle(qpanel.socialTeamRow,
-        `Team tag and role from your profile. Read-only; the panel never invites, applies or leaves. ${status}`);
-      setSocialTitle(qpanel.socialUpdatedRow,
-        `Last read status for the three GET requests. ${status}`);
-    }
-
-    // Tres GET sin efectos: total de amigos, amigos online y solicitudes. El
-    // panel no tiene ningun camino hacia accept/deny/invite/send. Si una
-    // peticion falla, se conserva el respaldo del perfil y se reintenta luego.
-    async function refreshSocial(force = false) {
-      if (!socialPanelRoute()) return;
-      // Las tres GET se reintentan al volver online; offline solo llenarian
-      // la cache de fallos y dejarian el panel en «retry» sin motivo.
-      if (!onlineNow()) return;
-      const now = Date.now();
-      const profile = persistedSocial();
-      const owner = socialOwner(profile);
-      if (socialCache.owner !== owner) {
-        // La peticion vieja puede seguir viva, pero su resultado se descarta
-        // al ver que el owner ya no coincide. Se suelta el pending para que
-        // la cuenta nueva no espere los 12 s de la anterior.
-        socialCache = { at: 0, data: null, pending: null, failedAt: 0, owner };
-      }
-      if (document.hidden && !force) return;
-      if (socialCache.pending) return socialCache.pending;
-      if (!force && socialCache.data && now - socialCache.at < SOCIAL_TTL_MS) return;
-      if (!force && socialCache.failedAt && now - socialCache.failedAt < SOCIAL_RETRY_MS) return;
-
-      if (!socialCache.data) {
-        socialCache.data = { friends: profile.friends, online: null, requests: null };
-      }
-
-      const pending = (async () => {
-        const token = readToken();
-        // Un GET colgado no puede dejar el panel en «refreshing» para siempre.
-        const controller = typeof AbortController === 'function' ? new AbortController() : null;
-        const timer = controller ? setTimeout(() => controller.abort(), SOCIAL_TIMEOUT_MS) : null;
-        const headers = { accept: 'application/json, text/plain, */*' };
-        if (token) {
-          headers.Authorization = `Bearer ${token}`;
-          const claims = jwtClaims(token);
-          if (claims && claims.sub) headers['x-uid'] = String(claims.sub);
-        }
-
-        const stamp = Date.now();
-        const read = async (url) => {
-          try {
-            const response = await fetch(url, {
-              method: 'GET',
-              credentials: 'include',
-              headers,
-              cache: 'no-store',
-              signal: controller ? controller.signal : undefined,
-            });
-            if (!response.ok) return null;
-            return await response.json();
-          } catch {
-            return null;
-          }
-        };
-
-        let all;
-        let online;
-        let requests;
-        try {
-          [all, online, requests] = await Promise.all([
-            read(`/api/v2/friends?_=${stamp}`),
-            read(`/api/v2/friends?online=1&_=${stamp}`),
-            read(`/api/v2/friend-requests?r=${stamp}`),
-          ]);
-        } finally {
-          if (timer) clearTimeout(timer);
-        }
-
-        const countValues = (body) => {
-          const results = body && body.results;
-          return Array.isArray(results && results.values) ? results.values.length : null;
-        };
-        const countRequests = (body) => {
-          const results = body && body.results;
-          if (Array.isArray(results && results.requests)) return results.requests.length;
-          const total = Number(results && results.totalRecords);
-          return Number.isFinite(total) ? total : null;
-        };
-
-        // Una respuesta de una cuenta que ya no esta activa no puede
-        // reemplazar los contadores de la cuenta nueva.
-        if (socialCache.owner !== owner) return;
-
-        const next = {
-          friends: countValues(all),
-          online: countValues(online),
-          requests: countRequests(requests),
-        };
-        if (next.friends === null && next.online === null && next.requests === null) {
-          socialCache.failedAt = Date.now();
-        } else {
-          socialCache.data = next;
-          socialCache.at = Date.now();
-          socialCache.failedAt = 0;
-        }
-      })();
-
-      socialCache.pending = pending;
-      try {
-        await pending;
-      } catch {
-        // Un error inesperado no debe quedar como rechazo sin manejar en una
-        // llamada fire-and-forget desde el latido.
-        if (socialCache.owner === owner) socialCache.failedAt = Date.now();
-      } finally {
-        if (socialCache.pending === pending) socialCache.pending = null;
-        if (socialPanelRoute()) paintGaragePanel();
-      }
-    }
+    const social = createQueueSocial({
+      panel: () => qpanel,
+      paint: () => paintGaragePanel(),
+      signedIn,
+      onlineNow,
+      shortWait,
+      siteUser,
+      jwtClaims,
+      readToken,
+    });
 
     function syncGaragePanel() {
       if (!panelRoute() || !document.body) {
         if (qpanel) qpanel.host.style.display = 'none';
-        if (!socialPanelRoute()) socialRouteSeen = '';
+        if (!social.route()) social.resetRoute();
         return;
       }
 
@@ -18405,16 +19869,16 @@ All of this only aims at believable statistics. It is your call and your risk.
       // este corte, entrar en /friends podria armar AUTO y abrir una carrera
       // desde una pantalla que solo debia enseñar datos.
       if (!garagePanelRoute()) {
-        if (socialRouteSeen !== location.pathname) {
-          socialRouteSeen = location.pathname;
-          refreshSocial(true).catch(() => {});
+        if (social.routeSeen() !== location.pathname) {
+          social.setRoute(location.pathname);
+          social.refresh(true).catch(() => {});
         } else {
-          refreshSocial().catch(() => {});
+          social.refresh().catch(() => {});
         }
         paintGaragePanel();
         return;
       }
-      socialRouteSeen = '';
+      social.resetRoute();
 
       // El garaje es el unico sitio desde el que la cola abre carrera, y el bot
       // parado tras una redireccion (DQ, recarga, vuelta del garaje) no debia
@@ -20724,6 +22188,23 @@ All of this only aims at believable statistics. It is your call and your risk.
    * 13. BOOT
    * ========================================================================== */
   function boot() {
+    // El modo seguro vive en localStorage: si una version anterior se cayo tres
+    // veces, esta no vuelve a armar la cola sola. El banner explica como salir.
+    const safeRecord = readSafeModeRecord();
+    if (safeRecord) {
+      safeMode = true;
+      safeModeReason = String(safeRecord.reason || 'previous safe mode').slice(0, 240);
+      showSafeModeBanner(safeModeReason, true);
+      return;
+    }
+
+    // Firefox y Safari no estan en la matriz probada. No se para el script
+    // (Tampermonkey puede funcionar), pero el reporte debe decirlo desde el
+    // primer arranque para que el aviso no dependa de abrir Health.
+    if (!browserSupported() && window.top === window) {
+      log(`Browser ${browserFamily()} is not in the tested set (Chrome/Edge); see docs/COMPATIBILITY.md.`);
+    }
+
     // El registro de instancias se monta antes de repartir el trabajo: las dos
     // mitades del script lo necesitan para saber cuantas copias hay y cual manda.
     guardId = INSTANCE_ID;
@@ -20839,6 +22320,9 @@ All of this only aims at believable statistics. It is your call and your risk.
     setInterval(() => {
       // Eleccion de copia en este marco: una escribe, las demas esperan. Se
       // refresca en cada latido del panel, que es el unico que corre siempre.
+      heart('safe-mode', () => {
+        if (!safeMode && readSafeModeRecord()) enterSafeMode('another tab stopped automation');
+      });
       heart('role', refreshRole);
       heart('supervise', superviseLive);
       heart('panel', () => {
@@ -20944,6 +22428,13 @@ All of this only aims at believable statistics. It is your call and your risk.
     document.addEventListener('freeze', () => {
       frozenAt = Date.now();
       noteAfkFreeze();
+      // Si el freeze pilla una carrera viva (incluida la cuenta atras), el
+      // keep-alive no basto. Se frena el farmeo oculto hasta una carrera visible
+      // en vez de abrir la siguiente a ciegas; el guardia de DQ sigue aparte.
+      const raceAtRisk = !session.stopped && (session.typing || Boolean(findTypingApp()));
+      if (raceAtRisk && backgroundFarm() && CONFIG.queue.afkFreezeGuard !== false) {
+        armAfkHold('the browser froze this tab during a race');
+      }
       noteFlight('freeze', `visible=${document.visibilityState === 'visible'} racing=${Boolean(session.liveRound && !session.stopped)}`);
       releaseTypingLock();
       if (session.liveRound && !session.stopped) {
@@ -20982,5 +22473,13 @@ All of this only aims at believable statistics. It is your call and your risk.
     runAuto();
   }
 
-  boot();
+  // La red se instala antes del arranque: un fallo de boot tambien tiene que
+  // dejar rastro y no puede quedarse con temporizadores a medio montar.
+  installErrorBoundary();
+  try {
+    boot();
+  } catch (error) {
+    try { if (typeof panic === 'function') panic('boot failure; automation stopped', 10 * 60000); } catch { /* ya estaba parado */ }
+    noteBootFailure(error);
+  }
 })();

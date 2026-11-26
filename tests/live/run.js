@@ -30,6 +30,9 @@ const SHOT_DIR = process.env.SHOT_DIR ? path.resolve(ROOT, process.env.SHOT_DIR)
 // La regresion visual necesita una foto reproducible: reloj congelado y sin
 // animaciones. El check normal no activa nada de esto.
 const VISUAL_CAPTURE = process.env.VISUAL_CAPTURE === '1';
+// El workflow visual solo necesita las fotos: con VISUAL_ONLY se saltan los
+// checks y se va directo a la galeria. `npm test` sigue corriendo el banco entero.
+const VISUAL_ONLY = process.env.VISUAL_ONLY === '1';
 // Mediodia local del 18/11/2026: la fecha congelada sigue siendo la misma en
 // cualquier zona horaria y las etiquetas de "hoy" no dependen del dia real.
 const VISUAL_FROZEN_AT = new Date(2026, 10, 18, 12, 0, 0).getTime();
@@ -246,7 +249,29 @@ async function clickSelector(tab, selector) {
   });
 }
 
+// Antes de disparar la foto se espera a que las fuentes del marco esten listas
+// y a que el navegador haya pintado dos frames. Sin esto, una captura puede
+// caer a mitad de un reflow y mover el texto medio pixel: justo el falso
+// positivo de antialiasing que aparecia en el garaje.
+async function settleFrame(cdp) {
+  try {
+    await cdp.evaluate(`(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      try { await document.fonts.ready; } catch { /* sin FontFaceSet */ }
+      try {
+        const frame = document.querySelector('iframe');
+        const fonts = frame && frame.contentWindow && frame.contentWindow.document.fonts;
+        if (fonts) await fonts.ready;
+      } catch { /* el iframe puede estar navegando */ }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await wait(80);
+      return true;
+    })()`, true);
+  } catch { /* la captura fallara con su propio mensaje */ }
+}
+
 async function captureShot(cdp, file, clip) {
+  await settleFrame(cdp);
   const result = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     fromSurface: true,
@@ -285,7 +310,9 @@ async function captureViewStates(cdp) {
   })()`);
 
   const views = ['tune', 'log'];
-  const states = ['idle', 'racing', 'stopped'];
+  // La parada va primero: si se captura al final, la cola ya lleva minutos
+  // viva y a veces recarga el marco justo durante la foto, colgando el CDP.
+  const states = ['stopped', 'idle', 'racing'];
   for (const view of views) {
     const shown = await cdp.evaluate(`(() => {
       const root = document.querySelector('iframe').contentWindow.document
@@ -418,6 +445,7 @@ async function captureGarageStates(cdp, appUrl) {
         || key.startsWith('ntQueue:box')
         || key === 'ntQueue:stoppedAt' || key === 'ntQueue:lastStop'
         || key === 'ntQueue:stopHistory' || key === 'ntQueue:banClearHold'
+        || key === 'ntQueue:today'
         || key === 'ntQueue:lastLogin' || key === 'ntQueue:notice'
         || key === 'ntQueue:lastFail' || key === 'ntQueue:stuckAt'
         || key === 'player_token') {
@@ -426,7 +454,6 @@ async function captureGarageStates(cdp, appUrl) {
     }
     sessionStorage.removeItem('ntQueue:armedAt');
     localStorage.setItem('autoTyperPanelTheme', 'carbon');
-    localStorage.setItem('autoTyperCalibratedRange', JSON.stringify({ min: 103, max: 117 }));
     localStorage.setItem('autoTyperCalibrationAt', String(now - 600000));
     localStorage.setItem('autoTyperCalibrationVersion', version);
     localStorage.setItem('persist:nt', JSON.stringify({
@@ -444,7 +471,11 @@ async function captureGarageStates(cdp, appUrl) {
     localStorage.setItem('nta:update', JSON.stringify({
       at: now - 60000, status: 200, latest: version, via: 'gist',
     }));
-    localStorage.setItem('ntQueue:todayPart:visual', JSON.stringify({
+    // La clave agregada ntQueue:today se sigue leyendo y no se poda desde
+    // otras ventanas. El iframe /race/ del fixture tambien carga el userscript
+    // y, si su reloj no coincide, borraria una parte del dia; esta clave no la
+    // toca. El panel pequeno la fusiona con las partes reales (ninguna aqui).
+    localStorage.setItem('ntQueue:today', JSON.stringify({
       date: todayKey, races: 128, sumWpm: 14080, sumTarget: 14080,
       boxes: 2, dq: 0, xp: 1240, clean: 120, firstAt: now - 7200000,
       lastAt: now, dqAt: 0, updatedAt: now,
@@ -511,6 +542,9 @@ async function captureGarageStates(cdp, appUrl) {
   })()`);
 
   const captureGarageShot = async (name) => {
+    // El raton puede quedar sobre una fila despues de un clic y el :hover
+    // cambia el color del texto. Se saca del panel antes de la foto.
+    try { await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 }); } catch { /* target cerrado */ }
     await cdp.evaluate('(() => { if (window.__ntaDebug && window.__ntaDebug.garagePaint) window.__ntaDebug.garagePaint(); return true; })()');
     await sleep(150);
     const clip = await cdp.evaluate(`(() => {
@@ -556,8 +590,9 @@ async function captureGarageStates(cdp, appUrl) {
   await captureGarageShot('idle');
 
   // Una parada en curso: la cola no se arma sola y el panel ensena las filas
-  // "waiting on" y "stopped". Se recarga para que garageAutoDone vuelva a
-  // empezar y respete la marca.
+  // "waiting on" y "stopped". Se recarga para que el aviso de la parada vuelva
+  // a montarse; despues se suelta el armed que dejo la captura anterior y se
+  // publica el tipador parado para que STOP no vuelva a habilitarse.
   await cdp.evaluate(`(() => {
     const now = Date.now();
     const stop = { at: now - 120000, reason: 'limit 50 races', holdMs: 600000 };
@@ -580,6 +615,40 @@ async function captureGarageStates(cdp, appUrl) {
       return false;
     }
   }, 10000, 'the stopped garage panel');
+  // Tras la recarga el iframe y el armado vuelven a arrancar. Se declara
+  // parado el tipador y se suelta el armed que dejo la captura anterior para
+  // que el rearme automatico no cambie la foto mientras se captura.
+  await cdp.evaluate(`(() => {
+    try { sessionStorage.removeItem('ntQueue:armedAt'); } catch { /* bloqueado */ }
+    const frame = document.querySelector('iframe');
+    const typer = frame && frame.contentWindow && frame.contentWindow.__ntaDebug;
+    if (typer && typer.patchSession) typer.patchSession({ typing: 0, stopped: 1, endedAt: 0 });
+    if (typer && typer.paint) typer.paint(true);
+    const d = window.__ntaDebug;
+    if (d && d.armedReset) d.armedReset();
+    if (d && d.garagePaint) d.garagePaint();
+    return true;
+  })()`);
+  await sleep(300);
+  // El iframe pudo republicar su estado fresco entre el parche y la foto. Se
+  // fija el resumen publicado justo antes de congelar la animacion, que es lo
+  // que lee la cola para decidir si STOP sigue vivo.
+  await cdp.evaluate(`(() => {
+    if (window.top.__ntaFrame) {
+      window.top.__ntaFrame.stopped = 1;
+      window.top.__ntaFrame.typing = 0;
+      window.top.__ntaFrame.at = Date.now();
+    }
+    const frame = document.querySelector('iframe');
+    if (frame && frame.contentWindow && frame.contentWindow.__ntaFrame) {
+      frame.contentWindow.__ntaFrame.stopped = 1;
+      frame.contentWindow.__ntaFrame.typing = 0;
+      frame.contentWindow.__ntaFrame.at = Date.now();
+    }
+    const d = window.__ntaDebug;
+    if (d && d.garagePaint) d.garagePaint();
+    return true;
+  })()`);
   await cdp.evaluate(`(() => {
     const root = document.getElementById('nt-queue-panel').shadowRoot;
     if (!root || root.getElementById('nta-visual-freeze')) return false;
@@ -622,11 +691,17 @@ async function capturePanelThemes(cdp, appUrl) {
     freezeId = frozen.identifier || null;
   }
 
-  // La captura documenta la funcion nueva: una cuenta de 110 WPM con top 230.
-  // Se deja la calibracion y el perfil en el almacenamiento antes de navegar
-  // para que el panel arranque como en una instalacion real, sin esperar al API.
+  // La captura documenta una cuenta de ejemplo. No se siembra el objetivo ni el
+  // top: el panel los deriva de esta cuenta con el mismo motor automatico que
+  // usaria cualquier otra. Solo se deja el perfil para no esperar al API.
   await cdp.evaluate(`(() => {
-    localStorage.setItem('autoTyperCalibratedRange', JSON.stringify({ min: 103, max: 117 }));
+    // La galeria no puede heredar lo que dejaron los checks: se borra el
+    // almacenamiento y se siembra una cuenta demo completa. El token es un JWT
+    // sin firma, solo para que el panel muestre identidad y objetivo; nunca se
+    // manda a la red.
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('player_token', 'eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.');
     localStorage.setItem('persist:nt', JSON.stringify({
       user: JSON.stringify({
         avgSpeed: 110, avgAcc: 98.7, highestSpeed: 230, racesPlayed: 48756,
@@ -781,6 +856,14 @@ async function capturePanelThemes(cdp, appUrl) {
         + '.panel,.panel[data-theme],.panel[data-theme] *,.panel[data-theme] *::before,.panel[data-theme] *::after,'
         + '.panel[data-theme]::before,.panel[data-theme]::after{animation:none!important;transition:none!important;}';
       root.appendChild(style);
+      // updatePanel() puede rehacer el shadow root: sin esto el <style>
+      // congelado y la clase .bump volverian en el siguiente repintado y la
+      // foto caeria otra vez a mitad del rebote del marcador.
+      root.__ntaVisualGuard = new MutationObserver(() => {
+        for (const el of root.querySelectorAll('.bump')) el.classList.remove('bump');
+        if (!root.getElementById('nta-visual-freeze')) root.appendChild(style);
+      });
+      root.__ntaVisualGuard.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
       return true;
     })()`);
     await cdp.evaluate('(() => document.querySelector(\'iframe\').contentWindow.__ntaDebug.paint(true))()');
@@ -800,6 +883,22 @@ async function capturePanelThemes(cdp, appUrl) {
       if (!changed) throw new Error(`theme button not found: ${theme}`);
       await sleep(300);
       await cdp.evaluate('(() => document.querySelector(\'iframe\').contentWindow.__ntaDebug.paint(true))()');
+      // El `.bump` del marcador dura 320 ms y `paint()` lo rearma en el
+      // siguiente frame: se deja terminar y se fija el numero antes de medir el
+      // clip. Sin esto la foto cae a mitad del rebote y el tamano del texto
+      // cambia unas decimas de pixel entre ejecuciones.
+      await sleep(380);
+      await cdp.evaluate(`(() => {
+        const root = document.querySelector('iframe').contentWindow.document
+          .getElementById('nt-autotyper-panel').shadowRoot;
+        for (const el of root.querySelectorAll('.bump')) el.classList.remove('bump');
+        for (const b of root.querySelectorAll('.stat b')) {
+          b.style.animation = 'none';
+          b.style.transform = 'none';
+        }
+        return true;
+      })()`);
+      await sleep(60);
 
       const clip = await cdp.evaluate(`(() => {
         const frame = document.querySelector('iframe');
@@ -1002,6 +1101,13 @@ const READ = `(() => {
 })()`;
 
 async function runChecks(cdp, devtoolsPort, appUrl) {
+  // Modo captura: el workflow visual solo necesita las fotos. Saltarse los 85
+  // checks baja el run de minutos a menos de uno; la logica se sigue probando
+  // en `npm test`, que es el unico sitio donde importa.
+  if (VISUAL_ONLY) {
+    await capturePanelThemes(cdp, appUrl);
+    return [];
+  }
   const results = [];
   const check = (name, ok, detail) => {
     results.push({ name, ok });
@@ -1078,7 +1184,9 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   const sourceOrder = [
     '00-header.js', '10-config.js', '20-utils.js', '30-profile.js', '32-history.js',
     '40-dom.js', '50-state.js', '60-pacing.js', '70-session.js', '72-results.js',
-    '80-panel.js', '90-queue.js', '95-stickers.js', '96-guard.js', '97-boot.js',
+    '80-panel.js', '81-panel-live.js', '82-panel-season.js', '83-panel-shell.js',
+    '85-queue-social.js', '87-queue-garage-dom.js', '90-queue.js',
+    '95-stickers.js', '96-guard.js', '97-boot.js',
   ];
   const sourceDir = path.join(ROOT, 'src');
   const sourceText = sourceOrder
@@ -1093,13 +1201,11 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   // Auto-update barato: el @updateURL apunta al meta pequeno del Gist y el
   // @downloadURL al script completo. Sin SHA en la URL, para que no se congele.
   const scriptText = fs.readFileSync(SCRIPT, 'utf8');
-  const socialStart = scriptText.indexOf('function socialPanelRoute()');
-  const socialEnd = scriptText.indexOf('function syncGaragePanel()');
-  const socialBlock = socialStart >= 0 && socialEnd > socialStart
-    ? scriptText.slice(socialStart, socialEnd)
-    : '';
+  const socialPath = path.join(ROOT, 'src/85-queue-social.js');
+  const socialBlock = fs.existsSync(socialPath) ? fs.readFileSync(socialPath, 'utf8') : '';
   check('the social panel only reads: no POST, accept, deny, invite or apply path',
     socialBlock.length > 0
+      && socialBlock.includes('createQueueSocial')
       && !/method:\s*'POST'/.test(socialBlock)
       && !/\/api\/v2\/(friend-requests\/(accept|deny)|teams\/.*(invite|apply))/.test(socialBlock),
     { bytes: socialBlock.length });
@@ -1241,6 +1347,152 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && updateHealth.fallbackState.latest === scriptVersion
       && updateHealth.fallbackState.via === 'github',
     updateHealth);
+
+  // Integridad del auto-update: el aviso solo se convierte en instalacion si
+  // el SHA-256 del archivo coincide con build.json. El fetch se sustituye por
+  // un servidor de mentira; no se toca el Gist ni la release real.
+  const updateIntegrity = await cdp.evaluate(`(async () => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    if (!d.checkForUpdate || !d.openUpdateDownload) return { has: false };
+    const key = 'nta:update';
+    const saved = w.localStorage.getItem(key);
+    const oldFetch = w.fetch;
+    const oldOpen = w.open;
+    const enc = new TextEncoder();
+    const payload = ['// ==UserScript==', '// @version 99.0.0', '// ==/UserScript==', ''].join(String.fromCharCode(10));
+    const tampered = ['// not the published file', ''].join(String.fromCharCode(10));
+    const hash = async (text) => {
+      const buffer = await w.crypto.subtle.digest('SHA-256', enc.encode(text));
+      return Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    };
+    const serve = async (digest) => {
+      w.fetch = async (url) => {
+        const target = String(url);
+        if (target.endsWith('build.json')) {
+          return { ok: true, status: 200, text: async () => JSON.stringify({ version: '99.0.0', files: { 'nitro-wraith.user.js': { sha256: digest } } }) };
+        }
+        if (target.includes('nitro-wraith.user.js')) {
+          return { ok: true, status: 200, arrayBuffer: async () => enc.encode(payload).buffer };
+        }
+        return { ok: true, status: 200, text: async () => '// @version 99.0.0' };
+      };
+    };
+    let opened = 0;
+    w.open = () => { opened += 1; };
+    try {
+      await serve(await hash(payload));
+      const good = await d.checkForUpdate(true);
+      const goodState = d.updateState();
+      const goodBadgeHidden = s.querySelector('.ghlink').hidden;
+      const goodOpened = d.openUpdateDownload();
+      const openedAfterGood = opened;
+
+      await serve(await hash(tampered));
+      const bad = await d.checkForUpdate(true);
+      const badState = d.updateState();
+      const badBadgeHidden = s.querySelector('.ghlink').hidden;
+      const badOpened = d.openUpdateDownload();
+      const openedAfterBad = opened;
+
+      // Un fallo de red posterior no puede dejar el aviso ya verificado como un
+      // boton muerto: antes se borraba verified, el badge seguia visible y el
+      // clic se rechazaba culpando a la integridad.
+      await serve(await hash(payload));
+      await d.checkForUpdate(true);
+      w.fetch = async () => { throw new Error('offline'); };
+      const offline = await d.checkForUpdate(true);
+      const offlineState = d.updateState();
+      const offlineOpened = d.openUpdateDownload();
+      const openedAfterOffline = opened;
+      return {
+        has: true, good, goodState, goodBadgeHidden, goodOpened, openedAfterGood,
+        bad, badState, badBadgeHidden, badOpened, openedAfterBad,
+        offline, offlineState, offlineOpened, openedAfterOffline,
+      };
+    } finally {
+      if (saved === null) w.localStorage.removeItem(key); else w.localStorage.setItem(key, saved);
+      w.fetch = oldFetch;
+      w.open = oldOpen;
+    }
+  })()`, true);
+  check('a newer update is offered only after its SHA-256 matches build.json',
+    updateIntegrity.has === true
+      && updateIntegrity.good === true
+      && updateIntegrity.goodState
+      && updateIntegrity.goodState.latest === '99.0.0'
+      && updateIntegrity.goodState.verified === true
+      && /^[0-9a-f]{64}$/.test(updateIntegrity.goodState.sha256 || '')
+      && updateIntegrity.goodBadgeHidden === false
+      && updateIntegrity.goodOpened === true
+      && updateIntegrity.openedAfterGood === 1
+      && updateIntegrity.bad === false
+      && updateIntegrity.badState
+      && updateIntegrity.badState.verified === false
+      && /^integrity:/.test(updateIntegrity.badState.error || '')
+      && updateIntegrity.badBadgeHidden === true
+      && updateIntegrity.badOpened === false
+      && updateIntegrity.openedAfterBad === 1
+      && updateIntegrity.offline === false
+      && updateIntegrity.offlineState
+      && updateIntegrity.offlineState.error === 'offline'
+      && updateIntegrity.offlineState.latest === '99.0.0'
+      && updateIntegrity.offlineState.verified === true
+      && updateIntegrity.offlineOpened === true
+      && updateIntegrity.openedAfterOffline === 2,
+    updateIntegrity);
+
+  // Fallos de almacenamiento: JSON corrupto y cuota llena no pueden tumbar el
+  // panel. Se restaura todo antes de devolver, para no contaminar el resto.
+  const storageFaults = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const d = w.__ntaDebug;
+    const updateKey = 'nta:update';
+    const tandaKey = 'autoTyperTandaLog';
+    const savedUpdate = w.localStorage.getItem(updateKey);
+    const savedTanda = w.localStorage.getItem(tandaKey);
+    const oldSet = w.Storage.prototype.setItem;
+    const out = {};
+    try {
+      w.localStorage.setItem(updateKey, '{not json');
+      out.corruptUpdate = d.updateState() === null;
+      w.localStorage.setItem(tandaKey, '{broken');
+      try { d.diagnostic(); out.diagnosticSafe = true; } catch { out.diagnosticSafe = false; }
+
+      w.Storage.prototype.setItem = function () {
+        const error = new Error('quota');
+        error.name = 'QuotaExceededError';
+        throw error;
+      };
+      try { s.querySelector('[data-theme-btn="violet"]').click(); out.quotaSafe = true; } catch { out.quotaSafe = false; }
+    } finally {
+      w.Storage.prototype.setItem = oldSet;
+      if (savedUpdate === null) w.localStorage.removeItem(updateKey); else w.localStorage.setItem(updateKey, savedUpdate);
+      if (savedTanda === null) w.localStorage.removeItem(tandaKey); else w.localStorage.setItem(tandaKey, savedTanda);
+      s.querySelector('[data-theme-btn="carbon"]').click();
+    }
+    out.panelAlive = Boolean(s.querySelector('.panel'));
+    out.diagnosticSchema = (() => { try { return d.diagnostic().schema; } catch { return 0; } })();
+    out.selfTest = d.selfTest ? d.selfTest() : null;
+    return out;
+  })()`);
+  check('corrupt storage and a full quota leave the panel and report usable',
+    storageFaults.corruptUpdate === true
+      && storageFaults.diagnosticSafe === true
+      && storageFaults.quotaSafe === true
+      && storageFaults.panelAlive === true
+      && storageFaults.diagnosticSchema === 2
+      && storageFaults.selfTest
+      && storageFaults.selfTest.schema === 2
+      && storageFaults.selfTest.storage === 'ok'
+      && storageFaults.selfTest.panel === true
+      && storageFaults.selfTest.contract
+      && typeof storageFaults.selfTest.contract.race === 'boolean'
+      && storageFaults.selfTest.update
+      && typeof storageFaults.selfTest.update.text === 'string',
+    storageFaults);
   check('results-page failure falls back to the garage before stopping',
     scriptText.includes("notifyTopNeedGarage('the results page would not open another race')")
       && scriptText.includes("panic('the results page will not open another race', 2 * 60000)")
@@ -1285,6 +1537,72 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('every theme resolves its own accent and background',
     new Set(themeVars.map((theme) => theme.acc)).size === 6
       && themeVars.every((theme) => theme.acc && theme.bg), themeVars);
+
+  // Contraste real por tema: se resuelven las variables dentro del shadow DOM
+  // (RGB usa hsl con @property) y se compone el fondo translucido sobre negro.
+  const contrast = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const s = w.document.getElementById('nt-autotyper-panel').shadowRoot;
+    const panel = s.querySelector('.panel');
+    const probe = w.document.createElement('span');
+    panel.appendChild(probe);
+    const parse = (value) => {
+      probe.style.color = value;
+      const color = w.getComputedStyle(probe).color;
+      const match = color.match(/rgba?\\(([^)]+)\\)/);
+      const parts = match ? match[1].split(',').map(Number) : [0, 0, 0, 1];
+      return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+    };
+    const lum = (c) => {
+      const channel = (v) => { const n = v / 255; return n <= 0.03928 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4); };
+      return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+    };
+    const over = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+    const ratio = (fg, bg) => {
+      const a = lum(fg); const b = lum(bg);
+      return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100;
+    };
+    const read = (name) => {
+      probe.style.color = 'var(' + name + ')';
+      return parse(w.getComputedStyle(probe).color);
+    };
+    const out = [];
+    for (const name of ['carbon', 'aurora', 'sunset', 'ice', 'violet', 'rgb']) {
+      s.querySelector('[data-theme-btn="' + name + '"]').click();
+      const bg = over(read('--bg-hi'), { r: 0, g: 0, b: 0, a: 1 });
+      out.push({ name, ink: ratio(read('--ink'), bg), dim: ratio(read('--dim'), bg), acc: ratio(read('--acc'), bg) });
+    }
+    s.querySelector('[data-theme-btn="carbon"]').click();
+    probe.remove();
+    return out;
+  })()`);
+  check('all six themes keep ink, dim and accent text above 4.5:1',
+    contrast.length === 6
+      && contrast.every((theme) => theme.ink >= 7 && theme.dim >= 4.5 && theme.acc >= 4.5),
+    contrast);
+
+  // Invariantes del modelo de ritmo con 400 muestras pseudoaleatorias (semilla
+  // fija). No sustituye a una carrera real, pero cubre combinaciones que los
+  // fixtures fijos no tocan.
+  const paceProps = await cdp.evaluate(`(() => {
+    const d = document.querySelector('iframe').contentWindow.__ntaDebug;
+    let seed = 20261120;
+    const rows = [];
+    for (let i = 0; i < 400; i += 1) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const wpm = 1 + Math.floor((seed / 4294967296) * 300);
+      rows.push({ wpm, range: d.paceRangeFor(wpm) });
+    }
+    return rows.sort((a, b) => a.wpm - b.wpm);
+  })()`);
+  check('pace ranges stay ordered and bounded across 1-300 WPM',
+    paceProps.length === 400
+      && paceProps.every((row) => row.range
+        && row.range.min >= 15 && row.range.max <= 120
+        && row.range.min <= row.range.center && row.range.center <= row.range.max
+        && row.range.max - row.range.min >= 6)
+      && paceProps.every((row, index) => index === 0 || row.range.center >= paceProps[index - 1].range.center),
+    { samples: paceProps.length, first: paceProps[0], last: paceProps[paceProps.length - 1] });
 
   // Mini-HUD de la barra inferior: precision y hueco de reloj junto al WPM,
   // visibles tambien con el panel minimizado.
@@ -2978,7 +3296,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
           stateAttr: shadow.querySelector('[data-field="acctState"]').dataset.state,
           avg: shadow.querySelector('[data-field="acctAvg"]').textContent,
           target: shadow.querySelector('[data-field="acctTarget"]').textContent,
-          top: shadow.querySelector('[data-field="acctTop"]').textContent,
+          acc: shadow.querySelector('[data-field="acctAcc"]').textContent,
           history: shadow.querySelector('[data-field="acctHistory"]').textContent,
           range: shadow.querySelector('[data-field="acctRange"]').textContent,
           read: shadow.querySelector('[data-field="acctRead"]').textContent,
@@ -3001,12 +3319,12 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
     calibration.account === '112.4 WPM · 98.7%', calibration);
   check('auto pace cannot be switched off from the panel',
     calibration.auto === true && calibration.autoText === 'on', calibration);
-  check('Live shows the auto pace and the account top WPM',
-    calibration.paceSource === 'auto · 112 target · 230 top', calibration.paceSource);
-  check('the Live account card shows the read stats and its refresh control',
+  check('Live shows the adaptive window, not the account target/top',
+    calibration.paceSource === 'auto · 106–118 wpm · live', calibration.paceSource);
+  check('the Live account card shows the live target, accuracy and refresh control',
     calibration.acct.state === 'profile only' && calibration.acct.stateAttr === 'ready'
       && calibration.acct.avg === '112.4' && calibration.acct.target === '112'
-      && calibration.acct.top === '230' && calibration.acct.history === 'profile only'
+      && /^98(\.7)?%$/.test(calibration.acct.acc) && calibration.acct.history === 'profile only'
       && calibration.acct.range === '106-118 wpm' && calibration.acct.read !== 'never'
       && calibration.acct.refreshDisabled === false,
     calibration.acct);
@@ -3060,7 +3378,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   check('the lifetime average prevents a low recent profile from dragging the target down',
     lifetimeCalibration.range === '113-120'
       && lifetimeCalibration.account === '120.0 WPM · 98.7%'
-      && lifetimeCalibration.paceSource === 'auto · 120 target · 230 top'
+      && lifetimeCalibration.paceSource === 'auto · 113–120 wpm · live'
       && lifetimeCalibration.stored && lifetimeCalibration.stored.min === 113
       && lifetimeCalibration.stored.max === 120
       && lifetimeCalibration.accountInfo && lifetimeCalibration.accountInfo.lifetime
@@ -3318,10 +3636,10 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       w.localStorage.removeItem('autoTyperLifetimeWpm');
     }
   })()`, true);
-  check('a collapsed short average shows avg, target and top together',
+  check('a collapsed short average reports the account without hiding the range',
     collapsedAccount.range === '113-120'
-      && collapsedAccount.account === '38.0 avg · 117 target · 230 top · 98.7%'
-      && collapsedAccount.paceSource === 'auto · 117 target · 230 top',
+      && collapsedAccount.account === '38.0 WPM · 98.7%'
+      && collapsedAccount.paceSource === 'auto · 113–120 wpm · live',
     collapsedAccount);
   check('calibration records the script version that produced the range',
     Boolean(collapsedAccount.calVersion), collapsedAccount);
@@ -4973,7 +5291,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
         compactHidden: compact.hidden,
         compactDisplay: getComputedStyle(compact).display,
       };
-      localStorage.setItem('nta:update', JSON.stringify({ at: Date.now(), latest: '99.0.0' }));
+      localStorage.setItem('nta:update', JSON.stringify({ at: Date.now(), latest: '99.0.0', verified: true, sha256: 'a'.repeat(64) }));
       paint();
       const rect = btn.getBoundingClientRect();
       const icon = btn.querySelector('svg');
@@ -7568,6 +7886,34 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && accountReset.identity === '555111' && accountReset.needsRead === true,
     accountReset);
 
+  // Propiedades del modelo de ritmo: para cualquier media razonable, el rango
+  // no se invierte ni cruza el techo duro. Se recorren 1..300 WPM en vez de
+  // probar solo los valores de ejemplo del README.
+  const paceInvariants = await cdp.evaluate(`(() => {
+    const w = document.querySelector('iframe').contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.paceRangeFor) return { has: false };
+    const cap = d.diagnostic().profile.hardCap;
+    const bad = [];
+    for (let wpm = 1; wpm <= 300; wpm += 1) {
+      const range = d.paceRangeFor(wpm);
+      if (!range || range.min > range.max || range.min < 15 || range.max > cap
+        || range.center < range.min || range.center > range.max) {
+        bad.push({ wpm, range });
+      }
+    }
+    const centers = [15, 30, 50, 80, 120, 200].map((wpm) => d.paceCenter({
+      wpm, bestWpm: wpm * 3, races: 100,
+    }));
+    return { has: true, cap, bad: bad.slice(0, 3), centers };
+  })()`);
+  check('the pace range never escapes the hard cap or inverts for 1-300 WPM',
+    paceInvariants.has === true && paceInvariants.cap <= 120
+      && paceInvariants.bad.length === 0
+      && paceInvariants.centers.every((item) => Number.isFinite(item.average)
+        && Number.isFinite(item.center) && item.center >= item.average),
+    paceInvariants);
+
   // Bloque de seguridad: ajustes nuevos, grabador de vuelo e interlock AFK.
   // Se ejecuta al final porque toca el estado AFK real y las prefs compartidas.
   const safety = await cdp.evaluate(`(async () => {
@@ -7612,6 +7958,18 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       const looseOff = fd.afkKeepAliveConfirmed();
       const looseHidden = fd.afkHiddenBlocked(true);
 
+      // El freeze hold es independiente del interlock: con AFK encendido y sin
+      // modo estricto, una pestaña oculta normalmente abre carreras, pero tras
+      // un freeze durante una carrera espera a que una arranque visible.
+      fd.setAfkFreezeGuard(true);
+      const holdBefore = fd.afkHiddenBlocked(true);
+      const holdArmed = fd.armAfkHold('test freeze during a race');
+      const holdHidden = fd.afkHiddenBlocked(true);
+      const holdVisible = fd.afkHiddenBlocked(false);
+      const holdInfo = fd.afkHold();
+      fd.clearAfkHold('test cleanup');
+      const holdCleared = fd.afkHiddenBlocked(true);
+
       // La decisión del guardián: freeze reciente + AFK + guardia = trip.
       localStorage.setItem('nta:afkFreeze', JSON.stringify({ count: 1, lastAt: Date.now(), lastDurationMs: 1000, totalMs: 1000 }));
       fd.setBackgroundFarm(true);
@@ -7651,6 +8009,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
           inDiagnostic: Array.isArray(diagnostic.flight) && diagnostic.flight.length > 0,
         },
         interlock: { strictOff, looseOff, strictHidden, strictVisible, looseHidden },
+        hold: {
+          before: holdBefore,
+          armed: holdArmed,
+          hidden: holdHidden,
+          visible: holdVisible,
+          info: holdInfo,
+          cleared: holdCleared,
+        },
         guard: { tripped: tripped.tripped, off: guardOff.tripped, old: oldFreeze.tripped },
         notifications: { enabled: notifications.enabled, label: notifications.label },
       };
@@ -7659,6 +8025,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       else localStorage.setItem('autoTyperPrefs', rawPrefs);
       if (rawFreeze === null) localStorage.removeItem('nta:afkFreeze');
       else localStorage.setItem('nta:afkFreeze', rawFreeze);
+      if (fd.clearAfkHold) fd.clearAfkHold('test cleanup');
       fd.setBackgroundFarm(oldBg);
       fd.setAfkRequireKeepAlive(oldStrict);
       fd.setAfkFreezeGuard(oldGuard);
@@ -7688,6 +8055,16 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && safety.interlock.strictVisible === false
       && safety.interlock.looseHidden === false,
     safety);
+  check('the AFK freeze hold blocks hidden races until a visible race clears it',
+    safety.has === true
+      && safety.hold.before === false
+      && safety.hold.armed === true
+      && safety.hold.hidden === true
+      && safety.hold.visible === false
+      && safety.hold.info.active === true
+      && /test freeze/i.test(safety.hold.info.reason || '')
+      && safety.hold.cleared === false,
+    safety);
   check('the AFK guard trips only for a recent freeze with AFK and the guard enabled',
     safety.has === true
       && safety.guard.tripped === true
@@ -7706,6 +8083,302 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       && /Account|Review/.test(safety.health.note || ''),
     safety);
 
+  // Red de seguridad: un fallo contenido para la automatizacion, deja el lock
+  // libre y se ve en pantalla; el contrato DOM y el paquete de soporte se
+  // prueban por el mismo camino que usaria una persona.
+  const safetyNet = await cdp.evaluate(`(async () => {
+    const frame = document.querySelector('iframe');
+    const w = frame.contentWindow;
+    const d = w.__ntaDebug;
+    if (!d || !d.enterSafeMode || !d.supportBundle || !d.typingContract) return { has: false };
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const rawToken = w.localStorage.getItem('player_token');
+    const rawUser = w.localStorage.getItem('persist:nt');
+    try {
+      d.clearSafeMode();
+      const before = d.safeModeState();
+      d.enterSafeMode('harness safe mode');
+      await wait(80);
+      const after = d.safeModeState();
+      const diag = d.diagnostic();
+      const banner = w.document.getElementById('nta-safe-mode');
+      const bannerText = banner ? banner.textContent : '';
+      const safeFlight = d.flight(40).some((row) => row.kind === 'safe-mode');
+      const stoppedBySafeMode = diag.flags.stopped === true;
+      const lockFree = d.live().typingLock === false || diag.flags.typingLock !== 'held';
+
+      d.clearSafeMode();
+      await wait(20);
+      const cleared = d.safeModeState();
+      const bannerGone = !w.document.getElementById('nta-safe-mode');
+
+      d.patchSession({ stopped: 0, typing: true });
+      const contract = d.typingContract();
+      const drifted = d.noteUiDrift('harness drift');
+      await wait(40);
+      const drift = d.uiDrift();
+      const driftDiag = d.diagnostic();
+      const driftFlight = d.flight(40).some((row) => row.kind === 'ui-drift');
+      d.clearUiDrift();
+
+      w.localStorage.setItem('player_token', 'SUPERSECRETO1234567890');
+      w.localStorage.setItem('persist:nt', JSON.stringify({
+        user: JSON.stringify({ userID: 999, username: 'LeakMaster' }),
+      }));
+      const bundle = d.supportBundle();
+      const bundleText = JSON.stringify(bundle);
+
+      return {
+        has: true,
+        before: { on: before.on, errors: before.errors },
+        after: { on: after.on, reason: after.reason, errors: after.errors },
+        banner: Boolean(banner), bannerText,
+        safeFlight, stoppedBySafeMode, lockFree,
+        cleared: cleared.on, bannerGone,
+        contract: { race: contract.race, body: contract.body, app: contract.app, content: contract.content },
+        drifted, drift: drift ? { reason: drift.reason, at: drift.at } : null,
+        driftStopped: driftDiag.flags.stopped === true,
+        driftFlight,
+        bundle: {
+          schema: bundle.schema,
+          redacted: bundle.redacted,
+          browser: bundle.diagnostic.env.browser,
+          supported: bundle.diagnostic.env.browserSupported,
+          safeMode: bundle.diagnostic.safeMode,
+        },
+        leaked: /SUPERSECRETO|LeakMaster|eyJhbGci/.test(bundleText),
+        tokenPresent: w.localStorage.getItem('player_token') === 'SUPERSECRETO1234567890',
+      };
+    } finally {
+      if (rawToken === null) w.localStorage.removeItem('player_token');
+      else w.localStorage.setItem('player_token', rawToken);
+      if (rawUser === null) w.localStorage.removeItem('persist:nt');
+      else w.localStorage.setItem('persist:nt', rawUser);
+      d.clearSafeMode();
+      if (d.clearUiDrift) d.clearUiDrift();
+      d.patchSession({ stopped: 1, typing: false });
+    }
+  })()`, true);
+  check('safe mode stops automation, frees the typing lock and leaves a visible banner',
+    safetyNet.has === true && safetyNet.before.on === false
+      && safetyNet.after.on === true
+      && safetyNet.banner === true && /safe mode/i.test(safetyNet.bannerText)
+      && safetyNet.safeFlight === true && safetyNet.stoppedBySafeMode === true
+      && safetyNet.lockFree === true,
+    safetyNet);
+  check('clearing safe mode removes the banner and the persisted flag',
+    safetyNet.has === true && safetyNet.cleared === false && safetyNet.bannerGone === true,
+    safetyNet);
+  // El fixture del banco no monta el arbol de React del juego, asi que aqui se
+  // comprueba la foto del marco; en una carrera real `app` y `content` son los
+  // que alimentan la deteccion de drift.
+  check('the DOM contract reports the race frame and the typing shape',
+    safetyNet.has === true && safetyNet.contract.race === true
+      && safetyNet.contract.body === true
+      && typeof safetyNet.contract.app === 'boolean',
+    safetyNet.contract);
+  check('a broken UI contract stops the bot instead of clicking blind',
+    safetyNet.has === true && safetyNet.drifted === true
+      && Boolean(safetyNet.drift) && /harness drift/.test(safetyNet.drift.reason)
+      && safetyNet.driftStopped === true && safetyNet.driftFlight === true,
+    safetyNet);
+  check('the support bundle is redacted and carries environment, flight and safe-mode state',
+    safetyNet.has === true && safetyNet.bundle.schema === 'nitro-wraith-support/2'
+      && safetyNet.bundle.redacted === true && safetyNet.bundle.browser === 'chrome'
+      && safetyNet.bundle.supported === true && safetyNet.leaked === false
+      && safetyNet.tokenPresent === true && Boolean(safetyNet.bundle.safeMode),
+    safetyNet.bundle);
+
+  // El gobernador de ritmo: una carrera mala baja el centro; tres limpias lo
+  // vuelven a subir (o lo dejan en el techo). Se ejecuta al final porque deja
+  // estado en memoria; la galeria recarga y siembra su propio panel.
+  if (!VISUAL_ONLY) {
+    const adaptiveGovernor = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const d = w.__ntaDebug;
+      if (!d.adaptivePace || !d.adaptPace) return { hasHook: false };
+      const keys = [
+        'autoTyperAdaptivePace', 'dynamicWpmValues', 'dynamicWpmValues:signature',
+        'dynamicAccuracies', 'dynamicAccuracies:signature',
+        'typingWpmSessionCount', 'typingAccuracySessionCount', 'typingAccuracyBufferCount',
+      ];
+      const saved = {};
+      for (const key of keys) saved[key] = w.localStorage.getItem(key);
+      d.setCustomWpm(0);
+      d.setCustomAccuracy(0);
+      const before = d.adaptivePace();
+      d.adaptPace({ wpm: 20, acc: 95, target: before.target });
+      const down = d.adaptivePace();
+      for (let i = 0; i < 3; i++) {
+        d.adaptPace({ wpm: before.target, acc: 99.5, target: before.target });
+      }
+      const up = d.adaptivePace();
+      for (const key of keys) {
+        if (saved[key] === null) w.localStorage.removeItem(key);
+        else w.localStorage.setItem(key, saved[key]);
+      }
+      return { hasHook: true, before, down, up };
+    })()`);
+    check('the pace governor cuts after a bad race and recovers after clean ones',
+      adaptiveGovernor.hasHook
+        && adaptiveGovernor.down.wpm <= adaptiveGovernor.before.wpm
+        && adaptiveGovernor.down.accuracy <= adaptiveGovernor.before.accuracy
+        && adaptiveGovernor.down.wpm >= adaptiveGovernor.down.range.min
+        && adaptiveGovernor.up.wpm >= adaptiveGovernor.down.wpm
+        && adaptiveGovernor.up.wpm <= adaptiveGovernor.up.range.max,
+      adaptiveGovernor);
+
+    // El centro aprendido tiene que volver del disco: si `adapted` no se
+    // restaura, sincronizar con la cuenta vuelve a subirlo al recomendado y
+    // borra el freno de las ultimas carreras.
+    const adaptivePersistence = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const d = w.__ntaDebug;
+      if (!d.adaptivePace || !d.adaptiveReload || !d.syncAdaptivePace) return { hasHook: false };
+      const keys = [
+        'autoTyperAdaptivePace', 'autoTyperPrefs',
+        'dynamicWpmValues', 'dynamicWpmValues:signature',
+        'dynamicAccuracies', 'dynamicAccuracies:signature',
+        'typingWpmSessionCount', 'typingAccuracySessionCount', 'typingAccuracyBufferCount',
+      ];
+      const saved = {};
+      for (const key of keys) saved[key] = w.localStorage.getItem(key);
+      d.setCustomWpm(0);
+      d.setCustomAccuracy(0);
+      const current = d.adaptivePace();
+      const range = current.range;
+      // Cuenta vacia = identidad desconocida al guardar: el estado debe
+      // adoptar la cuenta actual, no reiniciarse como si fuera otra persona.
+      w.localStorage.setItem('autoTyperAdaptivePace', JSON.stringify({
+        wpm: range.min, accuracy: 96, clean: 2, accClean: 1,
+        adapted: true, account: '', at: Date.now(),
+      }));
+      const reloaded = d.adaptiveReload();
+      const synced = d.syncAdaptivePace();
+      for (const key of keys) {
+        if (saved[key] === null) w.localStorage.removeItem(key);
+        else w.localStorage.setItem(key, saved[key]);
+      }
+      return { hasHook: true, current, range, reloaded, synced };
+    })()`);
+    check('the learned target survives a reload and the next calibration pass',
+      adaptivePersistence.hasHook
+        && adaptivePersistence.reloaded.adapted === true
+        && adaptivePersistence.reloaded.wpm === adaptivePersistence.range.min
+        && adaptivePersistence.reloaded.account === adaptivePersistence.current.account
+        && adaptivePersistence.synced.adapted === true
+        && adaptivePersistence.synced.wpm === adaptivePersistence.reloaded.wpm,
+      adaptivePersistence);
+
+    // Una DQ que sigue a un freeze no es un fallo de ritmo: el gobernador
+    // conserva lo aprendido y el castigo se queda en las carreras cuidadosas.
+    const freezeDq = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const d = w.__ntaDebug;
+      if (!d.adaptivePace || !d.noteDq || !d.afkGuardDecision || !d.setBackgroundFarm) return { hasHook: false };
+      const keys = [
+        'autoTyperAdaptivePace', 'autoTyperPrefs', 'autoTyperSessionCounters',
+        'dynamicWpmValues', 'dynamicWpmValues:signature',
+        'dynamicAccuracies', 'dynamicAccuracies:signature',
+        'typingWpmSessionCount', 'typingAccuracySessionCount', 'typingAccuracyBufferCount',
+        'nta:afkFreeze',
+      ];
+      const saved = {};
+      for (const key of keys) saved[key] = w.localStorage.getItem(key);
+      const farm = d.backgroundFarm();
+      d.setCustomWpm(0);
+      d.setCustomAccuracy(0);
+      d.setBackgroundFarm(true);
+      w.localStorage.setItem('nta:afkFreeze', JSON.stringify({
+        count: 1, lastAt: Date.now(), lastDurationMs: 1500, totalMs: 1500,
+      }));
+      const before = d.adaptivePace();
+      const guard = d.afkGuardDecision();
+      d.noteDq();
+      const after = d.adaptivePace();
+      d.setBackgroundFarm(farm);
+      for (const key of keys) {
+        if (saved[key] === null) w.localStorage.removeItem(key);
+        else w.localStorage.setItem(key, saved[key]);
+      }
+      return { hasHook: true, guard, before, after };
+    })()`);
+    check('a freeze-related disqualification keeps the learned pace',
+      freezeDq.hasHook && freezeDq.guard.tripped === true
+        && freezeDq.after.wpm === freezeDq.before.wpm
+        && freezeDq.after.accuracy === freezeDq.before.accuracy,
+      freezeDq);
+
+    // El historial se pinta con innerHTML: una fila corrupta o fabricada en
+    // localStorage no puede llegar al DOM ni conservar campos ajenos.
+    const historySanitize = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const d = w.__ntaDebug;
+      if (!d.historyReload) return { hasHook: false };
+      const key = 'autoTyperRaceHistory';
+      const saved = w.localStorage.getItem(key);
+      w.__ntaHistoryPwned = 0;
+      w.localStorage.setItem(key, JSON.stringify([{
+        wpm: 100, acc: 98,
+        target: '<img src=x onerror="__ntaHistoryPwned=1">',
+        place: '2', xp: '500', cash: 12, at: Date.now(),
+        evil: '<img src=x onerror="__ntaHistoryPwned=1">',
+      }]));
+      const rows = d.historyReload();
+      const host = w.document.getElementById('nt-autotyper-panel');
+      const shadow = host && host.shadowRoot;
+      const injected = shadow ? Boolean(shadow.querySelector('img[src="x"]')) : false;
+      const row = rows[0] || null;
+      if (saved === null) w.localStorage.removeItem(key);
+      else w.localStorage.setItem(key, saved);
+      d.historyReload();
+      return {
+        hasHook: true, row, injected,
+        pwned: w.__ntaHistoryPwned === 1,
+      };
+    })()`);
+    check('corrupt history is normalized before it reaches the panel',
+      historySanitize.hasHook && historySanitize.row
+        && historySanitize.row.target === undefined
+        && historySanitize.row.evil === undefined
+        && historySanitize.row.place === 2
+        && historySanitize.row.xp === 500
+        && historySanitize.injected === false
+        && historySanitize.pwned === false,
+      historySanitize);
+
+    // El arrastre no puede depender del puntero: la cabecera enfocada mueve el
+    // panel con flechas y Home lo devuelve a la esquina.
+    const panelKeyboard = await cdp.evaluate(`(() => {
+      const w = document.querySelector('iframe').contentWindow;
+      const host = w.document.getElementById('nt-autotyper-panel');
+      const shadow = host && host.shadowRoot;
+      const head = shadow && shadow.querySelector('.head');
+      if (!head) return { has: false };
+      const before = host.style.left;
+      head.focus();
+      head.dispatchEvent(new w.KeyboardEvent('keydown', {
+        key: 'ArrowRight', bubbles: true,
+      }));
+      const moved = host.style.left;
+      head.dispatchEvent(new w.KeyboardEvent('keydown', {
+        key: 'Home', bubbles: true,
+      }));
+      return {
+        has: true, before, moved, reset: host.style.left,
+        tabIndex: head.tabIndex, role: head.getAttribute('role'),
+        label: head.getAttribute('aria-label'),
+      };
+    })()`);
+    check('the panel can be moved with the keyboard and reset with Home',
+      panelKeyboard.has && panelKeyboard.tabIndex === 0
+        && panelKeyboard.role === 'group'
+        && /arrow keys/i.test(panelKeyboard.label || '')
+        && panelKeyboard.moved !== panelKeyboard.before
+        && panelKeyboard.reset === '16px',
+      panelKeyboard);
+  }
+
   // La galeria va al final: navega y siembra el panel para las fotos, y ese
   // estado no puede decidir ninguna comprobacion anterior.
   if (SHOT_DIR) await capturePanelThemes(cdp, appUrl);
@@ -7717,6 +8390,7 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
   let server = null;
   let chrome = null;
   let cdp = null;
+  let watchdog = null;
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'nta-live-'));
 
   try {
@@ -7730,9 +8404,23 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-gpu',
+      // Capturas deterministas: sin subpixel AA ni hinting, el mismo glyph
+      // produce los mismos bytes entre ejecuciones. Solo afecta al modo visual.
+      ...(VISUAL_CAPTURE ? ['--disable-lcd-text', '--font-render-hinting=none', '--force-color-profile=srgb'] : []),
       '--window-size=520,980',
       'about:blank',
     ], { stdio: 'ignore' });
+
+    // Si una llamada CDP se cuelga, el watchdog cierra Chrome y sale con 2 en
+    // vez de dejar al CLI visual esperando para siempre. Solo aplica al modo
+    // captura: el banco normal ya termina por sus propios timeouts.
+    if (VISUAL_CAPTURE) {
+      watchdog = setTimeout(() => {
+        console.error('harness: visual run timed out');
+        killTree(chrome);
+        process.exit(2);
+      }, VISUAL_ONLY ? 240000 : 600000);
+    }
 
     // Chrome escribe el puerto en DevToolsActivePort: no hay que adivinar.
     const devtoolsFile = path.join(profile, 'DevToolsActivePort');
@@ -7765,12 +8453,14 @@ async function runChecks(cdp, devtoolsPort, appUrl) {
       console.log('\nconsole (last 14 lines):');
       for (const line of cdp.consoleLines.slice(-14)) console.log(`  ${line}`);
     }
-    console.log(`\n${results.length - failures.length}/${results.length} checks passed`);
+    if (VISUAL_ONLY) console.log('\nvisual-only: captures ready (live checks skipped)');
+    else console.log(`\n${results.length - failures.length}/${results.length} checks passed`);
     process.exitCode = failures.length ? 1 : 0;
   } catch (error) {
     console.error('\nharness error:', error.message || error);
     process.exitCode = 2;
   } finally {
+    if (watchdog) clearTimeout(watchdog);
     if (cdp) cdp.close();
     killTree(chrome);
     if (server) server.close();

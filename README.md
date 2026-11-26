@@ -27,6 +27,7 @@
   <a href="#controls">Controls</a> ·
   <a href="#safety">Safety</a> ·
   <a href="#development">Development</a> ·
+  <a href="README.es.md">Español</a> ·
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
@@ -51,7 +52,7 @@ stats, and shows why it is waiting.
 | Area | Behaviour |
 | --- | --- |
 | **Race loop** | Opens the next race after a short human delay. After a DQ it returns to the garage instead of pressing Try Again. |
-| **Typing** | Builds a WPM range from the account that is signed in, capped at 120. A slow streak cannot lower the target, and a high top can recover it by at most 25% above the real average. The panel shows `avg · target · top` together. Accuracy stays at 96% or above. |
+| **Typing** | Builds a WPM window from the account that is signed in, capped at 120. The live target starts at the account center; a governor raises it after three clean races and cuts it after a miss; a DQ cuts it too unless it followed a recorded freeze. The learned target survives reloads. The top only sets a bounded recovery floor, never the target. The account card shows avg, live target and accuracy. Accuracy stays at 96% or above. |
 | **Rewards** | Claims the Mystery Box, closes daily challenges and sends one sticker in every race when stickers are on. |
 | **Session care** | Renews the session when needed. Passwords and CAPTCHAs stay manual. |
 | **Limits** | Session races, time, XP, active hours and daily race/XP budgets. |
@@ -60,12 +61,13 @@ stats, and shows why it is waiting.
 ## The panel
 
 <p align="center">
-  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: 107.0 WPM, 98.7% accuracy, an AUTO pace badge with 110 target and 230 top, season progress and session controls">
+  <img src="assets/panel-preview.png" width="460" alt="NITRO WRAITH live panel during a race: 110.0 WPM, 98.7% accuracy, an adaptive 104-116 WPM pace window, the account card and session controls">
 </p>
 
 <p align="center"><sub>A harness capture with demo values. The real panel sits in the bottom-right corner of the game.</sub></p>
 
-- **Live:** WPM, accuracy, a **recent** pace and accuracy for the last six seconds of accepted keys, the AUTO pace badge, target range, race count, session average, result and the game HUD. The header carries a dot and a freshness label: the figures are repainted four times per second, and if the race stops accepting keys the label turns amber (`stalled 3s`) and both recent figures blank, instead of pretending the frozen numbers are live. The **Account** card shows the signed-in account, effective average, target, top, monthly rows/pages, last read and a one-click refresh.
+- **Live:** WPM, accuracy, a **recent** pace and accuracy for the last six seconds of accepted keys, the AUTO pace badge, the adaptive window, race count, session average, result and the game HUD. The header carries a dot and a freshness label: the figures are repainted four times per second, and if the race stops accepting keys the label turns amber (`stalled 3s`) and both recent figures blank, instead of pretending the frozen numbers are live. The **Account** card shows the signed-in account, effective average, live target, accuracy, adaptive range, monthly rows/pages, last read and a one-click refresh.
+- **Safety net:** if an internal error repeats or happens while the race is live, the script releases the typing lock, stops the queue and shows a **safe mode** banner with **resume** and **copy report**. It also checks that the race typing component is still there; when the game UI changes (`ui-drift`), it stops instead of pressing keys blind. The **support** button copies a redacted bundle with the diagnostic report, environment and flight recorder, without tokens, account names or identifiers.
 - **Garage queue:** what the bot is waiting for, the next race, Mystery Box timing, the last stop and a seven-day mix of DQ, limit, manual and ban stops. The same panel has the **AFK off/on** control, the keep-alive state and whether the queue is visible, hidden or blocked by another gate.
 - **Tune:** pace profile, limits, breaks, stickers, sound, desktop alerts, AFK farming (off by default), the optional AFK keep-alive, the **AFK interlock**, the **AFK safety guard**, a live **AFK health** row and a **Health center** that summarizes account, AFK, update and freeze state. The filter at the top narrows the cards by setting name, description or section and clears back to all with one click.
 - **Log / Info:** history, season snapshot, diagnostics and the keyboard map.
@@ -108,9 +110,12 @@ Automatic calibration has two rules:
 When the API exposes monthly totals, the target also anchors to the higher
 lifetime average. The report shows how many rows and pages were used; if a page
 fails, the last complete snapshot is kept. The account row shows the short
-average, the effective target and the top together, for example
-`38.0 avg · 48 target · 230 top`; the target is the middle of the range being
-  typed, never the top and never a fixed 110.
+average and accuracy, for example `38.0 WPM · 98.7%`; the adaptive window and
+the live target are separate. The target starts at the account center and a
+governor raises it after three clean races and cuts it after a miss; a DQ also
+cuts it, unless that DQ followed a recorded freeze, because a freeze is a timing
+failure and not a pace miss. The learned target survives a reload and the next
+calibration pass. It is never the top and never a fixed 110.
 
 `TUNE` has optional **custom WPM** (15–119) and **custom accuracy** (96–100)
 fields. Leave them empty or at 0 for automatic calibration. The values are saved
@@ -136,7 +141,11 @@ guarantee: keep the tab visible for long runs if the race cannot be lost.
 the keep-alive reports a running context. **AFK safety guard** is on by default:
 if a disqualification arrives within 15 minutes of a recorded freeze while AFK
 is on, AFK is turned off and the reason is kept in the panel and the diagnostic
-report. It cannot undo the disqualification. **Desktop alerts** are opt-in and
+report. It cannot undo the disqualification. A freeze recorded while a race is
+live also puts hidden farming on hold: the next race must start with the tab
+visible. That **freeze hold** does not turn AFK off, and one visible race (or
+the AFK health reset) clears it, so a tab that has already frozen is not used to
+open another race blind. **Desktop alerts** are opt-in and
 ask for browser permission on the first click; they are used only for DQ, site
 blocks and the AFK guard.
 
@@ -200,18 +209,64 @@ The optional AFK keep-alive can reduce the freeze risk with near-silent local
 audio, but it is disabled by default and cannot guarantee that a browser,
 Energy Saver or a muted tab will keep running. The race loop also recovers a Web
 Lock left by a frozen tab and sends a watchdog key if a live race goes too long
-without an accepted character.
+without an accepted character. If an internal error repeats or occurs during a
+live race, the script enters **safe mode**: it releases the typing lock, stops
+the queue and shows a banner instead of continuing. A broken race UI contract
+(`ui-drift`) also stops it. **resume** clears the flag and reloads the page.
 
 **Privacy:** there is no telemetry, analytics or third-party logging. The
 `player_token` is read only to call Nitro Type's own same-origin API. It is never
 printed, exported or sent to another host. The only off-site request is the
 public Gist version check and, if it is unavailable, the public meta asset of the latest GitHub release; a canary build checks the public canary pre-release meta instead. All are made without credentials.
 
+## Browser support
+
+Chrome and Edge (Chromium) are the tested browsers. The harness and the visual
+baselines run on Chrome; Edge uses the same engine. Firefox is **not tested**:
+Tampermonkey works there, but Web Locks, Page Lifecycle and audio can behave
+differently. Safari is not supported. The feature matrix and fallbacks are in
+[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md); a Firefox report is welcome as
+long as it does not claim support.
+
+## Support
+
+Start with [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md). If the panel is
+still wrong, open a bug report with the version, channel, browser and a support
+bundle. The **support** button in TUNE → Health copies a JSON with the
+diagnostic report, environment, safe-mode state and flight recorder; tokens,
+account names and identifiers are removed. Review it before pasting, and never
+include a password, cookie or full account export. Security issues go through
+[`SECURITY.md`](SECURITY.md), not a public issue.
+
 ## Releases
 
 Releases are automatic. When `check` passes on `main` and the userscript changed,
 the workflow bumps the version, updates the changelog and README, syncs the Gist,
 tags the commit and publishes the release. README-only changes do not release.
+
+Each new stable release also publishes `build.json` and `SHA256SUMS` with the
+version, commit, source ref, run and the SHA-256 of both installable files. The
+release workflow uploads those assets, then verifies the public release and the
+Gist against the same hashes. To check a published release without trusting the
+workspace:
+
+```bash
+npm run release:verify -- vX.Y.Z
+```
+
+This works for a release that includes `build.json` and `SHA256SUMS` (the next
+stable release and later); older tags do not have them. `--wait` retries for
+about a minute after a fresh publish.
+
+The panel uses the same manifest before offering an update: when the Gist
+advertises a newer version, it downloads `build.json` from the release of that
+channel, hashes the candidate userscript and only then shows an actionable
+badge. A mismatch or a missing hash is reported as `integrity: ...` and the
+download button refuses to open. Verification runs only when there is a newer
+version, so the five-minute check stays cheap. The panel's 15 visual
+shots run in the separate `visual` workflow on a Windows runner that matches the
+committed baselines, so a layout change fails a pull request instead of waiting
+for someone to run `npm run visual` locally.
 
 ### Canary channel
 
@@ -252,6 +307,12 @@ npm run live:test   # CLI checks without opening Chrome
 npm run check       # synced build, syntax, release/README checks and harness
 npm test            # browser harness only
 npm run visual      # capture Live themes + Tune/Log/garage states and compare
+npm run budget      # artifact size, gzip and per-fragment limits
+npm run score       # static hygiene score (duplicates, risky patterns, tests, docs)
+npm run build:repro # clean rebuild in two environments, compared by SHA-256
+npm run release:verify -- vX.Y.Z    # verify a published release and the Gist
+npm run hotfix:plan -- --from v8.14.52  # plan a stable rollback
+npm run hotfix:build -- --from v8.14.52 --out dist/hotfix
 ```
 
 ### Visual regression
@@ -276,7 +337,7 @@ fonts change between operating systems; `report.json` records the fingerprint,
 and the compare step warns when it does not match. Regenerate the baselines on
 the platform where you run the check.
 
-The source lives in [`src/`](src/README.md): 15 ordered fragments concatenated
+The source lives in [`src/`](src/README.md): 20 ordered fragments concatenated
 inside one IIFE. `nitro-wraith.user.js` is still the only installable file and
 **is not edited by hand**; edit `src/`, run `npm run build` and verify with
 `npm run check`. `build:check` prevents testing or publishing an artifact that
@@ -292,7 +353,14 @@ README release notes are generated between the `release:start` and
 
 ## Docs
 
+- [`README.es.md`](README.es.md): guía rápida en español.
 - [`docs/NITROTYPE.md`](docs/NITROTYPE.md): game notes and design limits.
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md): safe mode, UI drift, gates, updates and the support bundle.
+- [`docs/ROLLBACK.md`](docs/ROLLBACK.md): stable hotfix/rollback and canary rollback.
+- [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md): tested browsers and feature fallbacks.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): modules, race loop and update trust boundary.
+- [`docs/adr/`](docs/adr/): decisions and their trade-offs.
+- [`SECURITY.md`](SECURITY.md): private vulnerability reporting and privacy guarantees.
 - [`tests/live/`](tests/live/): browser harness, live mode and fixtures.
 - [`CHANGELOG.md`](CHANGELOG.md): changes by version.
 

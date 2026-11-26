@@ -3,6 +3,23 @@
    * 13. BOOT
    * ========================================================================== */
   function boot() {
+    // El modo seguro vive en localStorage: si una version anterior se cayo tres
+    // veces, esta no vuelve a armar la cola sola. El banner explica como salir.
+    const safeRecord = readSafeModeRecord();
+    if (safeRecord) {
+      safeMode = true;
+      safeModeReason = String(safeRecord.reason || 'previous safe mode').slice(0, 240);
+      showSafeModeBanner(safeModeReason, true);
+      return;
+    }
+
+    // Firefox y Safari no estan en la matriz probada. No se para el script
+    // (Tampermonkey puede funcionar), pero el reporte debe decirlo desde el
+    // primer arranque para que el aviso no dependa de abrir Health.
+    if (!browserSupported() && window.top === window) {
+      log(`Browser ${browserFamily()} is not in the tested set (Chrome/Edge); see docs/COMPATIBILITY.md.`);
+    }
+
     // El registro de instancias se monta antes de repartir el trabajo: las dos
     // mitades del script lo necesitan para saber cuantas copias hay y cual manda.
     guardId = INSTANCE_ID;
@@ -118,6 +135,9 @@
     setInterval(() => {
       // Eleccion de copia en este marco: una escribe, las demas esperan. Se
       // refresca en cada latido del panel, que es el unico que corre siempre.
+      heart('safe-mode', () => {
+        if (!safeMode && readSafeModeRecord()) enterSafeMode('another tab stopped automation');
+      });
       heart('role', refreshRole);
       heart('supervise', superviseLive);
       heart('panel', () => {
@@ -223,6 +243,13 @@
     document.addEventListener('freeze', () => {
       frozenAt = Date.now();
       noteAfkFreeze();
+      // Si el freeze pilla una carrera viva (incluida la cuenta atras), el
+      // keep-alive no basto. Se frena el farmeo oculto hasta una carrera visible
+      // en vez de abrir la siguiente a ciegas; el guardia de DQ sigue aparte.
+      const raceAtRisk = !session.stopped && (session.typing || Boolean(findTypingApp()));
+      if (raceAtRisk && backgroundFarm() && CONFIG.queue.afkFreezeGuard !== false) {
+        armAfkHold('the browser froze this tab during a race');
+      }
       noteFlight('freeze', `visible=${document.visibilityState === 'visible'} racing=${Boolean(session.liveRound && !session.stopped)}`);
       releaseTypingLock();
       if (session.liveRound && !session.stopped) {
@@ -261,5 +288,13 @@
     runAuto();
   }
 
-  boot();
+  // La red se instala antes del arranque: un fallo de boot tambien tiene que
+  // dejar rastro y no puede quedarse con temporizadores a medio montar.
+  installErrorBoundary();
+  try {
+    boot();
+  } catch (error) {
+    try { if (typeof panic === 'function') panic('boot failure; automation stopped', 10 * 60000); } catch { /* ya estaba parado */ }
+    noteBootFailure(error);
+  }
 })();

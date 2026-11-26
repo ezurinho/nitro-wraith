@@ -249,12 +249,47 @@
   // copia esta en standby, recupera el turno ya; si la copia que escribe sigue
   // viva, el indice avanza y esto no se dispara.
   let lastLiveWarnAt = 0;
+  let lastContractAt = 0;
+  let uiDrift = null;
+
+  // Se llama cuando el contrato con la UI del juego se rompe. Parar es la
+  // opcion segura: seguir pulsando a ciegas puede abrir una carrera sin teclas
+  // o cerrar el modal equivocado. El aviso queda en el panel y en el grabador.
+  function noteUiDrift(reason) {
+    if (uiDrift || session.stopped) return false;
+    uiDrift = {
+      at: Date.now(),
+      reason: String(reason || 'game UI changed').slice(0, 240),
+      contract: typingContract(),
+    };
+    noteFlight('ui-drift', uiDrift.reason);
+    log(`UI DRIFT: ${uiDrift.reason}. Stopping instead of clicking blind.`);
+    try {
+      panic(`game UI changed: ${uiDrift.reason}`, 10 * 60000);
+    } catch (error) {
+      noteFlight('ui-drift-stop', String((error && error.message) || error));
+    }
+    return true;
+  }
+
   function superviseLive() {
     if (!session.running || session.stopped || session.paused || !session.liveRound) return;
     const now = Date.now();
     const phase = livePhase(now);
     if (phase !== 'racing' && phase !== 'countdown') return;
     if (captchaOnScreen()) return;
+
+    // El componente de tecleo existe al empezar la carrera. Si desaparece
+    // despues de cinco segundos de reloj, no es un montaje lento: es un cambio
+    // de la pagina. Se comprueba cada dos segundos, no en cada tecla.
+    if (now - lastContractAt >= 2000) {
+      lastContractAt = now;
+      const contract = typingContract();
+      if (contract.race && !contract.app && session.startedAt && now - session.startedAt > 5000) {
+        noteUiDrift('the race typing component disappeared');
+        return;
+      }
+    }
 
     const acceptedAt = session.lastAcceptedAt || session.startedAt || 0;
     if (!acceptedAt) return;
@@ -790,7 +825,9 @@
   // que vuelvan a ir finos: una carrera a 60 WPM con mala precision es peor que
   // no correrla. Devuelve true si hubo que esperar.
   async function backgroundClockHealthy() {
-    if (preciseClockKind !== 'worker') return false;
+    // No se sale antes de esperar: si el Worker se degrado, este preciseSleep
+    // es el que intenta crearlo de nuevo pasados los 30 s. Con la salida
+    // temprana, el iframe se quedaba en reloj de pagina hasta recargar.
     const started = performance.now();
     await preciseSleep(120);
     return preciseClockKind === 'worker' && performance.now() - started < 900;
@@ -807,7 +844,7 @@
 
       log('Background clock unavailable: waiting for the tab.');
       while (!session.stopped && pageHidden()) {
-        await sleep(1000);
+        await preciseSleep(1000);
         if (await backgroundClockHealthy()) return false;
       }
       if (session.stopped) return true;
@@ -884,7 +921,11 @@
   // sin depender de que el navegador de pruebas tenga la página en segundo plano.
   function afkHiddenBlocked(hidden = pageHidden()) {
     if (!hidden) return false;
-    return !backgroundFarm() || !afkKeepAliveConfirmed();
+    if (!backgroundFarm()) return true;
+    if (!afkKeepAliveConfirmed()) return true;
+    // Un freeze durante una carrera ya demostro que esta pestana no aguanta
+    // oculta. Hasta que una carrera arranque visible, no se abre otra a ciegas.
+    return CONFIG.queue.afkFreezeGuard !== false && afkHoldActive();
   }
 
   function hiddenBlocked() {
@@ -897,11 +938,16 @@
   async function waitWhileHidden() {
     if (!pageHidden() || !hiddenBlocked()) return false;
 
+    const hold = backgroundFarm()
+      && CONFIG.queue.afkFreezeGuard !== false
+      && afkHoldActive();
     const strict = backgroundFarm() && CONFIG.queue.afkRequireKeepAlive === true;
-    log(strict
-      ? 'AFK interlock: hidden tab with no running keep-alive; no new race until it is confirmed or the tab is visible again.'
-      : 'Background farming is off: no new race until the tab is visible again.');
-    noteFlight('afk-hold', strict ? 'keep-alive not confirmed' : 'background farming off');
+    log(hold
+      ? 'AFK freeze hold: a freeze was recorded during a race; no new hidden race until one starts with the tab visible.'
+      : strict
+        ? 'AFK interlock: hidden tab with no running keep-alive; no new race until it is confirmed or the tab is visible again.'
+        : 'Background farming is off: no new race until the tab is visible again.');
+    noteFlight('afk-hold', hold ? 'visible race required after a freeze' : strict ? 'keep-alive not confirmed' : 'background farming off');
     while (!session.stopped && pageHidden() && hiddenBlocked()) await preciseSleep(1000);
     return true;
   }
@@ -1336,6 +1382,10 @@
         session.lastKeyAt = Date.now();
         session.lastAcceptedAt = Date.now();
         session.typing = true;
+        // Una carrera que arranca con la pestana visible demuestra que el
+        // documento puede teclear; es lo que levanta el freno posterior a un
+        // freeze. Si arranco oculta, el freno sigue vigente hasta la proxima.
+        if (!pageHidden()) clearAfkHold('a visible race started');
         log(`Race started. Target: ${profile.targetWPM} WPM / ${profile.accuracyGoal.toFixed(1)}%`);
         return true;
       }
@@ -1571,6 +1621,18 @@
     session.dqStreak++;
     session.dqCount++;
     saveCounters();
+    // La correlacion freeze -> DQ se decide antes de tocar el ritmo: una DQ
+    // que llego tras un freeze no fue un fallo de cadencia, y bajar el
+    // objetivo por ella castigaria las estadisticas sin evitar el siguiente
+    // freeze. La carrera siguiente ya sale mas lenta por carefulRaces.
+    const afkGuard = afkFreezeGuardDecision();
+    if (afkGuard.tripped) {
+      log('Pace governor: the DQ followed a freeze; keeping the learned target (not a pace miss).');
+    } else if (typeof penalizeAdaptivePace === 'function') {
+      // La siguiente carrera no repite el mismo objetivo: el control baja dos
+      // puntos y la precision uno. Una DQ no entra al historial, pero si cuenta.
+      penalizeAdaptivePace();
+    }
     // La racha limpia del dia vuelve a cero y se guarda cuando fue: el resumen
     // del dia lo ensena para saber si el ritmo esta aguantando hoy.
     todayBump({ dq: 1, resetClean: true, dqAt: Date.now() });
@@ -1582,7 +1644,6 @@
 
     // Correlacion freeze -> DQ: si el contador de freezes se movio hace poco y
     // AFK estaba abierto, esta DQ es la senal para dejar de farmear a ciegas.
-    const afkGuard = afkFreezeGuardDecision();
     if (afkGuard.tripped) {
       const text = `AFK safety guard: a disqualification followed a freeze (${afkGuard.minutes} min ago). AFK farming was turned off; keep-alive is left as it was.`;
       if (typeof setBackgroundFarm === 'function') setBackgroundFarm(false);

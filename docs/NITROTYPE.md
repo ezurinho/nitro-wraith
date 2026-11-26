@@ -11,9 +11,12 @@ does not try to beat the game's limits; it tries to stay inside them.
 - The stats API's monthly totals cover a much longer history. The script uses the
   higher lifetime average as an anchor when those totals are available; this
   keeps its own low races from dragging the target downward.
-- Automatic calibration is a ratchet: a new average can raise the target but can
-  never lower one that is already saved. Only the custom WPM override may lower
-  it. This prevents a slow streak from becoming a permanent slow profile.
+- Calibration sets the account envelope: a new average can raise the envelope
+  but cannot lower a saved range. The live target inside it is a governor, not a
+  random ten-session series: it starts at the account center, rises after three
+  clean races and falls after a miss or a DQ, except a DQ that follows a
+  recorded freeze: that is a timing failure, not a pace miss. The learned center
+  survives reloads. Only custom WPM can pin it.
 - When the short average collapses relative to the account top, the recovery
   floor is `min(110, round(top × 0.48), round(average × 1.25))`, provided the
   top is at least 80 WPM and at least 1.8× the average. A 38 WPM / 230 top
@@ -24,8 +27,9 @@ does not try to beat the game's limits; it tries to stay inside them.
   range, lifetime cache and calibration timestamp, then reads the signed-in
   account before applying a target. A 50 WPM account cannot inherit the 110 WPM
   range of another account in the same browser.
-- The Live **Account** card shows the signed-in ID, effective average, target,
-  top, monthly rows/pages, last read and a refresh button. A failed account read
+- The Live **Account** card shows the signed-in ID, effective average, live
+  target, accuracy, adaptive range, monthly rows/pages, last read and a refresh
+  button. A failed account read
   keeps the last usable range, retries after two minutes, then relaxes to
   fifteen minutes while the API stays down. Coming online or returning to the
   tab also triggers a read.
@@ -36,14 +40,21 @@ does not try to beat the game's limits; it tries to stay inside them.
   retried once; if it still fails, the last complete snapshot is reused and
   marked as stale. A partial page is never used to lower the target.
 - Besides the 30-minute clock, a new account read is requested every 25
-  completed races. The target is still a ratchet, so this can raise a stale
-  objective during a long session but cannot lower it.
+  completed races. It refreshes the envelope; the governor keeps the recent
+  corrections, so a stale high objective can still be lowered by a bad race.
 - The calibration diagnostic reports the recent average, the lifetime average,
   the number of monthly rows and API pages, and whether the snapshot is cached
   or stale.
-- The script keeps its own target below the hard 120 WPM ceiling and never raises
-  the target to chase a fast result.
-- Accuracy below 96% loses the accuracy bonus, so the floor is 96%.
+- The script keeps its target below the hard 120 WPM ceiling and raises it at
+  most one WPM per three clean races; it never chases a single fast result.
+- The ten-value series is only a ±3 WPM human band around the governor's center;
+  the first race of each cycle uses the recommended center. The band is seeded
+  from the account ID, so the same account repeats it instead of reshuffling on
+  every reload.
+- Accuracy below 96% loses the accuracy bonus, so the floor is 96%. The same
+  governor lowers the accuracy target one point after a race below it and only
+  raises it after four clean races. Each race is compared against the accuracy
+  goal it actually used, including the buffer of that session.
 
 ## Race loop
 
@@ -53,7 +64,9 @@ does not try to beat the game's limits; it tries to stay inside them.
 - A hidden tab can be frozen by Chrome (Energy Saver, memory pressure or
   bfcache). A frozen page cannot type, so `backgroundFarm` is off by default;
   it can be enabled in `TUNE` or with the garage's **AFK off/on** button only if
-  that freeze risk is accepted. Both panels and every open tab receive the
+  that freeze risk is accepted. If a freeze lands while a race is live, a
+  **freeze hold** stops new hidden races until one race starts with the tab
+  visible (or the AFK health reset clears it); it does not turn AFK off. Both panels and every open tab receive the
   switch through localStorage events; with no other gate active, the garage row
   reads `off`, `on` or `on · hidden`, while sign-in, stop, block and active-hours
   gates keep priority.
@@ -100,6 +113,20 @@ not arm the race queue from `/friends` or `/team`.
 - It never types a username or password.
 - It never tries to solve a CAPTCHA.
 - CAPTCHA and credential login stay manual by design.
+
+## Reliability
+
+- If an internal error repeats, or happens while a race is live, the script
+  enters **safe mode**: it releases the typing lock, stops the queue and shows a
+  banner instead of continuing to click. The flag survives a reload until the
+  user presses **resume**.
+- The race frame is checked against a small DOM contract (the React typing
+  component and its lesson content). If the component disappears after the race
+  has started, the script reports `ui-drift` and stops instead of pressing keys
+  blind. A slow mount is covered by a five-second grace window.
+- The diagnostic report and the support bundle include the flight recorder, the
+  safe-mode state and the contract snapshot. Tokens and account identifiers are
+  redacted before the bundle is copied.
 
 ## Risk
 
