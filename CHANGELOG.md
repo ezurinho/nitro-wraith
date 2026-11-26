@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.88 — 2026-11-26
+
+- feat(panel): remember the tab, restore focus and split the garage sheet
+
 ## 8.14.87 — 2026-11-26
 
 - feat(garage): move the panel with the keyboard and Home
