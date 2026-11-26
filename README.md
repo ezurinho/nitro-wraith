@@ -20,7 +20,7 @@
   <a href="https://github.com/ezurinho/nitro-wraith/releases/latest"><img src="https://img.shields.io/github/v/release/ezurinho/nitro-wraith?style=flat-square&label=release&labelColor=0B1711&color=62E2D0" alt="Latest release"></a>
   <a href="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml"><img src="https://github.com/ezurinho/nitro-wraith/actions/workflows/check.yml/badge.svg?branch=main" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-FFC66D?style=flat-square&labelColor=0B1711" alt="MIT license"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-8.14.88-5CF2A0?style=flat-square&labelColor=0B1711" alt="version"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-8.14.89-5CF2A0?style=flat-square&labelColor=0B1711" alt="version"></a>
 </p>
 
 <p align="center">
@@ -40,9 +40,9 @@ stats, and shows why it is waiting.
 <!-- release:start -->
 ## Current release
 
-**[8.14.88](https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.88)** · 2026-11-26
+**[8.14.89](https://github.com/ezurinho/nitro-wraith/releases/tag/v8.14.89)** · 2026-11-26
 
-- feat(panel): remember the tab, restore focus and split the garage sheet
+- fix(guard): make the tab lease atomic with a token
 
 [Full changelog](CHANGELOG.md)
 <!-- release:end -->

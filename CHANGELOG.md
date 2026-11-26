@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.14.89 — 2026-11-26
+
+- fix(guard): make the tab lease atomic with a token
+
 ## 8.14.88 — 2026-11-26
 
 - feat(panel): remember the tab, restore focus and split the garage sheet
